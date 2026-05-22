@@ -71,6 +71,7 @@ export default function DashboardPage() {
       <aside
         className={`
           fixed top-0 left-0 h-full w-64 bg-green-900 text-white flex flex-col p-6 z-30
+          overflow-y-auto
           transition-transform duration-300 ease-in-out
           ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
           md:relative md:translate-x-0 md:w-72
@@ -78,7 +79,7 @@ export default function DashboardPage() {
       >
         {/* CLOSE BUTTON — mobile only */}
         <button
-          className="md:hidden self-end mb-4 text-green-200 hover:text-white"
+          className="md:hidden self-end mb-4 text-green-200 hover:text-white shrink-0"
           onClick={() => setSidebarOpen(false)}
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -87,7 +88,7 @@ export default function DashboardPage() {
         </button>
 
         {/* LOGO */}
-        <div className="flex flex-col items-center border-b border-green-700 pb-6">
+        <div className="flex flex-col items-center border-b border-green-700 pb-6 shrink-0">
           <Image
             src="/Images/LOGO.jpg"
             alt="Main Street Medical Center"
@@ -100,7 +101,7 @@ export default function DashboardPage() {
         </div>
 
         {/* NAVIGATION */}
-        <nav className="mt-8 flex flex-col gap-3 flex-1">
+        <nav className="mt-6 flex flex-col gap-2 shrink-0">
           {navItems.map((item) => (
             <button
               key={item}
@@ -117,29 +118,30 @@ export default function DashboardPage() {
               {item}
             </button>
           ))}
-
-          <div className="mt-auto pt-6 flex flex-col gap-3">
-            <button
-              onClick={() => router.push("/")}
-              className="bg-white text-green-900 px-4 py-3 rounded-xl font-semibold hover:bg-gray-100"
-            >
-              Home
-            </button>
-            <button
-              onClick={handleLogout}
-              className="bg-red-600 hover:bg-red-500 px-4 py-3 rounded-xl font-semibold text-white"
-            >
-              Logout
-            </button>
-          </div>
         </nav>
+
+        {/* HOME + LOGOUT — always visible at bottom */}
+        <div className="mt-6 flex flex-col gap-3 shrink-0">
+          <button
+            onClick={() => router.push("/")}
+            className="bg-white text-green-900 px-4 py-3 rounded-xl font-semibold hover:bg-gray-100"
+          >
+            Home
+          </button>
+          <button
+            onClick={handleLogout}
+            className="bg-red-600 hover:bg-red-500 px-4 py-3 rounded-xl font-semibold text-white"
+          >
+            Logout
+          </button>
+        </div>
       </aside>
 
       {/* MAIN CONTENT */}
       <section className="flex-1 min-w-0 flex flex-col">
 
         {/* MOBILE TOP BAR */}
-        <div className="md:hidden bg-green-900 text-white px-4 py-3 flex items-center justify-between">
+        <div className="md:hidden bg-green-900 text-white px-4 py-3 flex items-center justify-between shrink-0">
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-1"
