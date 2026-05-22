@@ -37,23 +37,25 @@ export default function HomePage() {
         {/* Actions */}
         <div className="flex flex-col sm:flex-row justify-center gap-4 mt-12">
 
-          <button
-            className="
-              bg-green-800
-              hover:bg-green-700
-              text-white
-              px-10
-              py-4
-              rounded-2xl
-              font-semibold
-              text-lg
-              transition
-              duration-200
-              shadow-md
-            "
-          >
-            Get Started
-          </button>
+          <Link
+  href="/get_started"
+  className="
+    bg-green-800
+    hover:bg-green-700
+    text-white
+    px-10
+    py-4
+    rounded-2xl
+    font-semibold
+    text-lg
+    transition
+    duration-200
+    shadow-md
+    inline-block
+  "
+>
+  Get Started
+</Link>
 
           <Link
   href="/login"
