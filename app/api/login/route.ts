@@ -1,5 +1,6 @@
 import { prisma } from "@/app/lib/prisma";
 import { NextResponse } from "next/server";
+import bcrypt from "bcryptjs"; // ✅ added
 
 export async function POST(req: Request) {
   try {
@@ -16,7 +17,9 @@ export async function POST(req: Request) {
       );
     }
 
-    if (user.password !== password) {
+    // ✅ bcrypt.compare instead of === (passwords are now hashed in DB)
+    const isValid = await bcrypt.compare(password, user.password);
+    if (!isValid) {
       return NextResponse.json(
         { success: false, message: "Wrong password" },
         { status: 401 }
