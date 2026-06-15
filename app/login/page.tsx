@@ -1,29 +1,23 @@
 "use client";
 
+import { ROLE_ROUTES } from "../lib/roleRoutes";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 export default function LoginPage() {
   const router = useRouter();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("Receptionist");
+  const [role, setRole] = useState("RECEPTIONIST");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // AUTO LOGIN
-  useEffect(() => {
-    const savedUser =
-      localStorage.getItem("user") ||
-      sessionStorage.getItem("user");
-    if (savedUser) {
-      router.push("/dashboard");
-    }
-  }, []);
+  // 🚨 NO AUTO REDIRECT HERE (IMPORTANT FIX)
+  // Login page must always be accessible
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -40,167 +34,159 @@ export default function LoginPage() {
       const data = await res.json();
 
       if (!data.success) {
-        if (data.message === "User not found") {
-          setError("No account found with that username.");
-        } else if (data.message === "Wrong password") {
-          setError("Incorrect password. Please try again.");
-        } else if (data.message === "Role mismatch") {
-          setError("Wrong role selected for this account.");
-        } else {
-          setError(data.message || "Login failed. Please try again.");
-        }
+        setError(data.message || "Invalid credentials");
         setLoading(false);
         return;
       }
 
-      const userData = JSON.stringify(data.user);
+      const user = data.user;
+      const userData = JSON.stringify(user);
 
+      // save session
       if (rememberMe) {
         localStorage.setItem("user", userData);
       } else {
         sessionStorage.setItem("user", userData);
       }
 
-      router.push("/dashboard");
+      // clean role-based routing
+      const route = ROLE_ROUTES[user.role];
+      router.replace(route || "/");
 
     } catch {
-      setError("Connection error. Please check your internet and try again.");
+      setError("Network error. Please try again.");
+    } finally {
       setLoading(false);
     }
   }
 
   return (
-    <main className="min-h-screen bg-[#eaf5ee] flex items-center justify-center px-4">
-      <div className="w-full max-w-md bg-white rounded-[30px] shadow-2xl overflow-hidden">
+    <main className="min-h-screen flex items-center justify-center bg-gradient-to-b from-[#eaf5ee] to-white px-4">
 
-        {/* HEADER */}
-        <div className="bg-green-800 px-8 py-10 text-center">
-          <Image
-            src="/Images/LOGO.jpg"
-            alt="Main Street Medical Center"
-            width={95}
-            height={95}
-            className="rounded-full bg-white p-2 shadow-md mx-auto"
-            priority
-          />
-          <h1 className="text-white text-3xl font-bold mt-5">
-            Main Street Medical Center
-          </h1>
-          <p className="text-green-100 mt-2 text-sm">
-            Electronic Health Records System
-          </p>
-        </div>
+      <div className="w-full max-w-md">
 
-        {/* FORM */}
-        <div className="p-8">
-          <form className="space-y-5" onSubmit={handleLogin}>
+        {/* CARD */}
+        <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
 
-            {/* ERROR BANNER */}
+          {/* HEADER */}
+          <div className="bg-green-800 px-6 py-8 text-center">
+            <Image
+              src="/Images/LOGO.jpg"
+              alt="Main Street Medical Center"
+              width={80}
+              height={80}
+              className="rounded-full bg-white p-2 mx-auto"
+              priority
+            />
+
+            <h1 className="text-white text-2xl font-bold mt-4">
+              Main Street EMR
+            </h1>
+
+            <p className="text-green-100 text-sm mt-1">
+              Secure Staff Login
+            </p>
+          </div>
+
+          {/* FORM */}
+          <form onSubmit={handleLogin} className="p-6 space-y-5">
+
+            {/* ERROR */}
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-3">
-                <svg className="w-5 h-5 text-red-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <p className="text-red-700 text-sm">{error}</p>
+              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+                {error}
               </div>
             )}
 
-            {/* Username */}
+            {/* USERNAME */}
             <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-2">
+              <label className="text-sm font-semibold text-gray-700">
                 Username
               </label>
               <input
                 value={username}
-                onChange={(e) => { setUsername(e.target.value); setError(""); }}
-                type="text"
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full mt-1 border border-gray-300 rounded-xl px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-600"
                 placeholder="Enter username"
                 required
-                className="w-full border-2 border-gray-300 rounded-xl px-4 py-3 text-gray-900 bg-white focus:outline-none focus:border-green-700 focus:ring-2 focus:ring-green-200"
               />
             </div>
 
-            {/* Password */}
+            {/* PASSWORD */}
             <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-2">
+              <label className="text-sm font-semibold text-gray-700">
                 Password
               </label>
-              <div className="relative">
+
+              <div className="relative mt-1">
                 <input
                   value={password}
-                  onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                  onChange={(e) => setPassword(e.target.value)}
                   type={showPassword ? "text" : "password"}
+                  className="w-full border border-gray-300 rounded-xl px-4 py-3 pr-16 focus:outline-none focus:ring-2 focus:ring-green-600"
                   placeholder="Enter password"
                   required
-                  className="w-full border-2 border-gray-300 rounded-xl px-4 py-3 pr-16 text-gray-900 bg-white focus:outline-none focus:border-green-700 focus:ring-2 focus:ring-green-200"
                 />
+
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-3 text-sm text-gray-600"
+                  className="absolute right-3 top-3 text-sm text-gray-500"
                 >
                   {showPassword ? "Hide" : "Show"}
                 </button>
               </div>
             </div>
 
-            {/* Role */}
+            {/* ROLE */}
             <div>
-              <label className="block text-sm font-semibold text-gray-800 mb-2">
-                Login As
+              <label className="text-sm font-semibold text-gray-700">
+                Login Role
               </label>
+
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
-                className="w-full border-2 border-gray-300 rounded-xl px-4 py-3 bg-white text-gray-900 font-medium focus:outline-none focus:border-green-700 focus:ring-2 focus:ring-green-200"
+                className="w-full mt-1 border border-gray-300 rounded-xl px-4 py-3 bg-white text-gray-900 font-medium focus:outline-none focus:ring-2 focus:ring-green-600"
               >
-                <option value="Receptionist">Receptionist</option>
-                <option value="Administrator">Administrator</option>
-                <option value="Level 1 Nurse / Midwife">Level 1 Nurse / Midwife</option>
-                <option value="Lab Technician">Lab Technician</option>
-                <option value="Sonographer / Radiologist">Sonographer / Radiologist</option>
-                <option value="Accountant">Accountant</option>
+                <option value="RECEPTIONIST">Receptionist</option>
+                <option value="ADMINISTRATOR">Administrator</option>
+                <option value="NURSE">Nurse</option>
+                <option value="MIDWIFE">Midwife</option>
+                <option value="LAB_TECHNICIAN">Lab Technician</option>
+                <option value="SONOGRAPHER">Sonographer</option>
+                <option value="RADIOLOGIST">Radiologist</option>
               </select>
             </div>
 
-            {/* Remember Me */}
-            <div className="flex items-center justify-between text-sm">
-              <label className="flex items-center gap-2 text-gray-700 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                />
-                Remember Me
-              </label>
-              <button type="button" className="text-green-700 hover:underline">
-                Forgot Password?
-              </button>
+            {/* REMEMBER */}
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+              />
+              Remember me
             </div>
 
-            {/* LOGIN BUTTON */}
+            {/* BUTTON */}
             <button
-              type="submit"
               disabled={loading}
-              className="w-full bg-green-800 hover:bg-green-700 disabled:bg-green-400 text-white py-3 rounded-xl font-semibold text-lg transition flex items-center justify-center gap-2"
+              className="w-full bg-green-800 hover:bg-green-700 text-white py-3 rounded-xl font-semibold transition"
             >
-              {loading ? (
-                <>
-                  <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                  </svg>
-                  Logging in...
-                </>
-              ) : (
-                "Login"
-              )}
+              {loading ? "Logging in..." : "Login"}
             </button>
 
           </form>
         </div>
 
+        {/* FOOTER NOTE */}
+        <p className="text-center text-xs text-gray-400 mt-4">
+          Secure EMR System • Mobile First Design
+        </p>
+
       </div>
+
     </main>
   );
 }

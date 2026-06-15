@@ -23,7 +23,7 @@ export async function POST(req: Request) {
       );
     }
 
-    if (user.role !== role) {
+    if (user.role.trim().toUpperCase() !== role.trim().toUpperCase()) {
       return NextResponse.json(
         { success: false, message: "Role mismatch" },
         { status: 403 }
@@ -38,7 +38,9 @@ export async function POST(req: Request) {
         role: user.role,
       },
     });
+
   } catch (err) {
+    console.error(err);
     return NextResponse.json(
       { success: false, message: "Server error" },
       { status: 500 }

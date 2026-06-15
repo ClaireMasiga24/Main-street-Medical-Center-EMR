@@ -18,6 +18,7 @@ export default function GetStartedPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
+  const [showAlreadyInitializedPopup, setShowAlreadyInitializedPopup] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,49 +50,84 @@ export default function GetStartedPage() {
     if (data.success) {
       setStatus("success");
       setMessage(
-        "System initialized successfully! Your administrator account has been created. You can now log in and assign roles to your staff."
+        "Your administrator account has been created successfully. You can now log in and assign roles to your staff."
       );
     } else {
-      setStatus("error");
-      // Show the actual message from the server
-      if (data.message === "Username already exists") {
-        setMessage(
-          "An administrator account already exists. The system has already been initialized. Please go to the login page."
-        );
+      if (data.message === "System already initialized") {
+        setStatus("idle");
+        setShowAlreadyInitializedPopup(true);
+      } else if (data.message === "Username already exists") {
+        setStatus("error");
+        setMessage("This username is already taken. Please choose a different one.");
       } else {
+        setStatus("error");
         setMessage(data.message || "Something went wrong. Please try again.");
       }
     }
   };
 
   return (
-    <main className="min-h-screen bg-[#f4f7f5] flex items-center justify-center px-6 py-10">
+    <main className="min-h-screen bg-[#f4f7f5] flex items-center justify-center px-4 py-10">
+
+      {/* ALREADY INITIALIZED POPUP */}
+      {showAlreadyInitializedPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 text-center">
+            <div className="flex justify-center mb-4">
+              <div className="bg-yellow-100 rounded-full p-4">
+                <svg className="w-10 h-10 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                </svg>
+              </div>
+            </div>
+            <h2 className="text-xl font-bold text-gray-800 mb-2">
+              System Already Set Up
+            </h2>
+            <p className="text-gray-500 text-sm mb-6 leading-relaxed">
+              This system has already been initialized. An administrator account already exists. Please log in to continue.
+            </p>
+            <button
+              onClick={() => router.push("/login")}
+              className="w-full bg-green-800 hover:bg-green-700 text-white py-4 rounded-xl font-semibold text-base transition mb-3"
+            >
+              Go to Login →
+            </button>
+            <button
+              onClick={() => setShowAlreadyInitializedPopup(false)}
+              className="w-full text-gray-400 text-sm py-2"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white w-full max-w-2xl rounded-3xl shadow-xl overflow-hidden">
 
         {/* Header */}
-        <div className="bg-green-800 px-10 py-10 text-center">
+        <div className="bg-green-800 px-8 py-10 text-center">
           <div className="flex justify-center">
             <Image
               src="/Images/LOGO.jpg"
               alt="Main Street Medical Center"
-              width={100}
-              height={100}
+              width={90}
+              height={90}
               className="rounded-full bg-white p-2 shadow-md"
               priority
             />
           </div>
-          <h1 className="text-white text-3xl font-bold mt-5">System Setup</h1>
-          <p className="text-green-100 mt-3 text-sm">
+          <h1 className="text-white text-2xl font-bold mt-5">System Setup</h1>
+          <p className="text-green-100 mt-2 text-sm">
             Create the first administrator account to begin using Main Street EMR.
           </p>
         </div>
 
-        {/* Form */}
-        <div className="p-10">
+        {/* Body */}
+        <div className="p-6 sm:p-10">
 
           {/* SUCCESS SCREEN */}
           {status === "success" && (
-            <div className="text-center py-10">
+            <div className="text-center py-8">
               <div className="flex justify-center mb-6">
                 <div className="bg-green-100 rounded-full p-5">
                   <svg className="w-12 h-12 text-green-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -102,15 +138,18 @@ export default function GetStartedPage() {
               <h2 className="text-2xl font-bold text-gray-800 mb-3">
                 System Initialized!
               </h2>
-              <p className="text-gray-600 mb-2">{message}</p>
-              <p className="text-gray-500 text-sm mb-8">
-                A confirmation email has been sent to <strong>{email}</strong>.
-              </p>
+              <p className="text-gray-600 mb-4 leading-relaxed">{message}</p>
+              <div className="bg-green-50 border border-green-200 rounded-xl px-5 py-4 mb-6 text-left">
+                <p className="text-green-800 text-sm font-semibold mb-1">📧 Check your email</p>
+                <p className="text-green-700 text-sm">
+                  A confirmation has been sent to <strong>{email}</strong> with your account details.
+                </p>
+              </div>
               <button
                 onClick={() => router.push("/login")}
-                className="bg-green-800 hover:bg-green-700 text-white px-10 py-4 rounded-xl font-semibold text-lg transition"
+                className="w-full bg-green-800 hover:bg-green-700 text-white py-4 rounded-xl font-semibold text-lg transition"
               >
-                Go to Login
+                Go to Login →
               </button>
             </div>
           )}
@@ -121,25 +160,14 @@ export default function GetStartedPage() {
               <svg className="w-5 h-5 text-red-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <div>
-                <p className="text-red-700 text-sm font-medium">{message}</p>
-                {message.includes("already exists") && (
-                  <button
-                    onClick={() => router.push("/login")}
-                    className="mt-2 text-green-700 text-sm font-semibold underline"
-                  >
-                    Go to Login →
-                  </button>
-                )}
-              </div>
+              <p className="text-red-700 text-sm font-medium">{message}</p>
             </div>
           )}
 
-          {/* FORM — hide after success */}
+          {/* FORM */}
           {status !== "success" && (
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-5">
 
-              {/* Administrator Full Name */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Administrator Full Name
@@ -154,7 +182,6 @@ export default function GetStartedPage() {
                 />
               </div>
 
-              {/* Administrator Email */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Administrator Email
@@ -169,7 +196,6 @@ export default function GetStartedPage() {
                 />
               </div>
 
-              {/* Administrator Username */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Administrator Username
@@ -184,7 +210,6 @@ export default function GetStartedPage() {
                 />
               </div>
 
-              {/* Password */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Password
@@ -208,7 +233,6 @@ export default function GetStartedPage() {
                 </div>
               </div>
 
-              {/* Confirm Password */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Confirm Password
@@ -223,7 +247,6 @@ export default function GetStartedPage() {
                 />
               </div>
 
-              {/* Security Question */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Security Question
@@ -239,7 +262,6 @@ export default function GetStartedPage() {
                 </select>
               </div>
 
-              {/* Security Answer */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   Security Answer
@@ -254,7 +276,6 @@ export default function GetStartedPage() {
                 />
               </div>
 
-              {/* Button */}
               <button
                 type="submit"
                 disabled={status === "loading"}
