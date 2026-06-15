@@ -8,13 +8,184 @@ datasource db {
 }
 
 model User {
-  id               Int      @id @default(autoincrement())
+  id               Int        @id @default(autoincrement())
   fullName         String
-  username         String   @unique
-  email            String
+  username         String     @unique
+  email            String     @unique
   password         String
-  role             String
+  role             Role
   securityQuestion String
   securityAnswer   String
-  createdAt        DateTime @default(now())
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  AuditLog         AuditLog[]
+  Staff            Staff?
+}
+
+model Patient {
+  id            Int            @id @default(autoincrement())
+  patientNumber String         @unique // This matches the generated Care ID (e.g., MSMC-2026-X)
+  firstName     String
+  lastName      String
+  gender        Gender
+  age           Int            // Stored directly to accommodate emergency estimates
+  dateOfBirth   DateTime?      // Optional (!) so Emergency entries can bypass it
+  phoneNumber   String?
+  address       String?
+  isEmergency   Boolean        @default(false)
+  
+  // The operational status engine that shares the patient across rooms
+  currentStatus PatientStatus  @default(AWAITING_TRIAGE)
+  
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  
+  Appointment   Appointment[]
+  Billing       Billing[]
+  LabRequest    LabRequest[]
+  Prescription  Prescription[]
+  Visit         Visit[]
+}
+
+model Visit {
+  id             Int            @id @default(autoincrement())
+  patientId      Int
+  symptoms       String?        @db.Text
+  diagnosis      String?        @db.Text
+  notes          String?        @db.Text
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  Patient        Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  
+  // Unified connections: Helps associate actions with this specific hospital stay
+  LabRequest     LabRequest[]
+  Prescription   Prescription[]
+  Billing        Billing[]
+}
+
+model Appointment {
+  id              Int               @id @default(autoincrement())
+  patientId       Int
+  staffId         Int
+  appointmentDate DateTime
+  status          AppointmentStatus @default(PENDING)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  Patient         Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Staff           Staff             @relation(fields: [staffId], references: [id])
+}
+
+model LabRequest {
+  id            Int       @id @default(autoincrement())
+  patientId     Int
+  visitId       Int?      // Linked to track which check-in ordered this test
+  requestedById Int
+  testName      String
+  results       String?   @db.Text
+  status        LabStatus @default(PENDING)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  Patient       Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Visit         Visit?    @relation(fields: [visitId], references: [id])
+  Staff         Staff     @relation(fields: [requestedById], references: [id])
+}
+
+model Prescription {
+  id           Int      @id @default(autoincrement())
+  patientId    Int
+  visitId      Int?     // Linked to track which clinical session generated this
+  medication   String
+  dosage       String
+  instructions String   @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  Patient      Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Visit        Visit?   @relation(fields: [visitId], references: [id])
+}
+
+model Billing {
+  id          Int           @id @default(autoincrement())
+  patientId   Int
+  visitId     Int?          // Essential for calculating line-items per visit
+  amount      Float
+  description String?       @db.Text
+  status      BillingStatus @default(UNPAID)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  Patient     Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Visit       Visit?        @relation(fields: [visitId], references: [id])
+}
+
+model Staff {
+  id             Int           @id @default(autoincrement())
+  fullName       String
+  phoneNumber    String?
+  department     String
+  specialization String?
+  userId         Int           @unique
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  Appointment    Appointment[]
+  LabRequest     LabRequest[]
+  User           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  action    String
+  details   String?  @db.Text
+  userId    Int
+  createdAt DateTime @default(now())
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// --- ENUMS ---
+
+enum PatientStatus {
+  AWAITING_TRIAGE
+  AWAITING_SONOGRAPHY
+  AWAITING_RADIOLOGY
+  AWAITING_LAB
+  IN_CONSULTATION
+  AWAITING_PHARMACY
+  AWAITING_CASHIER
+  DISCHARGED
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum BillingStatus {
+  UNPAID
+  PAID
+  PARTIAL
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum LabStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+}
+
+enum Role {
+  ADMINISTRATOR
+  DOCTOR
+  NURSE
+  MIDWIFE
+  LAB_TECHNICIAN
+  SONOGRAPHER
+  RADIOLOGIST
+  RECEPTIONIST
+  CASHIER
+  PHARMACIST
 }
