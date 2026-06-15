@@ -1,4 +1,5 @@
-import { prisma } from "@/app/lib/prisma";
+import { prisma } from "@/app/lib/prisma"; // ✅ correct path
+
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 
@@ -41,7 +42,7 @@ export async function POST(req: Request) {
     }
 
     // ✅ Atomic transaction — both or neither
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx:any) => {
       const user = await tx.user.create({
         data: {
           fullName,
