@@ -151,11 +151,12 @@ export default function LoginPage() {
               >
                 <option value="RECEPTIONIST">Receptionist</option>
                 <option value="ADMINISTRATOR">Administrator</option>
-                <option value="NURSE">Nurse</option>
-                <option value="MIDWIFE">Midwife</option>
+                <option value="NURSE">Nurse/Midwife</option>
+                <option value="MIDWIFE">Nurse/Midwife</option>
+                <option value="DOCTOR">Doctor</option>
                 <option value="LAB_TECHNICIAN">Lab Technician</option>
-                <option value="SONOGRAPHER">Sonographer</option>
-                <option value="RADIOLOGIST">Radiologist</option>
+                <option value="SONOGRAPHER">Radiologist/Sonographer</option>
+                <option value="RADIOLOGIST">Dentist</option>
               </select>
             </div>
 

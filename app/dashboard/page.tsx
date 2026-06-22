@@ -20,17 +20,16 @@ import {
 
 const modules = [
   { title: "Reception", icon: UserRound, path:"/receptionist" },
-  { title: "Doctors", icon: Stethoscope, path: null },
+  { title: "Doctors", icon: Stethoscope, path: "/Doctors" },
+  {title:"Dentists",icon: Stethoscope,path :"/Dentist"},
   { title: "Nurses & Midwives", icon: Activity, path: "/nurse-midwife" },
   { title: "Laboratory", icon: FlaskConical, path: "/laboratory" },
-  { title: "Radiology", icon: ClipboardList, path: null },
-  { title: "Pharmacy", icon: Pill, path: null },
-  { title: "Accounts & Billing", icon: CreditCard, path: null },
-  { title: "Appointments", icon: CalendarDays, path: null },
-  { title: "Patient Records", icon: FileText, path: null },
+  { title: "Radiology", icon: ClipboardList, path: "/radiologist_sonographer" },
+  { title: "Pharmacy", icon: Pill, path: "/pharmacy" },
+
   { title: "Staff Management", icon: Users, path: "/StaffManagement" },
-  { title: "System Settings", icon: Settings, path: null },
-  { title: "Audit & Security", icon: ShieldCheck, path: null },
+  { title: "System Settings", icon: Settings, path: "/system settings" },
+
 ];
 
 export default function DashboardPage() {
