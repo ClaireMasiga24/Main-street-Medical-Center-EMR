@@ -7,10 +7,11 @@ import {
   Search, UserPlus, UserCheck, ArrowRight, CheckCircle2,
   AlertCircle, ShieldAlert, FileText, Phone, MapPin, FileHeart,
   LogOut, Receipt, Plus, Trash2, CreditCard, Banknote, Smartphone,
-  Printer, X, BadgeCheck,
+  Printer, X, BadgeCheck, Stethoscope, FlaskConical, Scan, Baby,
+  Waves, RadioTower,
 } from "lucide-react";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Patient {
   id: number;
@@ -29,7 +30,7 @@ interface Patient {
 }
 
 interface BillLine {
-  id: string;           // local uuid for React key
+  id: string;
   description: string;
   qty: number;
   unitPrice: number;
@@ -45,27 +46,104 @@ const PAYMENT_ICONS: Record<PaymentMethod, React.ReactNode> = {
   INSURANCE: <BadgeCheck size={15} />,
 };
 
+// ─── Routing destinations ─────────────────────────────────────────────────────
+
+interface RouteOption {
+  label: string;
+  status: string;
+  icon: React.ReactNode;
+  color: string;      // Tailwind bg colour for the button
+  ringColor: string;  // Tailwind ring / border colour
+}
+
+const ROUTE_OPTIONS: RouteOption[] = [
+  {
+    label: "Triage",
+    status: "AWAITING_TRIAGE",
+    icon: <UserCheck size={14} />,
+    color: "bg-[#00703C] hover:bg-emerald-800",
+    ringColor: "border-emerald-600",
+  },
+  {
+    label: "Doctor",
+    status: "AWAITING_DOCTOR",
+    icon: <Stethoscope size={14} />,
+    color: "bg-indigo-600 hover:bg-indigo-700",
+    ringColor: "border-indigo-500",
+  },
+  {
+    label: "Dentist",
+    status: "AWAITING_DENTIST",
+    icon: <FileText size={14} />,
+    color: "bg-cyan-600 hover:bg-cyan-700",
+    ringColor: "border-cyan-500",
+  },
+  {
+    label: "Nurse / Midwife",
+    status: "AWAITING_TRIAGE",   // Triage is the nurse/midwife queue in this schema
+    icon: <Baby size={14} />,
+    color: "bg-pink-500 hover:bg-pink-600",
+    ringColor: "border-pink-400",
+  },
+  {
+    label: "Sonographer",
+    status: "AWAITING_SONOGRAPHY",
+    icon: <Waves size={14} />,
+    color: "bg-blue-600 hover:bg-blue-700",
+    ringColor: "border-blue-500",
+  },
+  {
+    label: "Radiologist",
+    status: "AWAITING_RADIOLOGY",
+    icon: <RadioTower size={14} />,
+    color: "bg-violet-600 hover:bg-violet-700",
+    ringColor: "border-violet-500",
+  },
+  {
+    label: "Laboratory",
+    status: "AWAITING_LAB",
+    icon: <FlaskConical size={14} />,
+    color: "bg-amber-500 hover:bg-amber-600",
+    ringColor: "border-amber-400",
+  },
+  {
+    label: "Pharmacy",
+    status: "AWAITING_PHARMACY",
+    icon: <Scan size={14} />,
+    color: "bg-teal-600 hover:bg-teal-700",
+    ringColor: "border-teal-500",
+  },
+];
+
+const STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  AWAITING_TRIAGE:     { label: "Awaiting Triage",     color: "text-emerald-700 bg-emerald-50 border-emerald-200" },
+  AWAITING_DOCTOR:     { label: "Awaiting Doctor",      color: "text-indigo-700 bg-indigo-50 border-indigo-200" },
+  AWAITING_DENTIST:    { label: "Awaiting Dentist",     color: "text-cyan-700 bg-cyan-50 border-cyan-200" },
+  AWAITING_SONOGRAPHY: { label: "Awaiting Sonography",  color: "text-blue-700 bg-blue-50 border-blue-200" },
+  AWAITING_RADIOLOGY:  { label: "Awaiting Radiology",   color: "text-violet-700 bg-violet-50 border-violet-200" },
+  AWAITING_LAB:        { label: "Awaiting Lab",         color: "text-amber-700 bg-amber-50 border-amber-200" },
+  IN_CONSULTATION:     { label: "In Consultation",      color: "text-rose-700 bg-rose-50 border-rose-200" },
+  AWAITING_PHARMACY:   { label: "Awaiting Pharmacy",    color: "text-teal-700 bg-teal-50 border-teal-200" },
+  AWAITING_CASHIER:    { label: "Awaiting Cashier",     color: "text-orange-700 bg-orange-50 border-orange-200" },
+  DISCHARGED:          { label: "Discharged",           color: "text-slate-500 bg-slate-50 border-slate-200" },
+};
+
 const formatUGX = (n: number) =>
   "UGX " + Math.round(n).toLocaleString("en-UG");
 
 // ─── CashierPOS ───────────────────────────────────────────────────────────────
 
 function CashierPOS({ patients }: { patients: Patient[] }) {
-  // Patient selection
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [patientSearch, setPatientSearch] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Bill lines — cashier types these in manually
   const [billLines, setBillLines] = useState<BillLine[]>([]);
-
-  // New line form
   const [newDesc, setNewDesc] = useState("");
   const [newQty, setNewQty] = useState("1");
   const [newPrice, setNewPrice] = useState("");
 
-  // Payment
   const [invoiceConfirmed, setInvoiceConfirmed] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
   const [amountTendered, setAmountTendered] = useState("");
@@ -76,18 +154,14 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
   const [receiptVisible, setReceiptVisible] = useState(false);
   const [savedInvoiceNumber, setSavedInvoiceNumber] = useState("");
 
-  // Totals
   const subtotal = billLines.reduce((s, l) => s + l.subtotal, 0);
   const total = subtotal;
   const tendered = parseFloat(amountTendered) || 0;
   const change = tendered - total;
 
   const canConfirm = !!selectedPatient && billLines.length > 0;
-  const canPay =
-    invoiceConfirmed &&
-    (paymentMethod !== "CASH" || tendered >= total);
+  const canPay = invoiceConfirmed && (paymentMethod !== "CASH" || tendered >= total);
 
-  // Close dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node))
@@ -104,7 +178,6 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
       p.patientNumber.toLowerCase().includes(patientSearch.toLowerCase())
   );
 
-  // Add a manually entered line item
   const handleAddLine = () => {
     const desc = newDesc.trim();
     const qty = parseInt(newQty) || 1;
@@ -114,9 +187,7 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
       ...prev,
       { id: crypto.randomUUID(), description: desc, qty, unitPrice: price, subtotal: qty * price },
     ]);
-    setNewDesc("");
-    setNewQty("1");
-    setNewPrice("");
+    setNewDesc(""); setNewQty("1"); setNewPrice("");
     setInvoiceConfirmed(false);
   };
 
@@ -142,22 +213,25 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
     if (!selectedPatient) return;
     setIsProcessing(true);
     try {
-      const res = await fetch("/api/receptionist?resource=billing", {
+      const res = await fetch("/api/receptionist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          patientId: selectedPatient.id,
-          paymentMethod,
-          amountTendered: paymentMethod === "CASH" ? tendered : total,
-          reference: ["MOBILE_MONEY", "CARD"].includes(paymentMethod) ? paymentReference : null,
-          insuranceProvider: paymentMethod === "INSURANCE" ? insuranceProvider : null,
-          insurancePolicyNumber: paymentMethod === "INSURANCE" ? insurancePolicyNumber : null,
-          lines: billLines.map((l) => ({
-            description: l.description,
-            qty: l.qty,
-            unitPrice: l.unitPrice,
-            subtotal: l.subtotal,
-          })),
+          action: "CREATE_BILL",
+          payload: {
+            patientId: selectedPatient.id,
+            paymentMethod,
+            amountTendered: paymentMethod === "CASH" ? tendered : total,
+            reference: ["MOBILE_MONEY", "CARD"].includes(paymentMethod) ? paymentReference : null,
+            insuranceProvider: paymentMethod === "INSURANCE" ? insuranceProvider : null,
+            insurancePolicyNumber: paymentMethod === "INSURANCE" ? insurancePolicyNumber : null,
+            lines: billLines.map((l) => ({
+              description: l.description,
+              qty: l.qty,
+              unitPrice: l.unitPrice,
+              subtotal: l.subtotal,
+            })),
+          },
         }),
       });
 
@@ -168,7 +242,9 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
       }
 
       const data = await res.json();
-      setSavedInvoiceNumber(data.invoiceNumber ?? `INV-${selectedPatient.patientNumber}-${Date.now().toString().slice(-5)}`);
+      setSavedInvoiceNumber(
+        data.invoiceNumber ?? `INV-${selectedPatient.patientNumber}-${Date.now().toString().slice(-5)}`
+      );
       setReceiptVisible(true);
     } catch {
       alert("Network error — payment could not be processed.");
@@ -178,26 +254,17 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
   };
 
   const handleNewBill = () => {
-    setSelectedPatient(null);
-    setPatientSearch("");
-    setBillLines([]);
+    setSelectedPatient(null); setPatientSearch(""); setBillLines([]);
     setNewDesc(""); setNewQty("1"); setNewPrice("");
-    setPaymentMethod("CASH");
-    setAmountTendered("");
-    setPaymentReference("");
-    setInsuranceProvider("");
-    setInsurancePolicyNumber("");
-    setInvoiceConfirmed(false);
-    setReceiptVisible(false);
-    setSavedInvoiceNumber("");
+    setPaymentMethod("CASH"); setAmountTendered(""); setPaymentReference("");
+    setInsuranceProvider(""); setInsurancePolicyNumber("");
+    setInvoiceConfirmed(false); setReceiptVisible(false); setSavedInvoiceNumber("");
   };
 
   return (
     <div className="flex flex-col gap-5 lg:grid lg:grid-cols-5">
-
       {/* ── LEFT ── */}
       <div className="space-y-4 lg:col-span-3">
-
         {/* Patient Selector */}
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <label className="mb-1.5 block text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
@@ -266,44 +333,32 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
             <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Add Item to Bill</p>
           </div>
           <div className="p-4 space-y-3">
-            {/* Description */}
             <div>
               <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Service / Item Description *</label>
               <input
-                type="text"
-                value={newDesc}
+                type="text" value={newDesc}
                 onChange={(e) => setNewDesc(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleAddLine()}
                 placeholder="e.g., General Consultation, Malaria RDT, Wound Dressing…"
                 className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium outline-none transition focus:border-[#00703C]"
               />
             </div>
-            {/* Qty + Price row */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Quantity</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={newQty}
+                <input type="number" min="1" value={newQty}
                   onChange={(e) => setNewQty(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-bold outline-none transition focus:border-[#00703C]"
-                />
+                  className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-bold outline-none transition focus:border-[#00703C]" />
               </div>
               <div>
                 <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Unit Price (UGX)</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={newPrice}
+                <input type="number" min="0" value={newPrice}
                   onChange={(e) => setNewPrice(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleAddLine()}
                   placeholder="e.g., 20000"
-                  className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-bold outline-none transition focus:border-[#00703C]"
-                />
+                  className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-bold outline-none transition focus:border-[#00703C]" />
               </div>
             </div>
-            {/* Preview */}
             {newDesc && parseFloat(newPrice) > 0 && (
               <div className="flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-2 text-xs font-bold text-emerald-700">
                 <span>{newDesc} × {newQty || 1}</span>
@@ -321,21 +376,18 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
         </div>
       </div>
 
-      {/* ── RIGHT: Bill + Payment ── */}
+      {/* ── RIGHT ── */}
       <div className="lg:col-span-2">
         <div className="sticky top-4 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-
-          {/* Bill Header */}
           <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-3 flex items-center justify-between">
             <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Current Bill</p>
             {billLines.length > 0 && (
-              <button onClick={() => { setBillLines([]); setInvoiceConfirmed(false); }} className="text-[10px] text-rose-400 hover:text-rose-600 font-bold flex items-center gap-0.5">
+              <button onClick={() => { setBillLines([]); setInvoiceConfirmed(false); }}
+                className="text-[10px] text-rose-400 hover:text-rose-600 font-bold flex items-center gap-0.5">
                 <Trash2 size={10} /> Clear
               </button>
             )}
           </div>
-
-          {/* Bill Lines */}
           <div className="min-h-[120px] divide-y divide-slate-50 overflow-y-auto max-h-56">
             {billLines.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-slate-300">
@@ -360,8 +412,6 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
               ))
             )}
           </div>
-
-          {/* Totals */}
           <div className="border-t border-slate-100 px-5 py-3 space-y-1 bg-slate-50/40">
             <div className="flex justify-between text-[11px] text-slate-500">
               <span>Subtotal</span><span className="font-bold">{formatUGX(subtotal)}</span>
@@ -370,51 +420,32 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
               <span>TOTAL DUE</span><span className="text-[#00703C]">{formatUGX(total)}</span>
             </div>
           </div>
-
-          {/* Confirm Invoice */}
           {!invoiceConfirmed && (
             <div className="px-5 pb-4">
-              <button
-                disabled={!canConfirm}
-                onClick={() => setInvoiceConfirmed(true)}
-                className="w-full flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-extrabold uppercase tracking-widest transition-all bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
+              <button disabled={!canConfirm} onClick={() => setInvoiceConfirmed(true)}
+                className="w-full flex items-center justify-center gap-2 rounded-xl py-3 text-xs font-extrabold uppercase tracking-widest transition-all bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-30 disabled:cursor-not-allowed">
                 <FileText size={13} /> Confirm Invoice
               </button>
             </div>
           )}
-
-          {/* Payment Section */}
           {invoiceConfirmed && (
             <div className="border-t border-slate-100 px-5 py-4 space-y-3">
               <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Payment Method</p>
-
               <div className="grid grid-cols-2 gap-2">
                 {(["CASH", "MOBILE_MONEY", "CARD", "INSURANCE"] as PaymentMethod[]).map((method) => (
-                  <button
-                    key={method}
-                    onClick={() => setPaymentMethod(method)}
-                    className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-[10px] font-extrabold uppercase tracking-wider transition-all ${
-                      paymentMethod === method
-                        ? "border-[#00703C] bg-emerald-50 text-[#00703C]"
-                        : "border-slate-200 text-slate-400 hover:border-slate-300"
-                    }`}
-                  >
-                    {PAYMENT_ICONS[method]}
-                    {method.replace("_", " ")}
+                  <button key={method} onClick={() => setPaymentMethod(method)}
+                    className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-[10px] font-extrabold uppercase tracking-wider transition-all ${paymentMethod === method ? "border-[#00703C] bg-emerald-50 text-[#00703C]" : "border-slate-200 text-slate-400 hover:border-slate-300"}`}>
+                    {PAYMENT_ICONS[method]}{method.replace("_", " ")}
                   </button>
                 ))}
               </div>
-
               {paymentMethod === "CASH" && (
                 <div>
                   <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Amount Tendered (UGX)</label>
-                  <input
-                    type="number" min={0} value={amountTendered}
+                  <input type="number" min={0} value={amountTendered}
                     onChange={(e) => setAmountTendered(e.target.value)}
                     placeholder="Enter cash amount…"
-                    className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-bold outline-none transition focus:border-[#00703C]"
-                  />
+                    className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-bold outline-none transition focus:border-[#00703C]" />
                   {tendered > 0 && (
                     <div className={`mt-2 flex justify-between rounded-xl px-3 py-2 text-xs font-extrabold ${change >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-600"}`}>
                       <span>{change >= 0 ? "Change" : "Shortfall"}</span>
@@ -423,21 +454,17 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
                   )}
                 </div>
               )}
-
               {(paymentMethod === "MOBILE_MONEY" || paymentMethod === "CARD") && (
                 <div>
                   <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">
                     {paymentMethod === "MOBILE_MONEY" ? "Mobile Money Transaction ID" : "Card / POS Reference"}
                   </label>
-                  <input
-                    type="text" value={paymentReference}
+                  <input type="text" value={paymentReference}
                     onChange={(e) => setPaymentReference(e.target.value)}
                     placeholder="Enter reference number…"
-                    className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-bold outline-none transition focus:border-[#00703C]"
-                  />
+                    className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-bold outline-none transition focus:border-[#00703C]" />
                 </div>
               )}
-
               {paymentMethod === "INSURANCE" && (
                 <div className="space-y-2">
                   <div>
@@ -454,12 +481,8 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
                   </div>
                 </div>
               )}
-
-              <button
-                disabled={!canPay || isProcessing}
-                onClick={handleProcessPayment}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#00703C] py-3 text-xs font-extrabold uppercase tracking-widest text-white hover:bg-emerald-800 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-              >
+              <button disabled={!canPay || isProcessing} onClick={handleProcessPayment}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#00703C] py-3 text-xs font-extrabold uppercase tracking-widest text-white hover:bg-emerald-800 transition-all disabled:opacity-30 disabled:cursor-not-allowed">
                 <CheckCircle2 size={14} />
                 {isProcessing ? "Processing…" : "Process Payment"}
               </button>
@@ -479,7 +502,6 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
               <h3 className="text-sm font-extrabold uppercase tracking-widest">Payment Received</h3>
               <p className="text-[10px] mt-0.5 text-emerald-100">Main Street Medical Center</p>
             </div>
-
             <div className="px-6 py-4 space-y-2 font-mono text-xs text-slate-700">
               <div className="flex justify-between text-[10px] text-slate-400 uppercase tracking-wider">
                 <span>Invoice</span><span>{savedInvoiceNumber}</span>
@@ -500,7 +522,6 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
                 <span className="text-slate-500">Method</span>
                 <span className="font-bold">{paymentMethod.replace("_", " ")}</span>
               </div>
-
               <div className="border-t border-dashed border-slate-200 pt-3 space-y-1">
                 {billLines.map((l) => (
                   <div key={l.id} className="flex justify-between text-[10px]">
@@ -509,11 +530,9 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
                   </div>
                 ))}
               </div>
-
               <div className="border-t border-slate-200 pt-2 flex justify-between font-extrabold text-sm">
                 <span>TOTAL</span><span className="text-[#00703C]">{formatUGX(total)}</span>
               </div>
-
               {paymentMethod === "CASH" && (
                 <>
                   <div className="flex justify-between text-[10px]">
@@ -526,18 +545,13 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
                 </>
               )}
             </div>
-
             <div className="flex gap-2 px-6 pb-5">
-              <button
-                onClick={() => window.print()}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50 transition"
-              >
+              <button onClick={() => window.print()}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50 transition">
                 <Printer size={12} /> Print Receipt
               </button>
-              <button
-                onClick={handleNewBill}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#00703C] py-3 text-[10px] font-extrabold uppercase tracking-wider text-white hover:bg-emerald-800 transition"
-              >
+              <button onClick={handleNewBill}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#00703C] py-3 text-[10px] font-extrabold uppercase tracking-wider text-white hover:bg-emerald-800 transition">
                 <Receipt size={12} /> New Bill
               </button>
             </div>
@@ -558,18 +572,20 @@ export default function ReceptionistPage() {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [isRouting, setIsRouting] = useState(false);
 
   const [formData, setFormData] = useState({
     firstName: "", lastName: "", age: "", dob: "", gender: "",
     phone: "", address: "", chiefComplaint: "",
   });
 
+  // ── Fetch all active (non-discharged) patients ────────────────────────────
   const fetchActiveRegistry = async () => {
     try {
-      const res = await fetch("/api/receptionist?resource=patients");
+      const res = await fetch("/api/receptionist");
       if (res.ok) setPatients(await res.json());
     } catch (err) {
-      console.error("Tracking node sync failure:", err);
+      console.error("Registry sync failure:", err);
     }
   };
 
@@ -600,50 +616,74 @@ export default function ReceptionistPage() {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
+  // ── Register patient — uses action/payload ────────────────────────────────
   const handleRegisterPatient = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     try {
-      const response = await fetch("/api/receptionist?resource=patients", {
+      const response = await fetch("/api/receptionist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          firstName: formData.firstName, lastName: formData.lastName, age: formData.age,
-          dob: registrationMode === "normal" ? formData.dob : null,
-          gender: formData.gender,
-          phone: registrationMode === "normal" ? formData.phone : null,
-          address: registrationMode === "normal" ? formData.address : null,
-          chiefComplaint: formData.chiefComplaint,
-          isEmergency: registrationMode === "emergency",
+          action: "CREATE_PATIENT",
+          payload: {
+            firstName: formData.firstName,
+            lastName: formData.lastName,
+            age: formData.age,
+            dob: registrationMode === "normal" ? formData.dob : null,
+            gender: formData.gender,
+            phone: registrationMode === "normal" ? formData.phone : null,
+            address: registrationMode === "normal" ? formData.address : null,
+            chiefComplaint: formData.chiefComplaint,
+            isEmergency: registrationMode === "emergency",
+          },
         }),
       });
-      if (!response.ok) throw new Error("Failed validation write step.");
+
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body.error || "Registration failed.");
+      }
+
       await fetchActiveRegistry();
       setActiveTab("search");
       setFormData({ firstName: "", lastName: "", age: "", dob: "", gender: "", phone: "", address: "", chiefComplaint: "" });
       setSelectedPatient(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Registration failed to submit.");
+      alert(err.message || "Registration failed to submit.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleDispatchPipeline = async (patientId: number, targetRoomStatus: string) => {
+  // ── Route patient — uses action/payload ───────────────────────────────────
+  const handleDispatchPipeline = async (patientId: number, targetStatus: string, label: string) => {
+    setIsRouting(true);
     try {
-      const response = await fetch("/api/receptionist?resource=patients", {
-        method: "PATCH",
+      const response = await fetch("/api/receptionist", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: patientId, status: targetRoomStatus }),
+        body: JSON.stringify({
+          action: "ADVANCE_PATIENT_STATUS",
+          payload: { patientId, nextStatus: targetStatus },
+        }),
       });
-      if (response.ok) {
-        alert(`Patient successfully routed to ${targetRoomStatus.replace(/_/g, " ")}`);
-        await fetchActiveRegistry();
-        setSelectedPatient(null);
+
+      if (!response.ok) {
+        const body = await response.json();
+        throw new Error(body.error || "Routing failed.");
       }
-    } catch (err) {
+
+      await fetchActiveRegistry();
+      setSelectedPatient(null);
+      // Brief success toast via the browser — avoids installing a toast lib
+      alert(`✓ Patient routed to ${label}`);
+    } catch (err: any) {
       console.error("Routing error:", err);
+      alert(err.message || "Could not route patient.");
+    } finally {
+      setIsRouting(false);
     }
   };
 
@@ -652,6 +692,15 @@ export default function ReceptionistPage() {
     p.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.patientNumber.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const statusBadge = (status: string) => {
+    const s = STATUS_LABELS[status] ?? { label: status.replace(/_/g, " "), color: "text-slate-500 bg-slate-50 border-slate-200" };
+    return (
+      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider ${s.color}`}>
+        {s.label}
+      </span>
+    );
+  };
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 antialiased font-sans">
@@ -689,9 +738,9 @@ export default function ReceptionistPage() {
         {/* TABS */}
         <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
           {([
-            { key: "search", label: "Tracking Desk", icon: <Search size={15} />, color: "border-[#00703C] text-[#00703C]" },
-            { key: "register", label: "Register Patient", icon: <UserPlus size={15} />, color: "border-[#00703C] text-[#00703C]" },
-            { key: "cashier", label: "Cashier & Billing", icon: <Receipt size={15} />, color: "border-amber-500 text-amber-600" },
+            { key: "search",   label: "Tracking Desk",    icon: <Search size={15} />,  color: "border-[#00703C] text-[#00703C]" },
+            { key: "register", label: "Register Patient",  icon: <UserPlus size={15} />, color: "border-[#00703C] text-[#00703C]" },
+            { key: "cashier",  label: "Cashier & Billing", icon: <Receipt size={15} />, color: "border-amber-500 text-amber-600" },
           ] as const).map((tab) => (
             <button
               key={tab.key}
@@ -705,9 +754,11 @@ export default function ReceptionistPage() {
           ))}
         </div>
 
-        {/* SEARCH TAB */}
+        {/* ── SEARCH / TRACKING TAB ─────────────────────────────────────────── */}
         {activeTab === "search" && (
           <div className="grid gap-6 lg:grid-cols-3">
+
+            {/* Left: registry list */}
             <div className="space-y-6 lg:col-span-2">
               <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                 <label className="block text-xs font-bold tracking-wide text-slate-500 uppercase mb-2">Live Master Registry Look-Up</label>
@@ -720,6 +771,7 @@ export default function ReceptionistPage() {
                   />
                 </div>
               </div>
+
               <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                 <div className="border-b border-slate-100 bg-slate-50/70 px-6 py-3 flex justify-between items-center">
                   <span className="text-xs font-bold tracking-wider text-slate-500 uppercase">Live Admissions</span>
@@ -727,7 +779,9 @@ export default function ReceptionistPage() {
                 </div>
                 {filteredPatients.length === 0 ? (
                   <div className="flex min-h-[280px] flex-col items-center justify-center p-8 text-center">
-                    <div className="rounded-2xl bg-slate-50 p-4 border border-slate-100 mb-3"><AlertCircle size={28} className="text-slate-300" /></div>
+                    <div className="rounded-2xl bg-slate-50 p-4 border border-slate-100 mb-3">
+                      <AlertCircle size={28} className="text-slate-300" />
+                    </div>
                     <h3 className="text-sm font-bold text-slate-800">No Patient Logs Registered</h3>
                     <p className="mt-1 max-w-xs text-xs text-slate-400">Registry is currently empty.</p>
                   </div>
@@ -735,23 +789,28 @@ export default function ReceptionistPage() {
                   <div className="divide-y divide-slate-100">
                     {filteredPatients.map((patient) => (
                       <div
-                        key={patient.id} onClick={() => setSelectedPatient(patient)}
+                        key={patient.id}
+                        onClick={() => setSelectedPatient(patient)}
                         className={`group flex items-center justify-between p-4 transition-all cursor-pointer hover:bg-slate-50/80 ${selectedPatient?.id === patient.id ? "bg-emerald-50/40 border-l-4 border-[#00703C]" : ""}`}
                       >
-                        <div className="space-y-1">
+                        <div className="space-y-1.5">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-mono text-xs font-bold tracking-wider text-[#00703C] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">{patient.patientNumber}</span>
-                            <h4 className="text-sm font-bold text-slate-800 group-hover:text-[#00703C]">{patient.lastName}, {patient.firstName}</h4>
+                            <span className="font-mono text-xs font-bold tracking-wider text-[#00703C] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                              {patient.patientNumber}
+                            </span>
+                            <h4 className="text-sm font-bold text-slate-800 group-hover:text-[#00703C]">
+                              {patient.lastName}, {patient.firstName}
+                            </h4>
                             {patient.isEmergency && (
                               <span className="inline-flex items-center gap-1 rounded bg-rose-50 border border-rose-100 px-2 py-0.5 text-[10px] font-extrabold uppercase text-rose-600 animate-pulse">
                                 <ShieldAlert size={10} /> Emergency
                               </span>
                             )}
                           </div>
-                          <div className="flex flex-wrap gap-3 text-xs text-slate-400">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
                             <span><strong>Age/Sex:</strong> {patient.age} Yrs ({patient.gender})</span>
                             <span>•</span>
-                            <span><strong>Status:</strong> {patient.status.replace(/_/g, " ")}</span>
+                            {statusBadge(patient.status)}
                           </div>
                         </div>
                         <ArrowRight size={16} className="text-slate-300 group-hover:text-[#00703C] group-hover:translate-x-1 transition-all flex-shrink-0" />
@@ -762,35 +821,70 @@ export default function ReceptionistPage() {
               </div>
             </div>
 
+            {/* Right: Clinical Workflow Router */}
             <div className="lg:col-span-1">
               <div className="sticky top-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <div>
                   <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Clinical Workflow Router</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Route records across hospital workstations.</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Route this patient to any department.</p>
                 </div>
+
                 {selectedPatient ? (
                   <div className="space-y-4">
-                    <div className="rounded-xl bg-slate-50 p-4 border border-slate-100">
-                      <div className="text-base font-black text-slate-800">{selectedPatient.lastName}, {selectedPatient.firstName}</div>
+                    {/* Patient card */}
+                    <div className="rounded-xl bg-slate-50 p-4 border border-slate-100 space-y-1">
+                      <div className="text-base font-black text-slate-800">
+                        {selectedPatient.lastName}, {selectedPatient.firstName}
+                      </div>
                       <div className="font-mono text-xs font-bold text-[#00703C]">{selectedPatient.patientNumber}</div>
+                      <div className="pt-1">{statusBadge(selectedPatient.status)}</div>
                     </div>
+
+                    {/* Patient details */}
                     <div className="space-y-2 text-xs">
-                      <div className="flex items-center gap-2 text-slate-500"><Phone size={14} /><span>Contact: <strong>{selectedPatient.phone || "Bypassed"}</strong></span></div>
-                      <div className="flex items-center gap-2 text-slate-500"><MapPin size={14} /><span className="truncate">Address: <strong>{selectedPatient.address || "Bypassed"}</strong></span></div>
+                      <div className="flex items-center gap-2 text-slate-500">
+                        <Phone size={13} />
+                        <span>Contact: <strong>{selectedPatient.phone || "Not recorded"}</strong></span>
+                      </div>
+                      <div className="flex items-start gap-2 text-slate-500">
+                        <MapPin size={13} className="mt-0.5 flex-shrink-0" />
+                        <span className="truncate">Address: <strong>{selectedPatient.address || "Not recorded"}</strong></span>
+                      </div>
                       <div className="flex flex-col pt-2 border-t border-slate-100">
-                        <span className="text-slate-400 font-bold mb-1 tracking-wider text-[10px] uppercase flex items-center gap-1"><FileHeart size={12} /> Presenting Details</span>
-                        <p className="font-medium text-slate-600 bg-slate-50/80 border border-slate-100 p-3 rounded-xl max-h-24 overflow-y-auto">{selectedPatient.chiefComplaint}</p>
+                        <span className="text-slate-400 font-bold mb-1 tracking-wider text-[10px] uppercase flex items-center gap-1">
+                          <FileHeart size={12} /> Presenting Details
+                        </span>
+                        <p className="font-medium text-slate-600 bg-slate-50/80 border border-slate-100 p-3 rounded-xl max-h-24 overflow-y-auto text-[11px] leading-relaxed">
+                          {selectedPatient.chiefComplaint}
+                        </p>
                       </div>
                     </div>
-                    <div className="pt-2 space-y-2">
-                      <button onClick={() => handleDispatchPipeline(selectedPatient.id, "AWAITING_TRIAGE")}
-                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#00703C] py-2.5 text-xs font-bold text-white hover:bg-emerald-800 transition-all">
-                        <UserCheck size={14} /> Dispatch to Triage
-                      </button>
-                      <button onClick={() => handleDispatchPipeline(selectedPatient.id, "AWAITING_SONOGRAPHY")}
-                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-2.5 text-xs font-bold text-white hover:bg-blue-700 transition-all">
-                        <UserCheck size={14} /> Send to Sonographer
-                      </button>
+
+                    {/* Route buttons — full grid of all destinations */}
+                    <div className="pt-1 space-y-1.5">
+                      <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 mb-2">
+                        Send Patient To
+                      </p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {ROUTE_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.status + opt.label}
+                            disabled={isRouting || selectedPatient.status === opt.status}
+                            onClick={() => handleDispatchPipeline(selectedPatient.id, opt.status, opt.label)}
+                            className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed ${opt.color} ${
+                              selectedPatient.status === opt.status ? "ring-2 ring-offset-1 " + opt.ringColor : ""
+                            }`}
+                          >
+                            {opt.icon}
+                            <span>{opt.label}</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Current status indicator */}
+                      <p className="text-[9px] text-slate-400 text-center pt-1">
+                        Highlighted button = current station · Greyed = already there
+                      </p>
                     </div>
                   </div>
                 ) : (
@@ -803,7 +897,7 @@ export default function ReceptionistPage() {
           </div>
         )}
 
-        {/* REGISTER TAB */}
+        {/* ── REGISTER TAB ──────────────────────────────────────────────────── */}
         {activeTab === "register" && (
           <div className="mx-auto max-w-2xl rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
             <div className="grid grid-cols-2 border-b border-slate-200">
@@ -841,17 +935,20 @@ export default function ReceptionistPage() {
               ))}
               <div className="md:col-span-2 flex items-center justify-end gap-3 border-t border-slate-100 pt-4 mt-2">
                 <button type="button" onClick={() => setActiveTab("search")}
-                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-50">Cancel</button>
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-50">
+                  Cancel
+                </button>
                 <button type="submit" disabled={isSubmitting}
-                  className={`flex items-center gap-2 rounded-xl px-5 py-2.5 text-xs font-bold text-white uppercase tracking-wider transition-all ${registrationMode === "emergency" ? "bg-rose-600 hover:bg-rose-700" : "bg-[#00703C] hover:bg-emerald-800"}`}>
-                  <CheckCircle2 size={14} /> {isSubmitting ? "Saving..." : "Commit Record"}
+                  className={`flex items-center gap-2 rounded-xl px-5 py-2.5 text-xs font-bold text-white uppercase tracking-wider transition-all ${registrationMode === "emergency" ? "bg-rose-600 hover:bg-rose-700" : "bg-[#00703C] hover:bg-emerald-800"} disabled:opacity-50`}>
+                  <CheckCircle2 size={14} />
+                  {isSubmitting ? "Saving..." : "Commit Record"}
                 </button>
               </div>
             </form>
           </div>
         )}
 
-        {/* CASHIER TAB */}
+        {/* ── CASHIER TAB ───────────────────────────────────────────────────── */}
         {activeTab === "cashier" && <CashierPOS patients={patients} />}
 
       </div>
