@@ -255,8 +255,9 @@ export default function StaffManagementPage() {
             >
               <option value="ADMINISTRATOR">Administrator</option>
               <option value="DOCTOR">Doctor</option>
-              <option value="NURSE">Nurse</option>
-              <option value="MIDWIFE">Midwife</option>
+              <option value="NURSE_MIDWIFE">Nurse/Midwife</option>
+      
+              <option value ="DENTIST">DENTIST</option>
               <option value="LAB_TECHNICIAN">Lab Technician</option>
               <option value="SONOGRAPHER">Sonographer</option>
               <option value="RADIOLOGIST">Radiologist</option>
