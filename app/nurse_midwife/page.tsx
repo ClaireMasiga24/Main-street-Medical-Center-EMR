@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
-import { Activity, Baby, Pill, FileText, LogOut, Printer, PlusCircle, Trash2, Send, RefreshCw, Phone, User, Clock, AlertTriangle, X, Thermometer, Droplets, Heart, Wind, Scale, Ruler, Eye, AlertCircle, Stethoscope, ArrowRight, CheckCircle, Save } from "lucide-react";
+import { Activity, Baby, FileText, LogOut, Printer, PlusCircle, Trash2, RefreshCw, Phone, User, Clock, AlertTriangle, X, Thermometer, Droplets, Heart, Wind, Scale, Ruler, Eye, AlertCircle, Stethoscope, ArrowRight, CheckCircle, Save, ClipboardList } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 interface TriagePatient {
@@ -24,8 +24,20 @@ export default function NurseMidwifeDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reportText, setReportText] = useState("");
-  const [prescriptions, setPrescriptions] = useState<any[]>([]);
-  const [drugInput, setDrugInput] = useState({ name: "", dose: "", frequency: "" });
+  const [treatmentEntries, setTreatmentEntries] = useState<TreatmentEntry[]>([]);
+  const [treatmentForm, setTreatmentForm] = useState({ date: new Date().toISOString().split("T")[0], drug: "", route: "PO", dose: "", time: "", signature: "" });
+
+  interface TreatmentEntry {
+    id: number;
+    date: string;
+    drug: string;
+    route: string;
+    dose: string;
+    time: string;
+    signature: string;
+  }
+
+  const ROUTES = ["PO", "IV", "IM", "SC", "SL", "PR", "Topical", "Inhalation", "Intradermal", "OT (Other)"];
 
   // ── Triage Modal State ────────────────────────────────────────────────────────
   const [selectedPatient, setSelectedPatient] = useState<TriagePatient | null>(null);
@@ -151,15 +163,10 @@ export default function NurseMidwifeDashboard() {
     }
   };
 
-  const handleAddDrug = () => {
-    if (!drugInput.name) return;
-    setPrescriptions([...prescriptions, { ...drugInput, id: Date.now() }]);
-    setDrugInput({ name: "", dose: "", frequency: "" });
-  };
-
-  const handleSharePrescription = () => {
-    alert("Prescription shared with Pharmacy!");
-    setPrescriptions([]);
+  const handleAddTreatment = () => {
+    if (!treatmentForm.drug || !treatmentForm.dose) return;
+    setTreatmentEntries([...treatmentEntries, { ...treatmentForm, id: Date.now() }]);
+    setTreatmentForm({ date: new Date().toISOString().split("T")[0], drug: "", route: "PO", dose: "", time: "", signature: "" });
   };
 
   // ── Fetch triage patients from the API ─────────────────────────────────────
@@ -198,7 +205,7 @@ export default function NurseMidwifeDashboard() {
           {[ 
             {id: "triage", label: "Triage & Vitals", icon: Activity}, 
             {id: "antenatal", label: "ANC Monitoring", icon: Baby},
-            {id: "pharmacy", label: "Drug Prescriptions", icon: Pill},
+            {id: "treatment", label: "Treatment Chart", icon: ClipboardList},
             {id: "reports", label: "Shift Handover", icon: FileText} 
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} 
@@ -300,27 +307,111 @@ export default function NurseMidwifeDashboard() {
             </div>
           )}
 
-          {/* PHARMACY */}
-          {activeTab === "pharmacy" && (
+          {/* TREATMENT CHART */}
+          {activeTab === "treatment" && (
             <div>
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr auto', gap: '10px', marginBottom: '30px' }}>
-                <input placeholder="Drug Name" value={drugInput.name} onChange={(e) => setDrugInput({...drugInput, name: e.target.value})} style={{ padding: '12px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
-                <input placeholder="Dose" value={drugInput.dose} onChange={(e) => setDrugInput({...drugInput, dose: e.target.value})} style={{ padding: '12px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
-                <input placeholder="Frequency" value={drugInput.frequency} onChange={(e) => setDrugInput({...drugInput, frequency: e.target.value})} style={{ padding: '12px', border: '1px solid #cbd5e1', borderRadius: '6px' }} />
-                <button onClick={handleAddDrug} style={{ backgroundColor: '#00703C', color: 'white', padding: '0 20px', borderRadius: '6px', border: 'none', cursor: 'pointer' }}><PlusCircle size={20} /></button>
+              {/* ── Add new treatment row ── */}
+              <div style={{ marginBottom: '24px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '20px' }}>
+                <h4 style={{ margin: '0 0 14px 0', fontSize: '13px', fontWeight: 'bold', color: '#00703C', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <PlusCircle size={16} /> Record Treatment
+                </h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 1fr 1fr 1fr 1.5fr auto', gap: '10px', alignItems: 'end' }}>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Date</label>
+                    <input type="date" value={treatmentForm.date} onChange={(e) => setTreatmentForm({...treatmentForm, date: e.target.value})}
+                      style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Drug / Treatment</label>
+                    <input type="text" placeholder="e.g. Paracetamol" value={treatmentForm.drug} onChange={(e) => setTreatmentForm({...treatmentForm, drug: e.target.value})}
+                      style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Route</label>
+                    <select value={treatmentForm.route} onChange={(e) => setTreatmentForm({...treatmentForm, route: e.target.value})}
+                      style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px', backgroundColor: 'white' }}>
+                      {ROUTES.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Dose</label>
+                    <input type="text" placeholder="e.g. 500 mg" value={treatmentForm.dose} onChange={(e) => setTreatmentForm({...treatmentForm, dose: e.target.value})}
+                      style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Time</label>
+                    <input type="time" value={treatmentForm.time} onChange={(e) => setTreatmentForm({...treatmentForm, time: e.target.value})}
+                      style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>Signature</label>
+                    <input type="text" placeholder="Nurse initials" value={treatmentForm.signature} onChange={(e) => setTreatmentForm({...treatmentForm, signature: e.target.value})}
+                      style={{ width: '100%', padding: '10px', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px' }} />
+                  </div>
+                  <div>
+                    <button onClick={handleAddTreatment} style={{ backgroundColor: '#00703C', color: 'white', padding: '10px 16px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <PlusCircle size={16} /> Add
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              {prescriptions.map(p => (
-                <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', borderBottom: '1px solid #eee' }}>
-                  <span><strong>{p.name}</strong> - {p.dose} ({p.frequency})</span>
-                  <button onClick={() => setPrescriptions(prescriptions.filter(x => x.id !== p.id))} style={{ background: 'none', border: 'none', color: '#b91c1c', cursor: 'pointer' }}><Trash2 size={18} /></button>
-                </div>
-              ))}
+              {/* ── Treatment Chart Table ── */}
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#00703C', color: 'white' }}>
+                      <th style={{ padding: '12px 16px', textAlign: 'left', border: '1px solid #006633' }}>#</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'left', border: '1px solid #006633' }}>Date</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'left', border: '1px solid #006633' }}>Drug / Treatment</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'left', border: '1px solid #006633' }}>Route</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'left', border: '1px solid #006633' }}>Dose</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'left', border: '1px solid #006633' }}>Time</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'left', border: '1px solid #006633' }}>Signature</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'center', border: '1px solid #006633', width: '60px' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {treatmentEntries.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} style={{ padding: '40px', textAlign: 'center', color: '#94a3b8', border: '1px solid #e2e8f0' }}>
+                          <ClipboardList size={32} style={{ margin: '0 auto 10px', display: 'block', opacity: 0.4 }} />
+                          <p style={{ fontWeight: 'bold', fontSize: '14px' }}>No treatment records yet</p>
+                          <p style={{ fontSize: '12px', marginTop: '4px' }}>Use the form above to record administered treatments</p>
+                        </td>
+                      </tr>
+                    ) : (
+                      treatmentEntries.map((entry, index) => (
+                        <tr key={entry.id} style={{ backgroundColor: index % 2 === 0 ? 'white' : '#f8fafc' }}>
+                          <td style={{ padding: '10px 16px', border: '1px solid #e2e8f0', fontWeight: 'bold', color: '#64748b', fontSize: '12px' }}>{index + 1}</td>
+                          <td style={{ padding: '10px 16px', border: '1px solid #e2e8f0' }}>{entry.date}</td>
+                          <td style={{ padding: '10px 16px', border: '1px solid #e2e8f0', fontWeight: 'bold', color: '#1e293b' }}>{entry.drug}</td>
+                          <td style={{ padding: '10px 16px', border: '1px solid #e2e8f0' }}>{entry.route}</td>
+                          <td style={{ padding: '10px 16px', border: '1px solid #e2e8f0' }}>{entry.dose}</td>
+                          <td style={{ padding: '10px 16px', border: '1px solid #e2e8f0' }}>{entry.time}</td>
+                          <td style={{ padding: '10px 16px', border: '1px solid #e2e8f0', fontFamily: 'cursive', fontStyle: 'italic' }}>{entry.signature}</td>
+                          <td style={{ padding: '10px 16px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+                            <button onClick={() => setTreatmentEntries(treatmentEntries.filter(x => x.id !== entry.id))}
+                              style={{ background: 'none', border: 'none', color: '#b91c1c', cursor: 'pointer', padding: '4px' }}>
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-              {prescriptions.length > 0 && (
-                <button onClick={handleSharePrescription} style={{ marginTop: '20px', backgroundColor: '#00703C', color: 'white', padding: '12px 24px', borderRadius: '6px', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', fontWeight: 'bold' }}>
-                  <Send size={18} style={{ marginRight: '8px' }} /> SHARE PRESCRIPTION
-                </button>
+              {treatmentEntries.length > 0 && (
+                <div style={{ marginTop: '20px', display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                  <button onClick={() => window.print()} style={{ backgroundColor: '#fff', color: '#00703C', padding: '12px 24px', borderRadius: '6px', border: '1px solid #00703C', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Printer size={18} /> Print Chart
+                  </button>
+                  <button onClick={() => { setTreatmentEntries([]); }} style={{ backgroundColor: '#64748b', color: 'white', padding: '12px 24px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Trash2 size={18} /> Clear All
+                  </button>
+                </div>
               )}
             </div>
           )}
