@@ -172,6 +172,13 @@ export default function DoctorsPage() {
     setRxMed(""); setRxDose(""); setRxInstr("");
     setLabChecked(new Set());
     setError(null);
+
+    // Begin consultation: move patient from AWAITING_DOCTOR to IN_CONSULTATION
+    fetch("/api/doctor", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patientId: p.id }),
+    }).catch(() => {}); // best-effort; the queue view will re-fetch on the next load
   }
 
   function addRx() {
@@ -295,7 +302,7 @@ export default function DoctorsPage() {
           {/* List */}
           <div className="bg-white rounded-xl border border-slate-100">
             <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-700">Patients sent by reception</span>
+              <span className="text-sm font-medium text-slate-700">Patients from triage</span>
               <span className="text-xs text-amber-700 bg-amber-50 border border-amber-100 px-2.5 py-1 rounded-full">● Live</span>
             </div>
 

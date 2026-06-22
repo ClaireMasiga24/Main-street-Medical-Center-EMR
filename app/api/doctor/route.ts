@@ -12,12 +12,15 @@ const ROUTE_TO_STATUS: Record<string, PatientStatus> = {
   DISCHARGE:  "DISCHARGED",
 };
 
-// GET — fetch all IN_CONSULTATION patients
+// GET — fetch all AWAITING_DOCTOR patients (triage queue for doctors)
 export async function GET() {
   try {
     const patients = await prisma.patient.findMany({
-      where: { currentStatus: "IN_CONSULTATION" },
-      orderBy: { updatedAt: "asc" },
+      where: { currentStatus: "AWAITING_DOCTOR" },
+      orderBy: [
+        { isEmergency: "desc" },
+        { updatedAt: "asc" },
+      ],
       include: {
         Visit: {
           orderBy: { createdAt: "desc" },
@@ -89,5 +92,25 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("[doctor POST]", err);
     return NextResponse.json({ error: "Server error. Please try again." }, { status: 500 });
+  }
+}
+
+// PATCH — begin consultation: move a patient from AWAITING_DOCTOR to IN_CONSULTATION
+export async function PATCH(req: NextRequest) {
+  try {
+    const { patientId } = await req.json();
+    if (!patientId) {
+      return NextResponse.json({ error: "patientId is required" }, { status: 400 });
+    }
+
+    const updated = await prisma.patient.update({
+      where: { id: patientId },
+      data:  { currentStatus: "IN_CONSULTATION" },
+    });
+
+    return NextResponse.json(updated);
+  } catch (err) {
+    console.error("[doctor PATCH]", err);
+    return NextResponse.json({ error: "Failed to start consultation." }, { status: 500 });
   }
 }
