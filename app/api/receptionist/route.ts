@@ -135,6 +135,27 @@ export async function POST(req: Request) {
           data: { currentStatus: nextStatus },
         });
 
+        // If routing to radiology/sonography, create an imaging request automatically
+        if (nextStatus === "AWAITING_RADIOLOGY" || nextStatus === "AWAITING_SONOGRAPHY") {
+          const studyType = nextStatus === "AWAITING_SONOGRAPHY" ? "ULTRASOUND" : "X_RAY";
+          const patientRecord = await prisma.patient.findUnique({
+            where: { id: patientId },
+            include: { Visit: { orderBy: { createdAt: "desc" }, take: 1 } },
+          });
+
+          await prisma.imagingRequest.create({
+            data: {
+              patientId,
+              visitId: patientRecord?.Visit[0]?.id ?? null,
+              studyType,
+              priority: patientRecord?.isEmergency ? "STAT" : "ROUTINE",
+              referralSource: "RECEPTION",
+              clinicalNotes: patientRecord?.Visit[0]?.symptoms ?? null,
+              status: "ORDERED",
+            },
+          });
+        }
+
         return NextResponse.json(updated);
       }
 

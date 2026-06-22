@@ -46,6 +46,8 @@ model Patient {
   Prescription Prescription[]
   Visit        Visit[]
   DentalRecord DentalRecord[]
+  Triage       Triage[]
+  ImagingRequest ImagingRequest[]
 }
 
 model Visit {
@@ -63,6 +65,108 @@ model Visit {
   Prescription Prescription[]
   Billing      Billing[]
   DentalRecord DentalRecord[]
+  Triage       Triage[]
+  ImagingRequest ImagingRequest[]
+}
+
+model Triage {
+  id                    Int      @id @default(autoincrement())
+  patientId             Int
+  visitId               Int?
+
+  // ── Arrival ───────────────────────────────────────────────────────
+  modeOfArrival         String?  // WALK_IN | AMBULANCE | WHEELCHAIR | REFERRAL | TRANSFER
+
+  // ── Vital Signs ───────────────────────────────────────────────────
+  temperature           Float?   // Celsius
+  bpSystolic            Int?     // mmHg
+  bpDiastolic           Int?     // mmHg
+  heartRate             Int?     // bpm (pulse rate)
+  respiratoryRate       Int?     // breaths/min
+  spo2                  Int?     // % SpO₂
+  weight                Float?   // kg
+  height                Float?   // cm
+
+  // ── Pain Assessment ───────────────────────────────────────────────
+  painLevel             Int?     // 0–10
+  painLocation          String?
+
+  // ── Clinical Assessment ───────────────────────────────────────────
+  chiefComplaint        String?  @db.Text
+  allergies             String?  @db.Text
+  medicalHistory        String?  @db.Text
+  nursingObservations   String?  @db.Text
+  nursingNotes          String?  @db.Text
+
+  // ── ESI & Red Flags ───────────────────────────────────────────────
+  esiLevel              Int?     // 1–5 (Emergency Severity Index)
+  redFlags              String?  @db.Text // JSON array — e.g. ["Airway compromise","Shock"]
+
+  // ── Triage Outcome ────────────────────────────────────────────────
+  triageOutcome         String?  // SEND_DOCTOR | EMERGENCY | OBSERVATION | SPECIALIST | DISCHARGE
+  referredTo            String?  // department / specialist name if triageOutcome = SPECIALIST
+
+  // ── Meta ──────────────────────────────────────────────────────────
+  status                String   @default("COMPLETED")
+  completedBy           Int?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  Patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Visit   Visit?  @relation(fields: [visitId], references: [id])
+}
+
+model ImagingRequest {
+  id             Int      @id @default(autoincrement())
+  patientId      Int
+  visitId        Int?
+  requestedById  Int?     // Staff ID of the requesting clinician
+
+  // ── Study Details ─────────────────────────────────────────────────
+  studyType      String   // X_RAY | ULTRASOUND | CT_SCAN | MRI | MAMMOGRAPHY | ECHOCARDIOGRAPHY | DOPPLER | FLUOROSCOPY
+  priority       String   @default("ROUTINE") // ROUTINE | URGENT | STAT
+  referralSource String?  // RECEPTION | TRIAGE | DOCTOR | EMERGENCY | SPECIALIST | WARD
+
+  // ── Clinical ──────────────────────────────────────────────────────
+  clinicalNotes  String?  @db.Text  // Reason for investigation
+  clinicalHistory String? @db.Text
+
+  // ── Status Workflow ───────────────────────────────────────────────
+  status         String   @default("ORDERED")
+  // ORDERED → ACCEPTED → IN_PROGRESS → AWAITING_INTERPRETATION → REPORTED
+  // CANCELLED at any point
+
+  // ── Critical Findings ─────────────────────────────────────────────
+  isCritical     Boolean  @default(false)
+  criticalNote   String?  @db.Text
+
+  // ── Imaging Data ──────────────────────────────────────────────────
+  imageCount     Int      @default(0)
+  dicomStudyUid  String?  // Placeholder for DICOM integration
+
+  // ── Report ────────────────────────────────────────────────────────
+  findings       String?  @db.Text
+  impression     String?  @db.Text
+  conclusion     String?  @db.Text
+  radiologistNotes String? @db.Text
+  reportedById   Int?
+  reportedAt     DateTime?
+
+  // ── Measurements & Annotations (JSON) ─────────────────────────────
+  measurements   String?  @db.Text  // JSON — {"label":"Liver size","value":"15.2","unit":"cm"}
+  annotations    String?  @db.Text  // JSON — free-form annotation data
+
+  // ── Machine Integration ───────────────────────────────────────────
+  machineResults String?  @db.Text  // Raw machine output / DICOM structured report
+  machineModel   String?  // Name/model of the device used
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  Patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Visit   Visit?  @relation(fields: [visitId], references: [id])
+  Staff   Staff?  @relation(fields: [requestedById], references: [id])
 }
 
 model DentalRecord {
@@ -146,6 +250,7 @@ model Staff {
   updatedAt      DateTime      @updatedAt
   Appointment    Appointment[]
   LabRequest     LabRequest[]
+  ImagingRequest ImagingRequest[]
   User           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 

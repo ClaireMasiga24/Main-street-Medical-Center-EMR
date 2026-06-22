@@ -42,10 +42,12 @@ export default function LoginPage() {
       const user = data.user;
       const userData = JSON.stringify(user);
 
-      // save session
+      // save session — always clear the other storage to prevent stale data
       if (rememberMe) {
+        sessionStorage.removeItem("user");
         localStorage.setItem("user", userData);
       } else {
+        localStorage.removeItem("user");
         sessionStorage.setItem("user", userData);
       }
 

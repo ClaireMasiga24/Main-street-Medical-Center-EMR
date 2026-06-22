@@ -10,6 +10,10 @@ export const ROLE_ROUTES: Record<string, string> = {
   SONOGRAPHER: "/radiology",
   RADIOLOGIST: "/radiology",
 
+  DENTIST: "/Dentist",
+
+  RADIOLOGIST_SONOGRAPHER: "/radiologist_sonographer",
+
   CASHIER: "/billing",
 
   PHARMACIST: "/pharmacy",

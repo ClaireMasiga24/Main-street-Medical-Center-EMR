@@ -22,7 +22,7 @@ const modules = [
   { title: "Reception", icon: UserRound, path:"/receptionist" },
   { title: "Doctors", icon: Stethoscope, path: "/Doctors" },
   {title:"Dentists",icon: Stethoscope,path :"/Dentist"},
-  { title: "Nurses & Midwives", icon: Activity, path: "/nurse-midwife" },
+  { title: "Nurses & Midwives", icon: Activity, path: "/nurse_midwife" },
   { title: "Laboratory", icon: FlaskConical, path: "/laboratory" },
   { title: "Radiology", icon: ClipboardList, path: "/radiologist_sonographer" },
   { title: "Pharmacy", icon: Pill, path: "/pharmacy" },
