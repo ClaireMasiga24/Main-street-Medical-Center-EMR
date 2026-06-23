@@ -12,6 +12,7 @@ export async function GET() {
       department: s.department,
       phoneNumber: s.phoneNumber,
       specialization: s.specialization,
+      userId: s.userId, // needed for matching logged-in user to staff record
       username: s.User?.username || "N/A",
       role: s.User?.role || "N/A",
       email: s.User?.email || "N/A",

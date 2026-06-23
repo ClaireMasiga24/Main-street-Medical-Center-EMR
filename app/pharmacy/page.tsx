@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Search, PackageCheck, Pill, LogOut, User } from "lucide-react";
+import NotificationInbox from "../components/NotificationInbox";
 import { useRouter } from "next/navigation";
 
 type PrescriptionStatus = "PENDING" | "DISPENSED";
@@ -47,6 +48,9 @@ export default function PharmacyPage() {
     }
 
     loadQueue();
+    try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); if (u.id) { fetch("/api/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id }) }); } } } catch {}
+    const hb = setInterval(() => { try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); if (u.id) { fetch("/api/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id }) }); } } } catch {} }, 120000);
+    return () => clearInterval(hb);
   }, []);
 
   const filteredQueue = queue.filter((q) =>
@@ -55,7 +59,8 @@ export default function PharmacyPage() {
       .includes(search.toLowerCase())
   );
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: u.id, username: u.username }) }); } } catch {}
     router.push("/");
   };
 
@@ -102,6 +107,7 @@ export default function PharmacyPage() {
           </div>
         </div>
 
+        <div className="mb-2"><NotificationInbox department="Pharmacy" /></div>
         <button
           onClick={handleLogout}
           className="flex items-center gap-2 text-red-200 hover:text-white"

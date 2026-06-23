@@ -3,12 +3,12 @@ import { prisma } from "../../lib/prisma";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Generates a patient number like MSMC-2026-0001 */
+/** Generates a patient number like MSMC-2026-XXXX (random 5-digit suffix to avoid race conditions) */
 async function generatePatientNumber(): Promise<string> {
   const year = new Date().getFullYear();
-  const count = await prisma.patient.count();
-  const seq = String(count + 1).padStart(4, "0");
-  return `MSMC-${year}-${seq}`;
+  const random = Math.floor(10000 + Math.random() * 90000);
+  const suffix = Date.now().toString().slice(-3);
+  return `MSMC-${year}-${random}${suffix}`;
 }
 
 // ─── GET — fetch all active patients for the Tracking Desk ───────────────────
@@ -154,6 +154,46 @@ export async function POST(req: Request) {
               status: "ORDERED",
             },
           });
+        }
+
+        // If routing to lab, create a lab request automatically so the lab tech can see it
+        if (nextStatus === "AWAITING_LAB") {
+          console.log("[RECEPTIONIST_ROUTE] Routing patient to LAB, patientId:", patientId);
+
+          const patientRecord = await prisma.patient.findUnique({
+            where: { id: patientId },
+            include: { Visit: { orderBy: { createdAt: "desc" }, take: 1 } },
+          });
+
+          if (!patientRecord) {
+            console.error("[RECEPTIONIST_ROUTE] Patient not found for id:", patientId);
+          } else {
+            // Resolve a staff ID — check payload first, fallback to earliest staff record
+            let staffId = payload.requestedById;
+            if (!staffId) {
+              const fallbackStaff = await prisma.staff.findFirst({ orderBy: { id: "asc" } });
+              staffId = fallbackStaff?.id;
+              console.log("[RECEPTIONIST_ROUTE] No staffId in payload, fallback found:", staffId);
+            }
+
+            if (!staffId) {
+              console.error("[RECEPTIONIST_ROUTE] No staff record exists at all — cannot create LabRequest");
+            } else {
+              const labRequest = await prisma.labRequest.create({
+                data: {
+                  patientId,
+                  visitId: patientRecord?.Visit[0]?.id ?? null,
+                  requestedById: staffId,
+                  testName: "Pending Lab Workup",
+                  priority: patientRecord?.isEmergency ? "STAT" : "ROUTINE",
+                  referralSource: "RECEPTION",
+                  clinicalNotes: patientRecord?.Visit[0]?.symptoms ?? null,
+                  status: "PENDING",
+                },
+              });
+              console.log("[RECEPTIONIST_ROUTE] LabRequest created successfully, id:", labRequest.id);
+            }
+          }
         }
 
         return NextResponse.json(updated);

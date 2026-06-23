@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import NotificationInbox from "../components/NotificationInbox";
 import {
   Activity, AlertTriangle, ArrowRight, Baby, Bell, Camera, CheckCircle,
   Clock, Download, FileText, Filter, Image, LogOut, Mic, Monitor,
@@ -206,8 +207,10 @@ export default function RadiologyDashboard() {
 
   useEffect(() => {
     fetchRequests();
+    try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); if (u.id) { fetch("/api/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id }) }); } } } catch {}
     const interval = setInterval(fetchRequests, 30_000);
-    return () => clearInterval(interval);
+    const hb = setInterval(() => { try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); if (u.id) { fetch("/api/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id }) }); } } } catch {} }, 120000);
+    return () => { clearInterval(interval); clearInterval(hb); };
   }, [fetchRequests]);
 
   // ── Select Request ────────────────────────────────────────────────────
@@ -409,7 +412,8 @@ export default function RadiologyDashboard() {
             <p style={{ margin: 0, fontSize: "12px", fontWeight: "bold" }}>Imaging Dept</p>
             <p style={{ margin: "2px 0 0", fontSize: "11px", opacity: 0.7 }}>Logged In</p>
           </div>
-          <button onClick={() => router.push("/")}
+          <div style={{ marginBottom: "8px" }}><NotificationInbox department="Radiology" /></div>
+          <button onClick={async () => { try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: u.id, username: u.username }) }); } } catch {} router.push("/"); }}
             style={{ width: "100%", padding: "12px", borderRadius: "10px", border: "none", backgroundColor: "#b91c1c", color: "white", cursor: "pointer", fontWeight: "bold", fontSize: "13px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
             <LogOut size={16} /> Sign Out
           </button>

@@ -16,6 +16,7 @@ model User {
   role             Role
   securityQuestion String
   securityAnswer   String
+  lastActiveAt     DateTime?
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
   AuditLog         AuditLog[]
@@ -48,6 +49,9 @@ model Patient {
   DentalRecord DentalRecord[]
   Triage       Triage[]
   ImagingRequest ImagingRequest[]
+  CriticalNotifications CriticalNotification[]
+  LabCommunications     LabCommunication[]
+  ResultShares          ResultShare[]
 }
 
 model Visit {
@@ -197,18 +201,142 @@ model Appointment {
 }
 
 model LabRequest {
-  id            Int       @id @default(autoincrement())
+  id                  Int       @id @default(autoincrement())
+  patientId           Int
+  visitId             Int?
+  requestedById       Int
+
+  // ── Request Details ───────────────────────────────────────────────────
+  testName            String
+  testPanel           String?
+  priority            String    @default("ROUTINE")
+  referralSource      String?
+  referralNotes       String?   @db.Text
+  clinicalNotes       String?   @db.Text
+
+  // ── Specimen Tracking ─────────────────────────────────────────────────
+  specimenType        String?
+  specimenId          String?   @unique
+  specimenCollectedAt DateTime?
+  collectedByName     String?
+  specimenRejected    Boolean   @default(false)
+  rejectedAt          DateTime?
+  rejectedBy          String?
+  rejectionReason     String?   @db.Text
+  rejectionCategory   String?   // HEMOLYZED | CLOTTED | INSUFFICIENT | WRONG_CONTAINER | MISLABELED | CONTAMINATED | EXPIRED | TRANSPORT | PREPARATION | DUPLICATE | OTHER
+
+  // ── Processing & TAT ─────────────────────────────────────────────────
+  processingStartedAt DateTime?
+  processingStartedBy String?
+
+  // ── Results Entry ─────────────────────────────────────────────────────
+  results             String?   @db.Text  // JSON array
+  resultEnteredAt     DateTime?
+  enteredByName       String?
+
+  // ── Validation ────────────────────────────────────────────────────────
+  validatedByName     String?
+  validatedAt         DateTime?
+  isCritical          Boolean   @default(false)
+  criticalNote        String?   @db.Text
+
+  // ── Analyzer Integration ──────────────────────────────────────────────
+  analyzerType        String?   // CBC | CHEMISTRY | HEMATOLOGY | URINALYSIS | COAGULATION | IMMUNOLOGY | MICROBIOLOGY | OTHER
+  analyzerResults     String?   @db.Text  // Raw JSON from analyzer
+  analyzerModel       String?
+  analyzerImportedAt  DateTime?
+  analyzerImportStatus String?  // PENDING | IMPORTED | REVIEWED | REJECTED
+
+  // ── Chain of Custody ─────────────────────────────────────────────────
+  chainOfCustody      String?   @db.Text  // JSON array: [{action,by,at,from,to}]
+
+  // ── Attachments ───────────────────────────────────────────────────────
+  attachments         String?   @db.Text  // JSON array
+
+  // ── Status ────────────────────────────────────────────────────────────
+  status              LabStatus @default(PENDING)
+
+  // ── Meta ──────────────────────────────────────────────────────────────
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  Patient             Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Visit               Visit?    @relation(fields: [visitId], references: [id])
+  Staff               Staff     @relation(fields: [requestedById], references: [id])
+
+  CriticalNotifications CriticalNotification[]
+  LabCommunications     LabCommunication[]
+  ResultShares          ResultShare[]
+}
+
+model CriticalNotification {
+  id              Int      @id @default(autoincrement())
+  labRequestId    Int
+  patientId       Int
+  notifiedPerson  String   // Who was notified
+  notifiedDept    String   // Department notified
+  notificationMethod String // PHONE | PAGE | IN_PERSON | EMAIL | SYSTEM
+  notifiedAt      DateTime
+  acknowledgedAt  DateTime?
+  acknowledgedBy  String?
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now())
+
+  LabRequest LabRequest @relation(fields: [labRequestId], references: [id], onDelete: Cascade)
+  Patient    Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+}
+
+model LabCommunication {
+  id              Int      @id @default(autoincrement())
+  labRequestId    Int?
+  patientId       Int?
+  messageType     String   // COMMENT | CLARIFICATION | SPECIMEN_ISSUE | REPEAT_REQUEST | CRITICAL_ALERT | GENERAL
+  message         String   @db.Text
+  senderId        Int
+  senderName      String
+  senderDept      String
+  recipientId     Int?     // Staff ID
+  recipientDept   String?  // Department to receive
+  isRead          Boolean  @default(false)
+  readAt          DateTime?
+  parentId        Int?     // For threading
+  createdAt       DateTime @default(now())
+
+  LabRequest LabRequest? @relation(fields: [labRequestId], references: [id])
+  Patient    Patient?    @relation(fields: [patientId], references: [id])
+  Staff      Staff       @relation(fields: [senderId], references: [id])
+}
+
+model Notification {
+  id          Int      @id @default(autoincrement())
+  userId      Int?
+  department  String?  // Target department
+  title       String
+  message     String   @db.Text
+  type        String   // CRITICAL_RESULT | RESULT_READY | RESULT_SHARED | COMMUNICATION | REPEAT_REQUEST | GENERAL
+  referenceId Int?     // Optional: ID of related entity (lab request, etc.)
+  referenceType String? // lab_request | communication | etc.
+  isRead      Boolean  @default(false)
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+}
+
+model ResultShare {
+  id            Int      @id @default(autoincrement())
+  labRequestId  Int
   patientId     Int
-  visitId       Int? // Linked to track which check-in ordered this test
-  requestedById Int
-  testName      String
-  results       String?   @db.Text
-  status        LabStatus @default(PENDING)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  Patient       Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  Visit         Visit?    @relation(fields: [visitId], references: [id])
-  Staff         Staff     @relation(fields: [requestedById], references: [id])
+  sharedById    Int
+  sharedByName  String
+  targetUserId  Int?     // Specific user
+  targetDept    String   // Target department
+  includeReport Boolean  @default(true)
+  note          String?  @db.Text
+  sharedAt      DateTime @default(now())
+  viewedAt      DateTime?
+
+  LabRequest LabRequest @relation(fields: [labRequestId], references: [id], onDelete: Cascade)
+  Patient    Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Staff      Staff?     @relation(fields: [sharedById], references: [id])
 }
 
 model Prescription {
@@ -251,7 +379,9 @@ model Staff {
   Appointment    Appointment[]
   LabRequest     LabRequest[]
   ImagingRequest ImagingRequest[]
-  User           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  LabCommunications LabCommunication[]
+  ResultShares     ResultShare[]
+  User             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model AuditLog {
@@ -299,8 +429,11 @@ enum Gender {
 
 enum LabStatus {
   PENDING
+  SPECIMEN_COLLECTED
   PROCESSING
+  AWAITING_VALIDATION
   COMPLETED
+  REJECTED
 }
 enum PrescriptionStatus {
   PENDING

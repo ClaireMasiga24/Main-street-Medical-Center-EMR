@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import Image from "next/image";
+import NotificationInbox from "../components/NotificationInbox";
 import { useRouter } from "next/navigation";
 import {
   Search, UserPlus, UserCheck, ArrowRight, CheckCircle2,
@@ -261,8 +262,65 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
     setInvoiceConfirmed(false); setReceiptVisible(false); setSavedInvoiceNumber("");
   };
 
+  const waitingCashier = patients.filter(p => p.status === "AWAITING_CASHIER");
+
   return (
-    <div className="flex flex-col gap-5 lg:grid lg:grid-cols-5">
+    <div className="flex flex-col gap-5">
+      {/* ── Awaiting Cashier Queue ── */}
+      {waitingCashier.length > 0 && !selectedPatient && (
+        <div className="rounded-xl border border-amber-200 bg-white shadow-sm overflow-hidden">
+          <div className="bg-amber-50 border-b border-amber-100 px-5 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Receipt size={15} className="text-amber-600" />
+              <span className="text-xs font-extrabold uppercase tracking-widest text-amber-700">
+                Patients Awaiting Payment
+              </span>
+            </div>
+            <span className="text-xs font-bold text-amber-600 bg-amber-100 px-2.5 py-1 rounded-full">
+              {waitingCashier.length} waiting
+            </span>
+          </div>
+          <div className="divide-y divide-slate-50 max-h-56 overflow-y-auto">
+            {waitingCashier.map(p => (
+              <button
+                key={p.id}
+                onClick={() => { setSelectedPatient(p); setPatientSearch(""); setInvoiceConfirmed(false); }}
+                className="flex w-full items-center justify-between px-5 py-3 text-left hover:bg-slate-50 transition"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-xs font-bold text-amber-700 flex-shrink-0">
+                    {p.firstName[0]}{p.lastName[0]}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-slate-800 truncate">{p.lastName}, {p.firstName}</div>
+                    <div className="text-xs text-slate-400">
+                      <span className="font-mono text-amber-600">{p.patientNumber}</span>
+                      <span className="mx-1">·</span>
+                      {p.age} yrs · {p.gender}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                    Bill Now
+                  </span>
+                  <ArrowRight size={14} className="text-slate-300" />
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {waitingCashier.length === 0 && !selectedPatient && (
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-5 text-center">
+          <Receipt size={28} className="mx-auto text-slate-200 mb-2" />
+          <p className="text-sm font-medium text-slate-400">No patients awaiting payment</p>
+          <p className="text-xs text-slate-300 mt-0.5">Patients will appear here after the doctor completes a consultation</p>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-5 lg:grid lg:grid-cols-5">
       {/* ── LEFT ── */}
       <div className="space-y-4 lg:col-span-3">
         {/* Patient Selector */}
@@ -557,9 +615,10 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
             </div>
           </div>
         </div>
-      )}
-    </div>
-  );
+	      )}
+	    </div>
+	  </div>
+	  );
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
@@ -589,7 +648,13 @@ export default function ReceptionistPage() {
     }
   };
 
-  useEffect(() => { fetchActiveRegistry(); }, []);
+  useEffect(() => {
+    fetchActiveRegistry();
+    try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); if (u.id) { fetch("/api/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id }) }); } } } catch {}
+    const interval = setInterval(fetchActiveRegistry, 15_000);
+    const hb = setInterval(() => { try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); if (u.id) { fetch("/api/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id }) }); } } } catch {} }, 120000);
+    return () => { clearInterval(interval); clearInterval(hb); };
+  }, []);
 
   const normalFields = [
     { id: "firstName", label: "First Name", type: "text", required: true, placeholder: "e.g., John" },
@@ -722,8 +787,9 @@ export default function ReceptionistPage() {
               <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
               <span className="text-xs font-bold text-emerald-800 tracking-wide uppercase">Receptionist Desk Active</span>
             </div>
+            <NotificationInbox department="Reception" />
             <button
-              onClick={() => router.push("/")}
+              onClick={async () => { try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: u.id, username: u.username }) }); } } catch {} router.push("/"); }}
               className="flex items-center gap-2 rounded-full bg-red-50 px-4 py-1.5 border border-red-100 text-red-600 hover:bg-red-100 transition-all"
             >
               <LogOut size={14} />

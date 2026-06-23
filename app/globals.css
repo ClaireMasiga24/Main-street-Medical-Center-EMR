@@ -14,3 +14,34 @@ body {
   image-rendering: pixelated !important;
   image-rendering: crisp-edges !important;
 }
+
+/* ── Print styles with logo watermark ── */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    position: fixed;
+    inset: 0;
+    padding: 40px;
+    background: white;
+    z-index: 99999;
+    overflow: auto;
+  }
+  .print-area::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: url("/Images/LOGO.jpg") center / 55% auto no-repeat;
+    opacity: 0.045;
+    pointer-events: none;
+    z-index: -1;
+  }
+  @page {
+    margin: 15mm;
+  }
+}

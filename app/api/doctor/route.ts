@@ -12,11 +12,12 @@ const ROUTE_TO_STATUS: Record<string, PatientStatus> = {
   DISCHARGE:  "DISCHARGED",
 };
 
-// GET — fetch all AWAITING_DOCTOR patients (triage queue for doctors)
+// GET — fetch patients waiting for the doctor or already in consultation
+// Optimized for performance: only loads the latest visit (without heavy nested relations)
 export async function GET() {
   try {
     const patients = await prisma.patient.findMany({
-      where: { currentStatus: "AWAITING_DOCTOR" },
+      where: { currentStatus: { in: ["AWAITING_DOCTOR", "IN_CONSULTATION"] } },
       orderBy: [
         { isEmergency: "desc" },
         { updatedAt: "asc" },
@@ -24,11 +25,7 @@ export async function GET() {
       include: {
         Visit: {
           orderBy: { createdAt: "desc" },
-          take: 5,
-          include: {
-            Prescription: true,
-            LabRequest: true,
-          },
+          take: 1, // only the most recent visit is needed for the queue list
         },
       },
     });
@@ -79,6 +76,22 @@ export async function POST(req: NextRequest) {
             testName:      l.testName,
             status:        "PENDING",
           })),
+        });
+      }
+
+      // Create imaging request if routing to SONOGRAPHY or RADIOLOGY
+      if (routeTo === "SONOGRAPHY" || routeTo === "RADIOLOGY") {
+        await tx.imagingRequest.create({
+          data: {
+            patientId,
+            visitId:        visit.id,
+            requestedById:  staffId ?? undefined,
+            studyType:      routeTo === "SONOGRAPHY" ? "ULTRASOUND" : "X_RAY",
+            priority:       "ROUTINE",
+            referralSource: "DOCTOR",
+            clinicalNotes:  symptoms || null,
+            status:         "ORDERED",
+          },
         });
       }
 

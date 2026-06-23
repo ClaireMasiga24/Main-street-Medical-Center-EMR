@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
+import NotificationInbox from "../components/NotificationInbox";
 import { Activity, Baby, FileText, LogOut, Printer, PlusCircle, Trash2, RefreshCw, Phone, User, Clock, AlertTriangle, X, Thermometer, Droplets, Heart, Wind, Scale, Ruler, Eye, AlertCircle, Stethoscope, ArrowRight, CheckCircle, Save, ClipboardList } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -187,8 +188,10 @@ export default function NurseMidwifeDashboard() {
   // Fetch on mount, then auto-refresh every 15 seconds
   useEffect(() => {
     fetchTriagePatients();
+    try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); if (u.id) { fetch("/api/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id }) }); } } } catch {}
     const interval = setInterval(fetchTriagePatients, 15_000);
-    return () => clearInterval(interval);
+    const hb = setInterval(() => { try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); if (u.id) { fetch("/api/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id }) }); } } } catch {} }, 120000);
+    return () => { clearInterval(interval); clearInterval(hb); };
   }, [fetchTriagePatients]);
 
   return (
@@ -217,7 +220,8 @@ export default function NurseMidwifeDashboard() {
           ))}
         </nav>
 
-        <button onClick={() => router.push("/")} style={{ backgroundColor: '#b91c1c', color: 'white', padding: '16px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', width: '100%' }}>
+        <div style={{ marginBottom: '8px' }}><NotificationInbox department="Nurse/Midwife" /></div>
+        <button onClick={async () => { try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: u.id, username: u.username }) }); } } catch {} router.push("/"); }} style={{ backgroundColor: '#b91c1c', color: 'white', padding: '16px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', width: '100%' }}>
           <LogOut size={18} style={{ marginRight: '8px' }} /> Logout
         </button>
       </aside>
