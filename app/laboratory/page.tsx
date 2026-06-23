@@ -196,6 +196,17 @@ export default function LaboratoryPage() {
   const [sortField, setSortField] = useState<string>("createdAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
+  // Lab Records view
+  const [showLabRecords, setShowLabRecords] = useState(false);
+  const [allLabRecords, setAllLabRecords] = useState<LabRequestItem[]>([]);
+  const [labRecordsLoading, setLabRecordsLoading] = useState(false);
+  const [labRecordsSearch, setLabRecordsSearch] = useState("");
+  const [labRecordsStatusFilter, setLabRecordsStatusFilter] = useState("");
+  const [labRecordsPriorityFilter, setLabRecordsPriorityFilter] = useState("");
+  const [labRecordsPage, setLabRecordsPage] = useState(1);
+  const [labRecordsTotal, setLabRecordsTotal] = useState(0);
+  const RECORDS_PER_PAGE = 50;
+
   // ── Auth ────────────────────────────────────────────────────────────
   useEffect(() => {
     const storedUser = localStorage.getItem("user") || sessionStorage.getItem("user");
@@ -232,6 +243,19 @@ export default function LaboratoryPage() {
       const data = await res.json();
       if (data.success) setPersistedNotifs(data.notifications);
     } catch {}
+  }, []);
+
+  const fetchAllLabRecords = useCallback(async () => {
+    setLabRecordsLoading(true);
+    try {
+      const res = await fetch("/api/laboratory?all=true");
+      const data = await res.json();
+      if (data.success) {
+        setAllLabRecords(data.requests);
+        setLabRecordsTotal(data.requests.length);
+      }
+    } catch (err: any) { console.error("Failed to fetch lab records", err); }
+    finally { setLabRecordsLoading(false); }
   }, []);
 
   useEffect(() => {
@@ -287,7 +311,7 @@ export default function LaboratoryPage() {
   // ── Logout ──────────────────────────────────────────────────────────
   const handleLogout = async () => {
     try { await fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: user?.id, username: user?.username }) }); } catch {}
-    localStorage.removeItem("user"); sessionStorage.removeItem("user"); router.push("/login");
+    localStorage.removeItem("user"); sessionStorage.removeItem("user"); router.push("/");
   };
 
   // ── Filtering & Sorting ─────────────────────────────────────────────
@@ -438,7 +462,7 @@ export default function LaboratoryPage() {
             const Icon = tab.icon;
             const count = tabCounts[tab.key] || 0;
             return (
-              <button key={tab.key} onClick={() => { setActiveTab(tab.key); setDetailView(false); setSidebarOpen(false); }}
+              <button key={tab.key} onClick={() => { setShowLabRecords(false); setActiveTab(tab.key); setDetailView(false); setSidebarOpen(false); }}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all text-left ${activeTab === tab.key ? "bg-white text-[#00703C] shadow-sm" : "text-white/80 hover:bg-white/10 hover:text-white"}`}
               >
                 <Icon size={18} />
@@ -460,6 +484,10 @@ export default function LaboratoryPage() {
             <button onClick={() => setShowStatsPanel(true)}
               className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-white/80 hover:bg-white/10 hover:text-white transition-all">
               <BarChart3 size={18} /> Performance Stats
+            </button>
+            <button onClick={() => { setShowLabRecords(true); setDetailView(false); setSelectedRequest(null); fetchAllLabRecords(); }}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-white/80 hover:bg-white/10 hover:text-white transition-all">
+              <History size={18} /> Lab Records
             </button>
           </div>
         </div>
@@ -603,11 +631,11 @@ ld                Welcome to Main Street Medical Centre Laboratory System, <stro
             {/* View toggle + bulk actions */}
             <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
               <div className="flex items-center gap-2">
-                <button onClick={() => setViewMode("cards")}
+                <button onClick={() => { setShowLabRecords(false); setViewMode("cards"); }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${viewMode === "cards" ? "bg-[#00703C] text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
                   <GripHorizontal size={13} /> Card View
                 </button>
-                <button onClick={() => setViewMode("table")}
+                <button onClick={() => { setShowLabRecords(false); setViewMode("table"); }}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${viewMode === "table" ? "bg-[#00703C] text-white" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}>
                   <Table2 size={13} /> Worklist Table
                 </button>
@@ -636,7 +664,27 @@ ld                Welcome to Main Street Medical Centre Laboratory System, <stro
             </div>
           )}
 
-          {detailView && selectedRequest ? (
+          {showLabRecords ? (
+            <LabRecordsView
+              records={allLabRecords}
+              isLoading={labRecordsLoading}
+              search={labRecordsSearch}
+              setSearch={setLabRecordsSearch}
+              statusFilter={labRecordsStatusFilter}
+              setStatusFilter={setLabRecordsStatusFilter}
+              priorityFilter={labRecordsPriorityFilter}
+              setPriorityFilter={setLabRecordsPriorityFilter}
+              page={labRecordsPage}
+              setPage={setLabRecordsPage}
+              perPage={RECORDS_PER_PAGE}
+              total={labRecordsTotal}
+              onRefresh={fetchAllLabRecords}
+              onSelectRequest={(r: LabRequestItem) => { setSelectedRequest(r); setDetailView(true); setShowLabRecords(false); }}
+              formatDate={formatDateShort}
+              formatDuration={formatDuration}
+              tatStatusClass={tatStatusClass}
+            />
+          ) : detailView && selectedRequest ? (
             <LabRequestDetail
               request={selectedRequest}
               onBack={() => { setDetailView(false); setSelectedRequest(null); }}
@@ -1398,6 +1446,216 @@ function ReportPreviewModal({ request, onClose, formatDate, handlePrint }: any) 
           <div className="border-t-2 border-slate-200 pt-6"><div className="grid grid-cols-3 gap-8 text-center"><div><div className="border-t border-slate-300 mt-8 mb-1" /><p className="text-xs font-bold">Technician</p><p className="text-xs text-slate-400">{request.enteredByName || "—"}</p></div><div><div className="border-t border-slate-300 mt-8 mb-1" /><p className="text-xs font-bold">Validator</p><p className="text-xs text-slate-400">{request.validatedByName || "—"}</p></div><div><div className="border-t border-slate-300 mt-8 mb-1" /><p className="text-xs font-bold">Authorized</p><p className="text-xs text-slate-400">MSMC</p></div></div></div>
           <div className="mt-6 text-center text-[9px] text-slate-400">Main Street Medical Center &bull; Report {new Date().toLocaleString("en-UG")}</div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+// LAB RECORDS VIEW — Complete archive of everything the lab has ever worked on
+// ═══════════════════════════════════════════════════════════════════════════════════════════════════
+function LabRecordsView({
+  records, isLoading, search, setSearch,
+  statusFilter, setStatusFilter, priorityFilter, setPriorityFilter,
+  page, setPage, perPage, total, onRefresh,
+  onSelectRequest, formatDate, formatDuration, tatStatusClass,
+}: any) {
+  const statusBadge = (st: string) => {
+    const colors: Record<string, string> = {
+      PENDING: "bg-amber-100 text-amber-700", SPECIMEN_COLLECTED: "bg-blue-100 text-blue-700",
+      PROCESSING: "bg-indigo-100 text-indigo-700", AWAITING_VALIDATION: "bg-purple-100 text-purple-700",
+      COMPLETED: "bg-green-100 text-green-700", REJECTED: "bg-red-100 text-red-700",
+    };
+    return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${colors[st] || "bg-slate-100 text-slate-600"}`}>{st.replace(/_/g, " ")}</span>;
+  };
+
+  // Filter and sort
+  const filtered = useMemo(() => {
+    let items = [...records];
+    if (search) {
+      const q = search.toLowerCase();
+      items = items.filter((r: LabRequestItem) =>
+        [r.patientNumber, r.firstName, r.lastName, `${r.firstName} ${r.lastName}`,
+          r.testName, r.testPanel, r.specimenId, r.specimenType, r.priority,
+          r.status, r.referralSource, r.requestedBy, r.requestedDepartment,
+          r.enteredByName, r.validatedByName, r.collectedByName,
+        ].some(f => f && f.toLowerCase().includes(q))
+      );
+    }
+    if (statusFilter) items = items.filter((r: LabRequestItem) => r.status === statusFilter);
+    if (priorityFilter) items = items.filter((r: LabRequestItem) => r.priority === priorityFilter);
+    items.sort((a: LabRequestItem, b: LabRequestItem) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return items;
+  }, [records, search, statusFilter, priorityFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
+  const safePage = Math.min(page, totalPages);
+  const paged = filtered.slice((safePage - 1) * perPage, safePage * perPage);
+
+  const allStatuses = records.reduce((acc: string[], r: LabRequestItem) => {
+    const s = r.status as string;
+    if (!acc.includes(s)) acc.push(s);
+    return acc;
+  }, []);
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-800 flex items-center gap-3">
+            <History size={28} className="text-[#00703C]" />
+            Lab Records Archive
+          </h1>
+          <p className="text-slate-500 text-sm mt-1">
+            Complete history &mdash; <strong className="text-[#00703C]">{total}</strong> total records
+          </p>
+        </div>
+        <button onClick={onRefresh} disabled={isLoading}
+          className="flex items-center gap-2 bg-white border border-slate-200 hover:border-[#00703C] text-slate-700 px-4 py-2.5 rounded-xl font-semibold text-sm transition shadow-sm">
+          <RefreshCw size={15} className={isLoading ? "animate-spin" : ""} /> Refresh
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="relative md:col-span-2">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              placeholder="Search patient, test, specimen, doctor..."
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-10 text-sm font-medium outline-none transition focus:border-[#00703C] focus:bg-white" />
+            {search && <button onClick={() => { setSearch(""); setPage(1); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><XCircle size={16} /></button>}
+          </div>
+          <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold outline-none focus:border-[#00703C] focus:bg-white">
+            <option value="">All Statuses</option>
+            {allStatuses.map((s: string) => (<option key={s} value={s}>{s.replace(/_/g, " ")}</option>))}
+          </select>
+          <select value={priorityFilter} onChange={(e) => { setPriorityFilter(e.target.value); setPage(1); }}
+            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold outline-none focus:border-[#00703C] focus:bg-white">
+            <option value="">All Priorities</option>
+            <option value="ROUTINE">Routine</option>
+            <option value="URGENT">Urgent</option>
+            <option value="STAT">STAT</option>
+          </select>
+        </div>
+        <div className="text-xs text-slate-400 mt-3">
+          Showing {filtered.length > 0 ? (safePage - 1) * perPage + 1 : 0}&ndash;{Math.min(safePage * perPage, filtered.length)} of {filtered.length} records
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        {isLoading ? (
+          <div className="p-16 text-center">
+            <RefreshCw size={36} className="mx-auto text-slate-200 mb-4 animate-spin" />
+            <p className="font-bold text-slate-400">Loading all lab records…</p>
+          </div>
+        ) : paged.length === 0 ? (
+          <div className="p-16 text-center">
+            <History size={48} className="mx-auto text-slate-200 mb-4" />
+            <p className="font-bold text-slate-400 text-lg">No records found</p>
+            <p className="text-slate-400 text-sm mt-1">Try adjusting your search or filters</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">#</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Date</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Patient</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Test / Panel</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Clinician</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Dept</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Specimen</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Priority</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">TAT</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paged.map((req: LabRequestItem, idx: number) => {
+                  const created = req.createdAt;
+                  const collected = req.specimenCollectedAt;
+                  const tatDisplay = req.status === "COMPLETED" && req.validatedAt
+                    ? formatDuration(created, req.validatedAt)
+                    : req.processingStartedAt
+                      ? formatDuration(req.processingStartedAt, new Date().toISOString())
+                      : collected
+                        ? formatDuration(collected, new Date().toISOString())
+                        : formatDuration(created, new Date().toISOString());
+
+                  return (
+                    <tr key={req.id} onClick={() => onSelectRequest(req)}
+                      className={`border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition ${req.isCritical ? "bg-red-50/50" : ""}`}>
+                      <td className="px-3 py-3 text-xs text-slate-400 font-mono">{(safePage - 1) * perPage + idx + 1}</td>
+                      <td className="px-3 py-3 text-[11px] text-slate-500 whitespace-nowrap">{formatDate(req.createdAt)}</td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-slate-800">{req.lastName}, {req.firstName}</span>
+                          {req.isEmergency && <AlertTriangle size={10} className="text-red-500" />}
+                          {req.isCritical && <ShieldAlert size={10} className="text-red-600" />}
+                        </div>
+                        <span className="text-[10px] text-slate-400">{req.patientNumber} &middot; {req.gender} &middot; {req.age}y</span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className="font-semibold text-slate-700 text-xs">{req.testName}</span>
+                        {req.testPanel && <div className="text-[10px] text-slate-400">{req.testPanel}</div>}
+                      </td>
+                      <td className="px-3 py-3 text-xs text-slate-600">{req.requestedBy}</td>
+                      <td className="px-3 py-3">
+                        <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">{req.referralSource || "—"}</span>
+                      </td>
+                      <td className="px-3 py-3">
+                        {req.specimenId ? (
+                          <div>
+                            <span className="font-mono text-[10px] font-bold text-amber-600">{req.specimenId}</span>
+                            {req.specimenType && <div className="text-[10px] text-slate-400">{req.specimenType}</div>}
+                          </div>
+                        ) : <span className="text-xs text-slate-400">—</span>}
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${PRIORITY_COLORS[req.priority] || ""}`}>{req.priority}</span>
+                      </td>
+                      <td className="px-3 py-3">{statusBadge(req.status)}</td>
+                      <td className="px-3 py-3">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${tatStatusClass ? tatStatusClass(created, req.status, req.priority) : ""}`}>
+                          {tatDisplay}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {!isLoading && totalPages > 1 && (
+          <div className="bg-slate-50 px-4 py-3 border-t border-slate-200 flex items-center justify-between">
+            <span className="text-xs text-slate-400">
+              Page {safePage} of {totalPages}
+            </span>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setPage(Math.max(1, safePage - 1))} disabled={safePage <= 1}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 hover:border-[#00703C] disabled:opacity-40 disabled:cursor-not-allowed transition">
+                Previous
+              </button>
+              <button onClick={() => setPage(Math.min(totalPages, safePage + 1))} disabled={safePage >= totalPages}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 hover:border-[#00703C] disabled:opacity-40 disabled:cursor-not-allowed transition">
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+        {!isLoading && (
+          <div className="bg-slate-50 px-4 py-2 text-xs text-slate-400 border-t border-slate-200">
+            {filtered.length} record{filtered.length !== 1 ? "s" : ""} &middot; Click a row to view full details
+          </div>
+        )}
       </div>
     </div>
   );

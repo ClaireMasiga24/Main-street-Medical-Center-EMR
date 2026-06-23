@@ -103,11 +103,12 @@ export async function GET(req: Request) {
     }
 
     // Default: fetch all requests
+    const allParam = url.searchParams.get("all");
     const where: Prisma.LabRequestWhereInput = {};
     if (status) where.status = status as any;
 
     const requests = await prisma.labRequest.findMany({
-      take: 500,
+      take: allParam === "true" ? undefined : 500,
       where,
       include: {
         Patient: { select: { patientNumber: true, firstName: true, lastName: true, age: true, gender: true, isEmergency: true } },
