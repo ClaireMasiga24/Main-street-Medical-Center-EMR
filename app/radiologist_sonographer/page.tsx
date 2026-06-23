@@ -166,6 +166,12 @@ export default function RadiologyDashboard() {
   // ── Stats ─────────────────────────────────────────────────────────────
   const [stats, setStats] = useState({ total: 0, pending: 0, inProgress: 0, awaitingReport: 0, reported: 0, critical: 0 });
 
+  // ── Appointments ──────────────────────────────────────────────────────
+  const [radAppts, setRadAppts] = useState<any[]>([]);
+  const [radApptDate, setRadApptDate] = useState(new Date().toISOString().split("T")[0]);
+  const [radApptFilter, setRadApptFilter] = useState("all");
+  const [radApptLoading, setRadApptLoading] = useState(false);
+
   // ── Sidebar ───────────────────────────────────────────────────────────
   const [sidebarTab, setSidebarTab] = useState("worklist");
 
@@ -204,6 +210,21 @@ export default function RadiologyDashboard() {
       setIsLoading(false);
     }
   }, [buildQueryString]);
+
+  const fetchRadAppointments = useCallback(async () => {
+    setRadApptLoading(true);
+    try {
+      const params = new URLSearchParams({ department: "Radiology", date: radApptDate });
+      if (radApptFilter !== "all") params.set("status", radApptFilter.toUpperCase());
+      const res = await fetch(`/api/appointments?${params}`);
+      const data = await res.json();
+      setRadAppts(data.appointments ?? []);
+    } catch { setRadAppts([]); }
+    finally { setRadApptLoading(false); }
+  }, [radApptDate, radApptFilter]);
+
+  useEffect(() => { fetchRadAppointments(); }, [fetchRadAppointments]);
+  useEffect(() => { const i = setInterval(fetchRadAppointments, 15_000); return () => clearInterval(i); }, [fetchRadAppointments]);
 
   useEffect(() => {
     fetchRequests();
@@ -405,6 +426,20 @@ export default function RadiologyDashboard() {
               </button>
             );
           })}
+          <button onClick={() => setSidebarTab("appointments")}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", gap: "12px", padding: "12px 14px",
+              borderRadius: "10px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: sidebarTab === "appointments" ? "bold" : "500",
+              backgroundColor: sidebarTab === "appointments" ? "rgba(255,255,255,0.18)" : "transparent",
+              color: "#fff", textAlign: "left", marginTop: "4px",
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={e => (e.target as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.18)"}
+            onMouseLeave={e => (e.target as HTMLElement).style.backgroundColor = sidebarTab === "appointments" ? "rgba(255,255,255,0.18)" : "transparent"}
+          >
+            <Calendar size={18} />
+            <span style={{ flex: 1 }}>Appointments</span>
+          </button>
         </nav>
 
         <div style={{ padding: "16px", borderTop: "1px solid rgba(255,255,255,0.12)" }}>
@@ -520,8 +555,102 @@ export default function RadiologyDashboard() {
           </div>
         )}
 
-        {/* ── Status Tabs ──────────────────────────────────────────────────── */}
-        <div style={{ display: "flex", gap: "0", padding: "0 28px", borderBottom: "2px solid #e2e8f0" }}>
+        {/* ── APPOINTMENTS VIEW ──────────────────────────────────────────── */}
+        {sidebarTab === "appointments" && (
+          <div style={{ flex: 1, overflowY: "auto", padding: "20px 28px", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", gap: "12px", alignItems: "center", marginBottom: "16px", flexWrap: "wrap" }}>
+              <input type="date" value={radApptDate} onChange={e => setRadApptDate(e.target.value)}
+                style={{ fontSize: "13px", padding: "8px 12px", borderRadius: "8px", border: "1px solid #d0d5dd", outline: "none" }} />
+              <select value={radApptFilter} onChange={e => setRadApptFilter(e.target.value)}
+                style={{ fontSize: "13px", padding: "8px 12px", borderRadius: "8px", border: "1px solid #d0d5dd", outline: "none" }}>
+                <option value="all">All Statuses</option>
+                <option value="pending">Pending</option>
+                <option value="confirmed">Confirmed</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+              <span style={{ fontSize: "12px", color: "#94a3b8", marginLeft: "auto" }}>{radAppts.length} appointment(s)</span>
+            </div>
+
+            <div style={{ backgroundColor: "white", borderRadius: "12px", border: "1px solid #e2e8f0", overflow: "hidden" }}>
+              <div style={{ padding: "14px 20px", borderBottom: "1px solid #e2e8f0", backgroundColor: "#f8fafc" }}>
+                <span style={{ fontSize: "12px", fontWeight: "bold", color: "#64748b", textTransform: "uppercase" }}>
+                  {new Date(radApptDate + "T12:00:00").toLocaleDateString("en-UG", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                </span>
+              </div>
+
+              {radApptLoading ? (
+                <div style={{ padding: "60px 20px", textAlign: "center", color: "#94a3b8" }}>
+                  <Loader2 size={20} style={{ display: "inline", verticalAlign: "middle", marginRight: "8px" }} /> Loading appointments...
+                </div>
+              ) : radAppts.length === 0 ? (
+                <div style={{ padding: "60px 20px", textAlign: "center", color: "#94a3b8" }}>
+                  <Calendar size={40} style={{ margin: "0 auto 12px", display: "block", opacity: 0.4 }} />
+                  <p style={{ fontWeight: "bold", fontSize: "14px" }}>No appointments for this date</p>
+                  <p style={{ fontSize: "12px", marginTop: "4px" }}>Appointments can be scheduled from Reception</p>
+                </div>
+              ) : (
+                <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                  {radAppts.map((a: any) => (
+                    <li key={a.id} style={{ display: "flex", alignItems: "center", gap: "16px", padding: "14px 20px", borderBottom: "1px solid #f8fafc", cursor: "default" }}>
+                      <div style={{
+                        width: "40px", height: "40px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: "14px", fontWeight: "bold", flexShrink: 0,
+                        backgroundColor: a.status === "CANCELLED" ? "#fecaca" : a.status === "COMPLETED" ? "#bbf7d0" : a.status === "CONFIRMED" ? "#bfdbfe" : "#fde68a",
+                        color: a.status === "CANCELLED" ? "#b91c1c" : a.status === "COMPLETED" ? "#166534" : a.status === "CONFIRMED" ? "#1e40af" : "#92400e",
+                      }}>
+                        {a.Patient?.firstName?.[0]}{a.Patient?.lastName?.[0]}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          <span style={{ fontSize: "14px", fontWeight: "bold", color: "#1e293b" }}>
+                            {a.Patient?.lastName}, {a.Patient?.firstName}
+                          </span>
+                          <span style={{
+                            fontSize: "10px", padding: "1px 8px", borderRadius: "10px", fontWeight: "bold",
+                            backgroundColor: a.status === "CANCELLED" ? "#fef2f2" : a.status === "COMPLETED" ? "#f0fdf4" : a.status === "CONFIRMED" ? "#eff6ff" : "#fffbeb",
+                            color: a.status === "CANCELLED" ? "#b91c1c" : a.status === "COMPLETED" ? "#166534" : a.status === "CONFIRMED" ? "#1e40af" : "#92400e",
+                          }}>
+                            {a.status}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: "12px", color: "#94a3b8", marginTop: "2px" }}>
+                          {a.Patient?.patientNumber} · {new Date(a.appointmentDate).toLocaleTimeString("en-UG", { hour: "2-digit", minute: "2-digit" })}
+                          {a.Patient?.phoneNumber && ` · ${a.Patient.phoneNumber}`}
+                        </div>
+                        {a.reason && <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>{a.reason}</div>}
+                        {a.notes && <div style={{ fontSize: "11px", color: "#94a3b8", marginTop: "2px", fontStyle: "italic" }}>{a.notes}</div>}
+                      </div>
+                      <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
+                        {a.status === "PENDING" && (
+                          <button onClick={async () => {
+                            await fetch("/api/appointments", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: a.id, status: "CONFIRMED" }) });
+                            setRadAppts((prev: any[]) => prev.map(x => x.id === a.id ? { ...x, status: "CONFIRMED" } : x));
+                          }}
+                            style={{ fontSize: "10px", padding: "6px 10px", borderRadius: "6px", border: "none", backgroundColor: "#dbeafe", color: "#1e40af", cursor: "pointer", fontWeight: "bold" }}>
+                            Confirm
+                          </button>
+                        )}
+                        {a.status !== "COMPLETED" && a.status !== "CANCELLED" && (
+                          <button onClick={async () => {
+                            await fetch(`/api/appointments?id=${a.id}`, { method: "DELETE" });
+                            setRadAppts((prev: any[]) => prev.map(x => x.id === a.id ? { ...x, status: "CANCELLED" } : x));
+                          }}
+                            style={{ fontSize: "10px", padding: "6px 10px", borderRadius: "6px", border: "none", backgroundColor: "#fef2f2", color: "#b91c1c", cursor: "pointer", fontWeight: "bold" }}>
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Status Tabs (hidden when viewing appointments) ──────────────── */}
+        {sidebarTab !== "appointments" && (<div style={{ display: "flex", gap: "0", padding: "0 28px", borderBottom: "2px solid #e2e8f0" }}>
           {STATUS_TABS.map(tab => {
             const isActive = statusFilter === tab.value;
             const tabCount = tab.value === "" ? stats.total
@@ -549,7 +678,7 @@ export default function RadiologyDashboard() {
               </button>
             );
           })}
-        </div>
+        </div>)}
 
         {/* ── Content Area ─────────────────────────────────────────────────── */}
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>

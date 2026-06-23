@@ -15,6 +15,15 @@ body {
   image-rendering: crisp-edges !important;
 }
 
+/* ── Mobile sidebar slide-in animation ── */
+@keyframes slide-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+.animate-slide-in {
+  animation: slide-in 0.2s ease-out;
+}
+
 /* ── Print styles with logo watermark ── */
 @media print {
   body * {
@@ -36,8 +45,8 @@ body {
     content: "";
     position: fixed;
     inset: 0;
-    background: url("/Images/LOGO.jpg") center / 55% auto no-repeat;
-    opacity: 0.045;
+    background: url("/Images/LOGO.jpg") center / 50% auto no-repeat;
+    opacity: 0.08;
     pointer-events: none;
     z-index: -1;
   }

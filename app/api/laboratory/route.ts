@@ -111,14 +111,14 @@ export async function GET(req: Request) {
       take: allParam === "true" ? undefined : 500,
       where,
       include: {
-        Patient: { select: { patientNumber: true, firstName: true, lastName: true, age: true, gender: true, isEmergency: true } },
+        Patient: { select: { id: true, patientNumber: true, firstName: true, lastName: true, age: true, gender: true, isEmergency: true } },
         Staff: { select: { fullName: true, department: true } },
       },
       orderBy: [{ isCritical: "desc" }, { createdAt: "desc" }],
     });
 
     const shaped = requests.map((r) => ({
-      id: r.id, patientNumber: r.Patient.patientNumber, firstName: r.Patient.firstName,
+      id: r.id, patientId: r.Patient.id, patientNumber: r.Patient.patientNumber, firstName: r.Patient.firstName,
       lastName: r.Patient.lastName, age: r.Patient.age, gender: r.Patient.gender,
       isEmergency: r.Patient.isEmergency, testName: r.testName, testPanel: r.testPanel,
       priority: r.priority, referralSource: r.referralSource,

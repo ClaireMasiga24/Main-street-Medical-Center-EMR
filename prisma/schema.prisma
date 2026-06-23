@@ -52,14 +52,32 @@ model Patient {
   CriticalNotifications CriticalNotification[]
   LabCommunications     LabCommunication[]
   ResultShares          ResultShare[]
+  OdontogramFinding OdontogramFinding[]
+  DentalProcedure   DentalProcedure[]
+  DentalImage       DentalImage[]
+  PatientTimeline   PatientTimeline[]
 }
 
 model Visit {
   id        Int      @id @default(autoincrement())
   patientId Int
-  symptoms  String?  @db.Text
-  diagnosis String?  @db.Text
+
+  // ── Chief Complaint & History ──────────────────────────────────────
+  symptoms              String?  @db.Text  // Also serves as Chief Complaint / Reason for visit
+  historyOfPresentIllness String? @db.Text
+  pastMedicalHistory    String?  @db.Text  // Combined past medical & surgical history
+  reviewOfOtherSystems  String?  @db.Text
+
+  // ── Examination & Diagnosis ────────────────────────────────────────
+  physicalExamination   String?  @db.Text
+  diagnosis             String?  @db.Text
+  differentialDiagnosis String?  @db.Text
+  assessment            String?  @db.Text
+  treatmentPlan         String?  @db.Text
+
+  // ── Clinical Notes ─────────────────────────────────────────────────
   notes     String?  @db.Text
+  doctorSignature String? @db.Text
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   Patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
@@ -69,6 +87,7 @@ model Visit {
   Prescription Prescription[]
   Billing      Billing[]
   DentalRecord DentalRecord[]
+  DentalProcedure DentalProcedure[]
   Triage       Triage[]
   ImagingRequest ImagingRequest[]
 }
@@ -174,30 +193,284 @@ model ImagingRequest {
 }
 
 model DentalRecord {
+  id                    Int               @id @default(autoincrement())
+  patientId             Int
+  visitId               Int?
+  staffId               Int?
+  reportNumber          String?
+
+  // ── Chief Complaint & History ──────────────────────────────────────────
+  chiefComplaint        String?           @db.Text
+  historyOfPresentIllness String?         @db.Text
+  pastDentalHistory     String?           @db.Text
+  medicalHistory        String?           @db.Text
+  allergies             String?           @db.Text
+
+  // ── Vital Signs ────────────────────────────────────────────────────────
+  temperature           Float?
+  bpSystolic            Int?
+  bpDiastolic           Int?
+  heartRate             Int?
+  respiratoryRate       Int?
+  spo2                  Int?
+  weight                Float?
+
+  // ── Clinical Examination ───────────────────────────────────────────────
+  clinicalExamination   String?           @db.Text
+  extraoralExam         String?           @db.Text
+  intraoralExam         String?           @db.Text
+  periodontalFindings   String?           @db.Text
+  oralHygieneAssessment String?           @db.Text
+
+  // ── Diagnosis & Treatment ──────────────────────────────────────────────
+  diagnosis             String?           @db.Text
+  icdCodes              String?           @db.Text  // JSON array
+  treatmentPlan         String?           @db.Text
+  proceduresPerformed   String?           @db.Text  // JSON array of procedure IDs
+  prescribedMedications String?           @db.Text  // JSON array of prescriptions
+
+  // ── Follow-Up ──────────────────────────────────────────────────────────
+  followUpInstructions  String?           @db.Text
+  reviewAppointment     DateTime?
+  reviewNotes           String?           @db.Text
+
+  // ── General Notes & Status ──────────────────────────────────────────────
+  notes                 String?           @db.Text
+  status                String            @default("COMPLETED") // COMPLETED | FOLLOW_UP | REFERRED
+
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  Patient               Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Visit                 Visit?            @relation(fields: [visitId], references: [id])
+  Staff                 Staff?            @relation(fields: [staffId], references: [id])
+  OdontogramFinding     OdontogramFinding[]
+  DentalProcedure       DentalProcedure[]
+  DentalImage           DentalImage[]
+}
+
+model OdontogramFinding {
+  id               Int      @id @default(autoincrement())
+  dentalRecordId   Int
+  patientId        Int
+
+  // ── Tooth Identification (Universal numbering 1-32) ─────────────────────
+  toothNumber      Int      // 1-32 (ADA Universal)
+  quadrant         Int      // 1=UR, 2=UL, 3=LL, 4=LR
+  toothType        String   // INCISOR | CANINE | PREMOLAR | MOLAR
+
+  // ── Tooth Status Flags ─────────────────────────────────────────────────
+  isPresent        Boolean  @default(true)
+  isMissing        Boolean  @default(false)
+  isExtracted      Boolean  @default(false)
+  isImpacted       Boolean  @default(false)
+  isUnerupted      Boolean  @default(false)
+
+  // ── Caries ─────────────────────────────────────────────────────────────
+  cariesMesial     Boolean  @default(false)
+  cariesDistal     Boolean  @default(false)
+  cariesBuccal     Boolean  @default(false)
+  cariesLingual    Boolean  @default(false)
+  cariesOcclusal   Boolean  @default(false)
+  cariesCervical   Boolean  @default(false)
+  cariesExtensive  Boolean  @default(false) // Large/compound lesion
+
+  // ── Restorations ───────────────────────────────────────────────────────
+  restorationMesial   Boolean @default(false)
+  restorationDistal   Boolean @default(false)
+  restorationBuccal   Boolean @default(false)
+  restorationLingual  Boolean @default(false)
+  restorationOcclusal Boolean @default(false)
+  restorationType     String? // AMALGAM | COMPOSITE | GLASS_IONOMER | TEMPORARY | OTHER
+  restorationMaterial String?
+
+  // ── Crown & Bridge ─────────────────────────────────────────────────────
+  hasCrown          Boolean @default(false)
+  crownType         String? // FULL_METAL | PFM | ALL_CERAMIC | ZIRCONIA | TEMPORARY | OTHER
+  isBridgeAbutment  Boolean @default(false)
+  bridgePONTIC      Boolean @default(false) // This tooth is a pontic (false tooth)
+  bridgeConnectedTo Int?    // Tooth number connected to
+
+  // ── Implant ────────────────────────────────────────────────────────────
+  hasImplant        Boolean @default(false)
+  implantType       String? // SINGLE | MULTI_UNIT | FULL_ARCH
+  implantDate       DateTime?
+
+  // ── Endodontics ────────────────────────────────────────────────────────
+  hasRootCanal      Boolean @default(false)
+  rootCanalCompleted Boolean @default(false)
+  rootCanalTreated  Boolean @default(false) // Already treated in past
+  postAndCore       Boolean @default(false)
+  periapicalPathology Boolean @default(false)
+
+  // ── Fracture & Trauma ─────────────────────────────────────────────────
+  hasFracture       Boolean @default(false)
+  fractureType      String? // CRAZE_LINE | CUSP | CRACKED_TOOTH | SPLIT_TOOTH | VERTICAL_ROOT | CROWN_FRACTURE | ROOT_FRACTURE
+  isTraumatized     Boolean @default(false)
+  hasMobility       Boolean @default(false)
+  mobilityGrade     Int?    // 0-3
+  hasAvulsion       Boolean @default(false)
+
+  // ── Periodontal ────────────────────────────────────────────────────────
+  probingDepthMesial    Float?
+  probingDepthDistal    Float?
+  probingDepthBuccal    Float?
+  probingDepthLingual   Float?
+  bleedingOnProbing     Boolean @default(false)
+  gingivalRecession     Float?
+  furcationInvolvement  Boolean @default(false)
+  furcationGrade        Int?    // 1-3
+  clinicalAttachmentLevel Float?
+
+  // ── Abutment ──────────────────────────────────────────────────────────
+  isAbutmentForPartial  Boolean @default(false)
+  isAbutmentForDenture  Boolean @default(false)
+
+  // ── Notes ──────────────────────────────────────────────────────────────
+  notes             String?  @db.Text
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  DentalRecord      DentalRecord @relation(fields: [dentalRecordId], references: [id], onDelete: Cascade)
+  Patient           Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([dentalRecordId])
+  @@index([patientId])
+  @@index([toothNumber])
+}
+
+model DentalProcedure {
+  id              Int      @id @default(autoincrement())
+  dentalRecordId  Int
+  patientId       Int
+  visitId         Int?
+
+  // ── Procedure Details ──────────────────────────────────────────────────
+  procedureType   String   // EXTRACTION | FILLING | SCALING | RCT | CROWN | BRIDGE | DENTURE | IMPLANT | PERIODONTAL | ORAL_SURGERY | PROPHYLAXIS | FLUORIDE | SEALANT | BLEACHING | VENEER | OTHER
+  procedureName   String
+  toothNumbers    String?  // JSON array of tooth numbers
+  arch            String?  // UPPER | LOWER | BOTH
+  quadrant        Int?
+
+  // ── Clinical Details ───────────────────────────────────────────────────
+  diagnosis       String?  @db.Text
+  findings         String? @db.Text
+  technique        String? @db.Text
+  materials        String? @db.Text
+  complications    String? @db.Text
+  outcome          String?  // SUCCESSFUL | PARTIAL | FAILED | ABANDONED
+  notes            String?  @db.Text
+
+  // ── Anaesthesia ────────────────────────────────────────────────────────
+  anaesthesiaType   String? // LOCAL | GENERAL | CONSCIOUS_SEDATION | NONE
+  anaesthesiaAgent  String?
+  anaesthesiaDetails String? @db.Text
+
+  // ── Billing ────────────────────────────────────────────────────────────
+  fee               Float?
+  isCompleted       Boolean  @default(true)
+  performedBy       Int?     // Staff ID
+  performedByName   String?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  DentalRecord      DentalRecord @relation(fields: [dentalRecordId], references: [id], onDelete: Cascade)
+  Patient           Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Visit             Visit?       @relation(fields: [visitId], references: [id])
+}
+
+model DentalImage {
+  id              Int      @id @default(autoincrement())
+  dentalRecordId  Int
+  patientId       Int
+
+  // ── Image Type ─────────────────────────────────────────────────────────
+  imageType       String   // INTRAORAL | PANORAMIC | BITEWING | PERIAPICAL | CEPHALOMETRIC | CBCT | OCCLUSAL | EXTRAORAL | OTHER
+  imageSubType    String?  // FRONTAL | RIGHT_LATERAL | LEFT_LATERAL | UPPER_OCCLUSAL | LOWER_OCCLUSAL | RIGHT_POSTERIOR | LEFT_POSTERIOR | OTHER
+
+  // ── File Data ──────────────────────────────────────────────────────────
+  fileName        String
+  fileSize        Int?
+  mimeType        String?
+  imageData       Bytes   // Base64 or binary stored in DB
+  thumbnailData   Bytes?  // Smaller preview
+  imageUrl        String? // Fallback URL if stored externally
+
+  // ── Metadata ───────────────────────────────────────────────────────────
+  toothNumbers    String?  // JSON array — which teeth are visible
+  findings        String?  @db.Text
+  isComparison    Boolean  @default(false)
+  comparisonWith  Int?     // ID of another DentalImage for side-by-side
+  sortOrder       Int      @default(0)
+
+  // ── Upload Info ────────────────────────────────────────────────────────
+  uploadedBy      String?
+  uploadedAt      DateTime @default(now())
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  DentalRecord   DentalRecord @relation(fields: [dentalRecordId], references: [id], onDelete: Cascade)
+  Patient        Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([dentalRecordId])
+  @@index([patientId])
+}
+
+model PatientTimeline {
   id             Int      @id @default(autoincrement())
   patientId      Int
-  visitId        Int?
-  chiefComplaint String?  @db.Text
-  diagnosis      String?  @db.Text
-  treatment      String?  @db.Text
-  notes          String?  @db.Text
+  action         String   // ARRIVAL | TRANSFER | CONSULTATION_START | CONSULTATION_END | PROCEDURE | LAB_REQUEST | IMAGING_REQUEST | PRESCRIPTION | DISCHARGE | EMERGENCY_TAG | STATUS_CHANGE
+  fromDepartment String?
+  toDepartment   String?
+  description    String?  @db.Text
+  metadata       String?  @db.Text // JSON for additional context
+  performedBy    String?
+  performedById  Int?
   createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
 
-  Patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  Visit   Visit?  @relation(fields: [visitId], references: [id])
+  Patient        Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([createdAt])
 }
 
 model Appointment {
   id              Int               @id @default(autoincrement())
   patientId       Int
-  staffId         Int
+  staffId         Int?
+  createdById     Int?
+  department      String?
   appointmentDate DateTime
+  reason          String?           @db.Text
+  notes           String?           @db.Text
   status          AppointmentStatus @default(PENDING)
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   Patient         Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  Staff           Staff             @relation(fields: [staffId], references: [id])
+  Staff           Staff?            @relation("StaffAppointments", fields: [staffId], references: [id])
+  CreatedBy       Staff?            @relation("CreatedByStaff", fields: [createdById], references: [id])
+}
+
+model StaffAttendance {
+  id             Int      @id @default(autoincrement())
+  staffId        Int?
+  staffName      String?
+  department     String?
+  clockIn        DateTime
+  clockOut       DateTime?
+  date           DateTime @default(now())
+  notes          String?  @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  Staff          Staff?   @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId])
+  @@index([date])
+  @@index([department])
 }
 
 model LabRequest {
@@ -376,11 +649,14 @@ model Staff {
   userId         Int           @unique
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
-  Appointment    Appointment[]
+  Appointment    Appointment[]          @relation("StaffAppointments")
+  AppointmentsCreated Appointment[]    @relation("CreatedByStaff")
+  StaffAttendance StaffAttendance[]
   LabRequest     LabRequest[]
   ImagingRequest ImagingRequest[]
   LabCommunications LabCommunication[]
   ResultShares     ResultShare[]
+  DentalRecord     DentalRecord[]
   User             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
@@ -403,6 +679,7 @@ enum PatientStatus {
   AWAITING_RADIOLOGY
   AWAITING_LAB
   IN_CONSULTATION
+  ADMITTED
   AWAITING_PHARMACY
   AWAITING_CASHIER
   DISCHARGED

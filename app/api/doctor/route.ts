@@ -10,6 +10,8 @@ const ROUTE_TO_STATUS: Record<string, PatientStatus> = {
   PHARMACY:   "AWAITING_PHARMACY",
   CASHIER:    "AWAITING_CASHIER",
   DISCHARGE:  "DISCHARGED",
+  ADMIT:      "ADMITTED",
+  DENTIST:    "AWAITING_DENTIST",
 };
 
 // GET — fetch patients waiting for the doctor or already in consultation
@@ -36,22 +38,39 @@ export async function GET() {
   }
 }
 
-// POST — complete consultation: save Visit, Prescriptions, LabRequests, update status
+// POST — complete consultation: save Visit, Prescriptions, LabRequests, timeline, update status
 export async function POST(req: NextRequest) {
   try {
-    const { patientId, staffId, symptoms, diagnosis, notes, prescriptions, labRequests, routeTo } = await req.json();
+    const {
+      patientId, staffId, staffName,
+      symptoms, historyOfPresentIllness, pastMedicalHistory,
+      reviewOfOtherSystems,
+      physicalExamination, diagnosis, differentialDiagnosis,
+      assessment, treatmentPlan, notes, doctorSignature,
+      prescriptions, labRequests, routeTo,
+    } = await req.json();
 
     if (!patientId || !routeTo || !(routeTo in ROUTE_TO_STATUS)) {
       return NextResponse.json({ error: "Missing required fields." }, { status: 400 });
     }
 
+    const performerName = staffName || "Doctor";
+
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const visit = await tx.visit.create({
         data: {
           patientId,
-          symptoms:  symptoms  || null,
-          diagnosis: diagnosis || null,
-          notes:     notes     || null,
+          symptoms:              symptoms              || null,
+          historyOfPresentIllness: historyOfPresentIllness || null,
+          pastMedicalHistory:    pastMedicalHistory    || null,
+          reviewOfOtherSystems:  reviewOfOtherSystems  || null,
+          physicalExamination:   physicalExamination   || null,
+          diagnosis:             diagnosis             || null,
+          differentialDiagnosis: differentialDiagnosis || null,
+          assessment:            assessment            || null,
+          treatmentPlan:         treatmentPlan         || null,
+          notes:                 notes                 || null,
+          doctorSignature:       doctorSignature       || null,
         },
       });
 
@@ -98,6 +117,49 @@ export async function POST(req: NextRequest) {
       await tx.patient.update({
         where: { id: patientId },
         data:  { currentStatus: ROUTE_TO_STATUS[routeTo] },
+      });
+
+      // ── Log to PatientTimeline ──
+      const actionLabel =
+        routeTo === "ADMIT" ? "ADMITTED" :
+        routeTo === "CASHIER" ? "FINISHED" :
+        routeTo === "DISCHARGE" ? "DISCHARGED" :
+        "REFERRED";
+
+      await tx.patientTimeline.create({
+        data: {
+          patientId,
+          action:        "CONSULTATION_END",
+          fromDepartment: "DOCTOR",
+          toDepartment:   routeTo === "ADMIT" ? "WARD" :
+                          routeTo === "CASHIER" ? "CASHIER" :
+                          routeTo === "DISCHARGE" ? "DISCHARGE" :
+                          routeTo === "REFERRAL" && labRequests?.length ? "LAB" : routeTo,
+          description:   `Consultation completed — ${actionLabel}. Diagnosis: ${diagnosis || "Not specified"}`,
+          metadata:      JSON.stringify({
+            visitId:       visit.id,
+            diagnosis,
+            treatmentPlan,
+            prescriptionCount: prescriptions?.length || 0,
+            labCount:          labRequests?.length || 0,
+            routeTo,
+          }),
+          performedBy:   performerName,
+          performedById: staffId || null,
+        },
+      });
+
+      // Also log consultation start if it wasn't logged earlier
+      await tx.patientTimeline.create({
+        data: {
+          patientId,
+          action:        "STATUS_CHANGE",
+          fromDepartment: "AWAITING_DOCTOR",
+          toDepartment:   "CONSULTATION",
+          description:   `Consultation began with Dr. ${performerName}`,
+          performedBy:   performerName,
+          performedById: staffId || null,
+        },
       });
     });
 

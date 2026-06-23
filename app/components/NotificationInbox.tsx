@@ -37,11 +37,13 @@ export default function NotificationInbox({
   userId,
   maxHeight = "400px",
   showTitle = true,
+  sidebar = false,
 }: {
   department?: string;
   userId?: number;
   maxHeight?: string;
   showTitle?: boolean;
+  sidebar?: boolean;
 }) {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -120,68 +122,78 @@ export default function NotificationInbox({
   };
 
   return (
-    <div className="relative">
-      {/* Bell button */}
+    <div className={`${sidebar ? "" : "relative"}`}>
+      {/* Bell button — sidebar variant vs inline variant */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative flex items-center gap-1.5 bg-white border border-slate-200 hover:border-[#00703C] text-slate-600 px-3 py-2 rounded-xl text-xs font-semibold transition shadow-sm"
+        className={`relative flex items-center gap-2 w-full transition-all duration-150 ${
+          sidebar
+            ? "px-3 py-2.5 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/10"
+            : "bg-white border border-slate-200 hover:border-[#00703C] text-slate-600 px-3 py-2 rounded-xl text-xs font-semibold shadow-sm"
+        }`}
       >
-        <Bell size={15} />
+        <Bell size={sidebar ? 16 : 15} />
+        <span>{showTitle ? "Inbox" : ""}</span>
         {unreadCount > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+          <span className={`ml-auto ${sidebar ? "bg-white/25 text-white" : "bg-red-500 text-white"} text-[10px] font-bold px-2 py-0.5 rounded-full`}>
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}
-        <span className="hidden md:inline">Inbox</span>
       </button>
 
-      {/* Dropdown */}
+      {/* Dropdown panel — fixed to viewport so it never clips */}
       {isOpen && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-0 top-full mt-2 z-50 w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+          <div className="fixed inset-0 z-[100]" onClick={() => setIsOpen(false)} />
+          <div
+            className="fixed z-[101] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+            style={{
+              width: "min(420px, calc(100vw - 32px))",
+              maxHeight: "min(560px, calc(100vh - 100px))",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+            }}
+          >
             {/* Header */}
-            <div className="bg-slate-50 px-4 py-3 flex items-center justify-between border-b border-slate-200">
+            <div className="bg-gradient-to-r from-[#00803F] to-[#00A651] px-5 py-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Bell size={16} className="text-[#00703C]" />
-                <span className="font-bold text-sm text-slate-700">
+                <Bell size={18} className="text-white/90" />
+                <span className="font-bold text-sm text-white">
                   Notifications
                 </span>
                 {unreadCount > 0 && (
-                  <span className="bg-red-100 text-red-700 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                  <span className="bg-white/25 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
                     {unreadCount} new
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-2">
                 {unreadCount > 0 && (
                   <button
                     onClick={markAllRead}
-                    className="text-[10px] font-bold text-[#00703C] hover:text-green-700 px-2 py-1 rounded-lg hover:bg-green-50 transition"
+                    className="text-[10px] font-bold text-white/80 hover:text-white px-2 py-1 rounded-lg hover:bg-white/10 transition"
                   >
                     Mark all read
                   </button>
                 )}
-                <button onClick={() => setIsOpen(false)} className="text-slate-300 hover:text-slate-500">
-                  <XCircle size={14} />
+                <button onClick={() => setIsOpen(false)} className="text-white/60 hover:text-white p-1 rounded-lg hover:bg-white/10 transition">
+                  <XCircle size={16} />
                 </button>
               </div>
             </div>
 
             {/* List */}
-            <div
-              className="overflow-y-auto"
-              style={{ maxHeight }}
-            >
+            <div className="overflow-y-auto" style={{ maxHeight: "calc(560px - 60px)" }}>
               {loading && notifications.length === 0 ? (
-                <div className="flex items-center justify-center py-12 text-slate-300">
-                  <RefreshCw size={20} className="animate-spin" />
+                <div className="flex items-center justify-center py-16 text-slate-300">
+                  <RefreshCw size={24} className="animate-spin" />
                 </div>
               ) : notifications.length === 0 ? (
-                <div className="py-12 text-center text-slate-400 text-sm">
-                  <Bell size={32} className="mx-auto mb-2 text-slate-200" />
-                  <p className="font-semibold">No notifications</p>
-                  <p className="text-xs mt-1">Lab results shared with your department will appear here</p>
+                <div className="py-16 text-center text-slate-400 text-sm">
+                  <Bell size={40} className="mx-auto mb-3 text-slate-200" />
+                  <p className="font-semibold text-slate-500">No notifications</p>
+                  <p className="text-xs mt-1 text-slate-400">Updates and alerts will appear here</p>
                 </div>
               ) : (
                 notifications.map((n) => {
@@ -191,49 +203,49 @@ export default function NotificationInbox({
                     <div
                       key={n.id}
                       onClick={() => !n.isRead && markRead(n.id)}
-                      className={`px-4 py-3 border-b border-slate-100 cursor-pointer transition hover:bg-slate-50 ${
+                      className={`px-5 py-3.5 border-b border-slate-100 cursor-pointer transition hover:bg-slate-50 ${
                         !n.isRead ? "bg-blue-50/30" : ""
                       }`}
                     >
                       <div className="flex items-start gap-3">
                         <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                            !n.isRead ? "bg-[#00703C]/10" : "bg-slate-100"
+                          className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+                            !n.isRead ? "bg-[#00803F]/10" : "bg-slate-100"
                           }`}
                         >
                           <Icon
-                            size={15}
-                            className={!n.isRead ? "text-[#00703C]" : "text-slate-400"}
+                            size={16}
+                            className={!n.isRead ? "text-[#00803F]" : "text-slate-400"}
                           />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-start justify-between gap-2">
                             <p
-                              className={`text-xs font-semibold truncate ${
+                              className={`text-sm font-semibold truncate ${
                                 !n.isRead ? "text-slate-800" : "text-slate-500"
                               }`}
                             >
                               {n.title}
                             </p>
-                            <span className="text-[10px] text-slate-400 flex-shrink-0 whitespace-nowrap">
+                            <span className="text-[11px] text-slate-400 flex-shrink-0 whitespace-nowrap">
                               {formatTime(n.createdAt)}
                             </span>
                           </div>
-                          <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
+                          <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">
                             {n.message}
                           </p>
-                          <div className="flex items-center gap-2 mt-1">
+                          <div className="flex items-center gap-2 mt-1.5">
                             <span
-                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                                 !n.isRead
-                                  ? "bg-[#00703C]/10 text-[#00703C]"
+                                  ? "bg-[#00803F]/10 text-[#00803F]"
                                   : "bg-slate-100 text-slate-400"
                               }`}
                             >
                               {n.type.replace(/_/g, " ")}
                             </span>
                             {!n.isRead && (
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                              <span className="w-2 h-2 rounded-full bg-[#00803F]" />
                             )}
                           </div>
                         </div>

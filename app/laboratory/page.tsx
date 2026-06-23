@@ -23,7 +23,7 @@ interface Attachment { name: string; path: string; type: string; uploadedAt: str
 interface ChainOfCustodyEntry { action: string; by: string; at: string; from: string; to: string; }
 
 interface LabRequestItem {
-  id: number; patientNumber: string; firstName: string; lastName: string;
+  id: number; patientId: number; patientNumber: string; firstName: string; lastName: string;
   age: number; gender: string; isEmergency: boolean;
   testName: string; testPanel: string | null;
   priority: string; referralSource: string | null;
@@ -488,6 +488,10 @@ export default function LaboratoryPage() {
             <button onClick={() => { setShowLabRecords(true); setDetailView(false); setSelectedRequest(null); fetchAllLabRecords(); }}
               className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-white/80 hover:bg-white/10 hover:text-white transition-all">
               <History size={18} /> Lab Records
+            </button>
+            <button onClick={() => window.open("/api/appointments?department=Laboratory", "_blank")}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold text-white/80 hover:bg-white/10 hover:text-white transition-all">
+              <Calendar size={18} /> Appointments
             </button>
           </div>
         </div>
@@ -1262,7 +1266,7 @@ function CriticalResultsPanel({ onClose, callLabApi, formatDate, allRequests, us
   const criticalItems = allRequests.filter((r: any) => r.isCritical && r.status !== "COMPLETED");
   const handleRecord = async () => {
     if (!selectedLabReq || !notifiedPerson || !notifMethod) { alert("Fill all required fields"); return; } setSaving(true);
-    try { const req = allRequests.find((r: any) => r.id === selectedLabReq); await callLabApi("RECORD_CRITICAL_NOTIFICATION", { labRequestId: selectedLabReq, patientId: req?.id || 0, notifiedPerson, notifiedDept, notificationMethod: notifMethod, notes: notifNotes || undefined }); alert("Recorded"); setNotifiedPerson(""); setNotifNotes(""); setSelectedLabReq(""); onRefresh(); } catch (e: any) { alert(e.message); } finally { setSaving(false); }
+    try { const req = allRequests.find((r: any) => r.id === selectedLabReq); await callLabApi("RECORD_CRITICAL_NOTIFICATION", { labRequestId: selectedLabReq, patientId: req?.patientId || 0, notifiedPerson, notifiedDept, notificationMethod: notifMethod, notes: notifNotes || undefined }); alert("Recorded"); setNotifiedPerson(""); setNotifNotes(""); setSelectedLabReq(""); onRefresh(); } catch (e: any) { alert(e.message); } finally { setSaving(false); }
   };
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center pt-12 pb-12 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -1292,7 +1296,7 @@ function CriticalResultsPanel({ onClose, callLabApi, formatDate, allRequests, us
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 function ShareResultPanel({ request, onClose, callLabApi, user }: any) {
   const [targetDept, setTargetDept] = useState(""); const [shareNote, setShareNote] = useState(""); const [saving, setSaving] = useState(false);
-  const handleShare = async () => { if (!request || !targetDept) { alert("Select a department"); return; } setSaving(true); try { await callLabApi("SHARE_RESULT", { labRequestId: request.id, patientId: request.id, sharedById: user?.id || 0, sharedByName: user?.fullName || "Lab", targetDept, note: shareNote || undefined }); alert(`Shared with ${targetDept}`); onClose(); } catch (e: any) { alert(e.message); } finally { setSaving(false); } };
+      const handleShare = async () => { if (!request || !targetDept) { alert("Select a department"); return; } setSaving(true); try { await callLabApi("SHARE_RESULT", { labRequestId: request.id, patientId: request.patientId, sharedById: user?.staffId || user?.id || 0, sharedByName: user?.fullName || "Lab", targetDept, note: shareNote || undefined }); alert(`Shared with ${targetDept}`); onClose(); } catch (e: any) { alert(e.message); } finally { setSaving(false); } };
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center pt-20" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
@@ -1314,7 +1318,7 @@ function ShareResultPanel({ request, onClose, callLabApi, user }: any) {
 function CommunicationsPanel({ onClose, callLabApi, user, formatDate }: any) {
   const [messages, setMessages] = useState<any[]>([]); const [messageType, setMessageType] = useState("GENERAL"); const [message, setMessage] = useState(""); const [recipientDept, setRecipientDept] = useState(""); const [saving, setSaving] = useState(false); const [loading, setLoading] = useState(true);
   useEffect(() => { fetch("/api/laboratory?action=communications").then(r => r.json()).then(d => { if (d.success) setMessages(d.communications); }).catch(() => {}).finally(() => setLoading(false)); }, []);
-  const handleSend = async () => { if (!message.trim()) return; setSaving(true); try { await callLabApi("SEND_COMMUNICATION", { messageType, message, senderId: user?.id || 0, senderName: user?.fullName || "Lab", senderDept: "Laboratory", recipientDept: recipientDept || undefined }); setMessage(""); const r = await fetch("/api/laboratory?action=communications"); const d = await r.json(); if (d.success) setMessages(d.communications); } catch (e: any) { alert(e.message); } finally { setSaving(false); } };
+  const handleSend = async () => { if (!message.trim()) return; setSaving(true); try { await callLabApi("SEND_COMMUNICATION", { messageType, message, senderId: user?.staffId || user?.id || 0, senderName: user?.fullName || "Lab", senderDept: "Laboratory", recipientDept: recipientDept || undefined }); setMessage(""); const r = await fetch("/api/laboratory?action=communications"); const d = await r.json(); if (d.success) setMessages(d.communications); } catch (e: any) { alert(e.message); } finally { setSaving(false); } };
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center pt-12 pb-12" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col max-h-[85vh]" onClick={(e) => e.stopPropagation()}>

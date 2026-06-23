@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
 import NotificationInbox from "../components/NotificationInbox";
-import { Activity, Baby, FileText, LogOut, Printer, PlusCircle, Trash2, RefreshCw, Phone, User, Clock, AlertTriangle, X, Thermometer, Droplets, Heart, Wind, Scale, Ruler, Eye, AlertCircle, Stethoscope, ArrowRight, CheckCircle, Save, ClipboardList } from "lucide-react";
+import { Activity, Baby, FileText, LogOut, Printer, PlusCircle, Trash2, RefreshCw, Phone, User, Clock, AlertTriangle, X, Thermometer, Droplets, Heart, Wind, Scale, Ruler, Eye, AlertCircle, Stethoscope, ArrowRight, CheckCircle, Save, ClipboardList, Calendar, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 interface TriagePatient {
@@ -27,6 +27,27 @@ export default function NurseMidwifeDashboard() {
   const [reportText, setReportText] = useState("");
   const [treatmentEntries, setTreatmentEntries] = useState<TreatmentEntry[]>([]);
   const [treatmentForm, setTreatmentForm] = useState({ date: new Date().toISOString().split("T")[0], drug: "", route: "PO", dose: "", time: "", signature: "" });
+
+  // ── Appointments state ──────────────────────────────────────────────────
+  const [nurseAppts, setNurseAppts] = useState<any[]>([]);
+  const [nurseApptDate, setNurseApptDate] = useState(new Date().toISOString().split("T")[0]);
+  const [nurseApptFilter, setNurseApptFilter] = useState("all");
+  const [nurseApptLoading, setNurseApptLoading] = useState(false);
+
+  const fetchNurseAppointments = useCallback(async () => {
+    setNurseApptLoading(true);
+    try {
+      const params = new URLSearchParams({ department: "Nurse_Midwife", date: nurseApptDate });
+      if (nurseApptFilter !== "all") params.set("status", nurseApptFilter.toUpperCase());
+      const res = await fetch(`/api/appointments?${params}`);
+      const data = await res.json();
+      setNurseAppts(data.appointments ?? []);
+    } catch { setNurseAppts([]); }
+    finally { setNurseApptLoading(false); }
+  }, [nurseApptDate, nurseApptFilter]);
+
+  useEffect(() => { fetchNurseAppointments(); }, [fetchNurseAppointments]);
+  useEffect(() => { const i = setInterval(fetchNurseAppointments, 15_000); return () => clearInterval(i); }, [fetchNurseAppointments]);
 
   interface TreatmentEntry {
     id: number;
@@ -209,7 +230,7 @@ export default function NurseMidwifeDashboard() {
             {id: "triage", label: "Triage & Vitals", icon: Activity}, 
             {id: "antenatal", label: "ANC Monitoring", icon: Baby},
             {id: "treatment", label: "Treatment Chart", icon: ClipboardList},
-            {id: "reports", label: "Shift Handover", icon: FileText} 
+            {id: "appointments", label: "Appointments", icon: Calendar},
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} 
               style={{ width: '100%', padding: '16px', marginBottom: '8px', borderRadius: '8px', 
@@ -417,6 +438,103 @@ export default function NurseMidwifeDashboard() {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* APPOINTMENTS */}
+          {activeTab === "appointments" && (
+            <div>
+              {/* Filters */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-4">
+                <input type="date" value={nurseApptDate} onChange={e => setNurseApptDate(e.target.value)}
+                  className="text-xs px-3 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-[#00703C]" />
+                <select value={nurseApptFilter} onChange={e => setNurseApptFilter(e.target.value)}
+                  className="text-xs px-3 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-[#00703C]">
+                  <option value="all">All Statuses</option>
+                  <option value="pending">Pending</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="completed">Completed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+                <span className="text-xs text-slate-400 ml-auto">{nurseAppts.length} appointment(s)</span>
+              </div>
+
+              <div className="bg-white rounded-xl border border-slate-100 overflow-hidden">
+                <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                  <span className="text-xs font-extrabold uppercase tracking-widest text-slate-400">
+                    {new Date(nurseApptDate + "T12:00:00").toLocaleDateString("en-UG", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+                  </span>
+                </div>
+
+                {nurseApptLoading ? (
+                  <div className="py-16 flex items-center justify-center text-slate-400 text-sm">
+                    <Loader2 size={16} className="animate-spin mr-2" /> Loading appointments...
+                  </div>
+                ) : nurseAppts.length === 0 ? (
+                  <div className="py-16 text-center">
+                    <Calendar size={36} className="mx-auto text-slate-200 mb-3" />
+                    <p className="text-sm font-medium text-slate-400">No appointments for this date</p>
+                    <p className="text-xs text-slate-300 mt-1">Appointments can be scheduled from Reception</p>
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-slate-50">
+                    {nurseAppts.map((a: any) => (
+                      <li key={a.id} className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-colors">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0 ${
+                          a.status === "CANCELLED" ? "bg-red-100 text-red-500" :
+                          a.status === "COMPLETED" ? "bg-green-100 text-green-600" :
+                          a.status === "CONFIRMED" ? "bg-blue-100 text-blue-600" :
+                          "bg-amber-100 text-amber-600"
+                        }`}>
+                          {a.Patient?.firstName?.[0]}{a.Patient?.lastName?.[0]}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-semibold text-slate-800">
+                              {a.Patient?.lastName}, {a.Patient?.firstName}
+                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                              a.status === "CANCELLED" ? "bg-red-50 text-red-600" :
+                              a.status === "COMPLETED" ? "bg-green-50 text-green-600" :
+                              a.status === "CONFIRMED" ? "bg-blue-50 text-blue-600" :
+                              "bg-amber-50 text-amber-600"
+                            }`}>
+                              {a.status}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-400 mt-0.5">
+                            {a.Patient?.patientNumber} · {new Date(a.appointmentDate).toLocaleTimeString("en-UG", { hour: "2-digit", minute: "2-digit" })}
+                            {a.Patient?.phoneNumber && ` · ${a.Patient.phoneNumber}`}
+                          </div>
+                          {a.reason && <div className="text-xs text-slate-500 mt-1">{a.reason}</div>}
+                          {a.notes && <div className="text-[11px] text-slate-400 mt-0.5 italic">{a.notes}</div>}
+                          {a.Staff && <div className="text-[10px] text-slate-400 mt-0.5">with {a.Staff.fullName}</div>}
+                        </div>
+                        <div className="flex gap-1.5 flex-shrink-0">
+                          {a.status === "PENDING" && (
+                            <button onClick={async () => {
+                              await fetch("/api/appointments", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: a.id, status: "CONFIRMED" }) });
+                              setNurseAppts((prev: any[]) => prev.map(x => x.id === a.id ? { ...x, status: "CONFIRMED" } : x));
+                            }}
+                              className="text-[10px] px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 font-medium transition-colors">
+                              Confirm
+                            </button>
+                          )}
+                          {a.status !== "COMPLETED" && a.status !== "CANCELLED" && (
+                            <button onClick={async () => {
+                              await fetch(`/api/appointments?id=${a.id}`, { method: "DELETE" });
+                              setNurseAppts((prev: any[]) => prev.map(x => x.id === a.id ? { ...x, status: "CANCELLED" } : x));
+                            }}
+                              className="text-[10px] px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 font-medium transition-colors">
+                              Cancel
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           )}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
 import NotificationInbox from "../components/NotificationInbox";
 import { useRouter } from "next/navigation";
@@ -9,7 +9,7 @@ import {
   AlertCircle, ShieldAlert, FileText, Phone, MapPin, FileHeart,
   LogOut, Receipt, Plus, Trash2, CreditCard, Banknote, Smartphone,
   Printer, X, BadgeCheck, Stethoscope, FlaskConical, Scan, Baby,
-  Waves, RadioTower,
+  Waves, RadioTower, Calendar, Clock, UserRound, Loader2,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -131,6 +131,646 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 
 const formatUGX = (n: number) =>
   "UGX " + Math.round(n).toLocaleString("en-UG");
+
+// ─── StaffAttendancePanel ──────────────────────────────────────────────────────
+
+interface AttendanceRecord {
+  id: number;
+  staffId: number | null;
+  staffName: string | null;
+  department: string | null;
+  clockIn: string;
+  clockOut: string | null;
+  date: string;
+  notes: string | null;
+  Staff: { fullName: string; department: string } | null;
+}
+
+function StaffAttendancePanel() {
+  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<"all" | "active" | "checked-out">("all");
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Form state
+  const [formName, setFormName] = useState("");
+  const [formDept, setFormDept] = useState("");
+  const [formClockIn, setFormClockIn] = useState(new Date().toISOString().slice(0, 16));
+  const [formClockOut, setFormClockOut] = useState("");
+
+  // Confirmation state for delete
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+
+  const fetchAttendance = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filter === "active") params.set("active", "true");
+      const today = new Date().toISOString().split("T")[0];
+      params.set("date", today);
+      const res = await fetch(`/api/staff-attendance?${params}`);
+      const data = await res.json();
+      setRecords(data.records ?? []);
+    } catch {
+      setRecords([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [filter]);
+
+  useEffect(() => { fetchAttendance(); }, [fetchAttendance]);
+
+  const formatTime = (iso: string) =>
+    new Date(iso).toLocaleTimeString("en-UG", { hour: "2-digit", minute: "2-digit" });
+
+  const formatDuration = (clockIn: string, clockOut: string | null) => {
+    if (!clockOut) return null;
+    const ms = new Date(clockOut).getTime() - new Date(clockIn).getTime();
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    return `${h}h ${m}m`;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formName.trim()) return;
+    setSaving(true);
+    try {
+      const body: any = { staffName: formName.trim(), department: formDept.trim() || null };
+      const now = new Date();
+      const clockInDate = new Date(formClockIn);
+      // Only send clockIn if it differs from current time by more than a minute
+      if (Math.abs(clockInDate.getTime() - now.getTime()) > 60000) {
+        body.clockIn = formClockIn;
+      }
+      if (formClockOut) body.clockOut = formClockOut;
+
+      const res = await fetch("/api/staff-attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setFormName("");
+        setFormDept("");
+        setFormClockIn(new Date().toISOString().slice(0, 16));
+        setFormClockOut("");
+        setShowForm(false);
+        fetchAttendance();
+      }
+    } catch {} finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    try {
+      await fetch(`/api/staff-attendance?id=${id}`, { method: "DELETE" });
+      setConfirmDelete(null);
+      fetchAttendance();
+    } catch {}
+  };
+
+  const activeCount = records.filter((r) => !r.clockOut).length;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {/* Header */}
+      <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Clock size={15} className="text-blue-600" />
+          <span className="text-xs font-extrabold uppercase tracking-widest text-slate-500">
+            Staff Attendance
+          </span>
+          <span className="text-[10px] text-slate-400 ml-1">
+            {records.length} records
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {activeCount > 0 && (
+            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+              {activeCount} active
+            </span>
+          )}
+          <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full">
+            {new Date().toLocaleDateString("en-UG", { day: "numeric", month: "short", year: "numeric" })}
+          </span>
+        </div>
+      </div>
+
+      {/* Filter tabs + Add button */}
+      <div className="flex items-center justify-between px-5 pt-3 pb-1 border-b border-slate-50">
+        <div className="flex gap-1">
+          {(["all", "active", "checked-out"] as const).map((f) => (
+            <button key={f} onClick={() => setFilter(f)}
+              className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full transition-colors ${
+                filter === f
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+              }`}>
+              {f === "all" ? "All" : f === "active" ? "Active" : "Checked Out"}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => { setShowForm(!showForm); setConfirmDelete(null); }}
+          className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full transition-colors ${
+            showForm ? "bg-slate-200 text-slate-600" : "bg-blue-600 text-white hover:bg-blue-700"
+          }`}>
+          {showForm ? "Cancel" : "+ Add Record"}
+        </button>
+      </div>
+
+      {/* ── ADD RECORD FORM ──────────────────────────────────────────────────── */}
+      {showForm && (
+        <div className="border-b border-slate-100 bg-slate-50/60 px-5 py-4">
+          <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+            <div className="sm:col-span-2 lg:col-span-1">
+              <label className="block text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">Staff Name *</label>
+              <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)} required
+                placeholder="e.g. Jane Smith"
+                className="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label className="block text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">Department / Role</label>
+              <input type="text" value={formDept} onChange={(e) => setFormDept(e.target.value)}
+                placeholder="e.g. Nursing"
+                className="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label className="block text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">Check In</label>
+              <input type="datetime-local" value={formClockIn} onChange={(e) => setFormClockIn(e.target.value)}
+                className="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-500" />
+            </div>
+            <div>
+              <label className="block text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">Check Out</label>
+              <input type="datetime-local" value={formClockOut} onChange={(e) => setFormClockOut(e.target.value)}
+                className="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-500" />
+            </div>
+            <button type="submit" disabled={saving || !formName.trim()}
+              className="w-full text-xs font-bold px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* List */}
+      <div className="p-5">
+        {loading ? (
+          <div className="flex items-center justify-center py-10">
+            <Loader2 size={20} className="text-slate-300 animate-spin" />
+          </div>
+        ) : records.length === 0 ? (
+          <div className="text-center py-10 text-slate-400">
+            <Clock size={32} className="mx-auto text-slate-200 mb-3" />
+            <p className="text-xs font-medium">No attendance records for today</p>
+            <p className="text-[10px] text-slate-300 mt-1">Click "+ Add Record" above to enter a staff member's attendance</p>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            {/* Column headers */}
+            <div className="hidden sm:grid grid-cols-12 gap-1.5 px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400">
+              <div className="col-span-3">Staff</div>
+              <div className="col-span-2 flex items-center gap-1">
+                <LogOut size={10} /> Check In
+              </div>
+              <div className="col-span-2 flex items-center gap-1">
+                <LogOut size={10} className="rotate-180" /> Check Out
+              </div>
+              <div className="col-span-2 text-center">Duration</div>
+              <div className="col-span-3 text-right">Action</div>
+            </div>
+
+            {records.map((r) => (
+              <div key={r.id}
+                className="grid grid-cols-1 sm:grid-cols-12 gap-1.5 items-center rounded-lg border border-slate-100 px-3 py-2.5 hover:bg-slate-50/50 transition-colors relative">
+                {/* Name + Dept */}
+                <div className="sm:col-span-3 flex items-center gap-2">
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
+                    !r.clockOut ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                  }`}>
+                    {(r.Staff?.fullName || r.staffName || "?").split(" ").map((s: string) => s[0]).join("").slice(0, 2)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-slate-700 truncate">{r.Staff?.fullName || r.staffName || "Unknown"}</p>
+                    <p className="text-[9px] text-slate-400 truncate">{r.Staff?.department || r.department || "—"}</p>
+                  </div>
+                </div>
+
+                {/* Clock In */}
+                <div className="sm:col-span-2 flex sm:block items-center gap-2">
+                  <span className="sm:hidden text-[9px] font-bold text-slate-400 uppercase">In</span>
+                  <span className="text-xs font-semibold text-slate-600">{formatTime(r.clockIn)}</span>
+                </div>
+
+                {/* Clock Out */}
+                <div className="sm:col-span-2 flex sm:block items-center gap-2">
+                  <span className="sm:hidden text-[9px] font-bold text-slate-400 uppercase">Out</span>
+                  {r.clockOut ? (
+                    <span className="text-xs font-semibold text-slate-600">{formatTime(r.clockOut)}</span>
+                  ) : (
+                    <span className="text-[9px] font-extrabold uppercase text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full inline-block">
+                      Active
+                    </span>
+                  )}
+                </div>
+
+                {/* Duration */}
+                <div className="sm:col-span-2 text-center">
+                  {r.clockOut ? (
+                    <span className="text-[10px] font-mono text-slate-400">
+                      {formatDuration(r.clockIn, r.clockOut)}
+                    </span>
+                  ) : (
+                    <span className="text-[9px] text-emerald-500">—</span>
+                  )}
+                </div>
+
+                {/* Delete action */}
+                <div className="sm:col-span-3 text-right">
+                  {confirmDelete === r.id ? (
+                    <div className="flex items-center justify-end gap-1">
+                      <span className="text-[9px] text-red-600 font-medium">Delete?</span>
+                      <button onClick={() => handleDelete(r.id)}
+                        className="text-[9px] font-bold px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 transition-colors">
+                        Yes
+                      </button>
+                      <button onClick={() => setConfirmDelete(null)}
+                        className="text-[9px] font-bold px-2 py-1 rounded bg-slate-200 text-slate-600 hover:bg-slate-300 transition-colors">
+                        No
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setConfirmDelete(r.id)}
+                      className="text-[9px] text-slate-400 hover:text-red-600 transition-colors"
+                      title="Delete record">
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── AppointmentsPanel ─────────────────────────────────────────────────────────
+
+function AppointmentsPanel({ staffId, patients }: { staffId: string | null; patients: Patient[] }) {
+  const [appointments, setAppointments] = useState<any[]>([]);
+  const [apptLoading, setApptLoading] = useState(true);
+  const [apptDate, setApptDate] = useState(new Date().toISOString().split("T")[0]);
+  const [apptFilter, setApptFilter] = useState("all");
+
+  // ── Create appointment form ───────────────────────────────────────────
+  const [showForm, setShowForm] = useState(false);
+  const [formPatientSearch, setFormPatientSearch] = useState("");
+  const [formPatientId, setFormPatientId] = useState<number | null>(null);
+  const [formDepartment, setFormDepartment] = useState("Doctor");
+  const [formStaffId, setFormStaffId] = useState<number | null>(null);
+  const [formStaffList, setFormStaffList] = useState<any[]>([]);
+  const [formDateTime, setFormDateTime] = useState(() => {
+    const now = new Date();
+    now.setMinutes(0, 0, 0);
+    now.setHours(now.getHours() + 1);
+    return now.toISOString().slice(0, 16);
+  });
+  const [formReason, setFormReason] = useState("");
+  const [formNotes, setFormNotes] = useState("");
+  const [formSubmitting, setFormSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formSuccess, setFormSuccess] = useState<string | null>(null);
+  const [showPatientDropdown, setShowPatientDropdown] = useState(false);
+  const formDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Fetch ALL staff for the staff selector — no role filter
+  useEffect(() => {
+    fetch("/api/staffcreate")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success) {
+          const allStaff = data.staff;
+          setFormStaffList(allStaff);
+          // Auto-select the first staff member
+          if (allStaff.length > 0 && formStaffId === null) {
+            setFormStaffId(allStaff[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []); // only fetch once on mount
+
+  // Close patient dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (formDropdownRef.current && !formDropdownRef.current.contains(e.target as Node))
+        setShowPatientDropdown(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const filteredFormPatients = patients.filter(
+    (p) =>
+      p.firstName.toLowerCase().includes(formPatientSearch.toLowerCase()) ||
+      p.lastName.toLowerCase().includes(formPatientSearch.toLowerCase()) ||
+      p.patientNumber.toLowerCase().includes(formPatientSearch.toLowerCase())
+  );
+
+  const fetchAppointments = useCallback(async () => {
+    setApptLoading(true);
+    try {
+      const params = new URLSearchParams({ date: apptDate });
+      if (apptFilter !== "all") params.set("status", apptFilter.toUpperCase());
+      const res = await fetch(`/api/appointments?${params}`);
+      const data = await res.json();
+      setAppointments(data.appointments ?? []);
+    } catch {
+      setAppointments([]);
+    } finally {
+      setApptLoading(false);
+    }
+  }, [apptDate, apptFilter]);
+
+  useEffect(() => { fetchAppointments(); }, [fetchAppointments]);
+
+  // Auto-refresh every 15 seconds for real-time
+  useEffect(() => {
+    const interval = setInterval(fetchAppointments, 15_000);
+    return () => clearInterval(interval);
+  }, [fetchAppointments]);
+
+  const handleCreateAppointment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formPatientId || !formDateTime) return;
+    setFormSubmitting(true);
+    setFormError(null);
+    setFormSuccess(null);
+    try {
+      const res = await fetch("/api/appointments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: formPatientId,
+          staffId: formStaffId,
+          department: formDepartment,
+          appointmentDate: new Date(formDateTime).toISOString(),
+          reason: formReason || null,
+          notes: formNotes || null,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFormSuccess(`Appointment created for ${patients.find(p => p.id === formPatientId)?.firstName} ${patients.find(p => p.id === formPatientId)?.lastName}`);
+        setFormPatientId(null);
+        setFormPatientSearch("");
+        setFormReason("");
+        setFormNotes("");
+        setShowForm(false);
+        fetchAppointments();
+      } else {
+        setFormError(data.error || "Failed to create appointment.");
+      }
+    } catch {
+      setFormError("Network error.");
+    } finally {
+      setFormSubmitting(false);
+    }
+  };
+
+  const appendedStaff = formStaffList.filter((s: any) =>
+    s.fullName.toLowerCase().includes(formPatientSearch.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Toolbar: Filters + Create Button */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+        <input type="date" value={apptDate} onChange={e => setApptDate(e.target.value)}
+          className="text-xs px-3 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-[#00703C]" />
+        <select value={apptFilter} onChange={e => setApptFilter(e.target.value)}
+          className="text-xs px-3 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-[#00703C]">
+          <option value="all">All Statuses</option>
+          <option value="pending">Pending</option>
+          <option value="confirmed">Confirmed</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <span className="text-xs text-slate-400 ml-auto">{appointments.length} appointment(s)</span>
+        <button onClick={() => { setShowForm(!showForm); setFormError(null); setFormSuccess(null); }}
+          className={`text-xs font-extrabold uppercase tracking-wider px-4 py-2.5 rounded-xl transition-all ${
+            showForm ? "bg-slate-200 text-slate-600" : "bg-[#00703C] text-white hover:bg-emerald-800"
+          }`}>
+          {showForm ? "Cancel" : "+ New Appointment"}
+        </button>
+      </div>
+
+      {/* ── CREATE APPOINTMENT FORM ───────────────────────────────────────── */}
+      {showForm && (
+        <form onSubmit={handleCreateAppointment} className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="border-b border-slate-100 bg-emerald-50/70 px-5 py-3">
+            <p className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-700">Schedule New Appointment</p>
+          </div>
+          <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Patient selector */}
+            <div className="md:col-span-2" ref={formDropdownRef}>
+              <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Patient *</label>
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input type="text" value={formPatientId
+                  ? `${patients.find(p => p.id === formPatientId)?.patientNumber} — ${patients.find(p => p.id === formPatientId)?.lastName}, ${patients.find(p => p.id === formPatientId)?.firstName}`
+                  : formPatientSearch}
+                  onChange={(e) => { if (formPatientId) setFormPatientId(null); setFormPatientSearch(e.target.value); setShowPatientDropdown(true); }}
+                  onFocus={() => setShowPatientDropdown(true)}
+                  placeholder="Search patient by name or ID..."
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 py-2.5 text-xs font-medium outline-none focus:border-[#00703C] focus:bg-white" />
+                {formPatientId && (
+                  <button type="button" onClick={() => { setFormPatientId(null); setFormPatientSearch(""); }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500">
+                    <X size={14} />
+                  </button>
+                )}
+                {showPatientDropdown && !formPatientId && filteredFormPatients.length > 0 && (
+                  <div className="absolute z-20 mt-1 w-full rounded-xl border border-slate-200 bg-white shadow-lg overflow-hidden">
+                    {filteredFormPatients.slice(0, 7).map((p) => (
+                      <button key={p.id} type="button"
+                        onClick={() => { setFormPatientId(p.id); setFormPatientSearch(""); setShowPatientDropdown(false); }}
+                        className="flex w-full items-center justify-between px-4 py-2.5 text-left text-xs hover:bg-slate-50 transition">
+                        <div className="flex items-center gap-2">
+                          <span className="font-extrabold text-[#00703C] font-mono">{p.patientNumber}</span>
+                          <span className="text-slate-700 font-semibold">{p.lastName}, {p.firstName}</span>
+                        </div>
+                        <span className="text-slate-400">{p.age} yrs · {p.gender}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Department */}
+            <div>
+              <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Department *</label>
+              <select value={formDepartment} onChange={(e) => { setFormDepartment(e.target.value); setFormStaffId(null); }}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-medium bg-white outline-none focus:border-[#00703C]">
+                {[
+                  { value: "Doctor", label: "Doctor" },
+                  { value: "Dentist", label: "Dentist" },
+                  { value: "Nurse_Midwife", label: "Nurse / Midwife" },
+                  { value: "Radiology", label: "Radiologist / Sonographer" },
+                  { value: "Laboratory", label: "Laboratory" },
+                ].map((d) => (
+                  <option key={d.value} value={d.value}>{d.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Staff */}
+            <div>
+              <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Assign To *</label>
+              <select value={formStaffId ?? ""} onChange={(e) => setFormStaffId(e.target.value ? parseInt(e.target.value) : null)}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-medium bg-white outline-none focus:border-[#00703C]">
+                {formStaffList.length === 0 && <option value="">Loading staff...</option>}
+                {formStaffList.map((s: any) => (
+                  <option key={s.id} value={s.id}>{s.fullName} — {s.role.replace(/_/g, " ")} ({s.department})</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Date & Time */}
+            <div>
+              <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Date & Time *</label>
+              <input type="datetime-local" value={formDateTime}
+                onChange={(e) => setFormDateTime(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-medium outline-none focus:border-[#00703C]" />
+            </div>
+
+            {/* Reason */}
+            <div>
+              <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Reason</label>
+              <input type="text" value={formReason} onChange={(e) => setFormReason(e.target.value)}
+                placeholder="e.g., Follow-up, Routine checkup..."
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-medium outline-none focus:border-[#00703C]" />
+            </div>
+
+            {/* Notes */}
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Notes (optional)</label>
+              <textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} rows={2}
+                placeholder="Any additional instructions or notes..."
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-medium outline-none focus:border-[#00703C]" />
+            </div>
+
+            {formError && (
+              <div className="md:col-span-2 bg-red-50 border border-red-200 text-red-700 text-xs font-bold px-4 py-2.5 rounded-xl">{formError}</div>
+            )}
+            {formSuccess && (
+              <div className="md:col-span-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5">
+                <CheckCircle2 size={13} /> {formSuccess}
+              </div>
+            )}
+
+            <div className="md:col-span-2 flex justify-end gap-3">
+              <button type="button" onClick={() => setShowForm(false)}
+                className="rounded-xl border border-slate-200 px-5 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition">
+                Cancel
+              </button>
+              <button type="submit" disabled={formSubmitting || !formPatientId || !formDateTime}
+                className="flex items-center gap-1.5 rounded-xl bg-[#00703C] px-5 py-2.5 text-xs font-extrabold text-white hover:bg-emerald-800 transition-all disabled:opacity-50">
+                {formSubmitting ? <><Loader2 size={13} className="animate-spin" /> Scheduling...</> : <><Calendar size={13} /> Schedule Appointment</>}
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
+
+      {/* ── APPOINTMENTS LIST ─────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+          <span className="text-xs font-extrabold uppercase tracking-widest text-slate-400">
+            {new Date(apptDate + "T12:00:00").toLocaleDateString("en-UG", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+          </span>
+        </div>
+
+        {apptLoading ? (
+          <div className="py-16 flex items-center justify-center text-slate-400 text-sm">
+            <Loader2 size={16} className="animate-spin mr-2" /> Loading appointments...
+          </div>
+        ) : appointments.length === 0 ? (
+          <div className="py-16 text-center">
+            <Calendar size={36} className="mx-auto text-slate-200 mb-3" />
+            <p className="text-sm font-medium text-slate-400">No appointments for this date</p>
+            <p className="text-xs text-slate-300 mt-1">Click "+ New Appointment" above to schedule one</p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-slate-50">
+            {appointments.map((a: any) => (
+              <li key={a.id} className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-colors">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0 ${
+                  a.status === "CANCELLED" ? "bg-red-100 text-red-500" :
+                  a.status === "COMPLETED" ? "bg-green-100 text-green-600" :
+                  a.status === "CONFIRMED" ? "bg-blue-100 text-blue-600" :
+                  "bg-amber-100 text-amber-600"
+                }`}>
+                  {a.Patient?.firstName?.[0]}{a.Patient?.lastName?.[0]}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-slate-800">
+                      {a.Patient?.lastName}, {a.Patient?.firstName}
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                      a.status === "CANCELLED" ? "bg-red-50 text-red-600" :
+                      a.status === "COMPLETED" ? "bg-green-50 text-green-600" :
+                      a.status === "CONFIRMED" ? "bg-blue-50 text-blue-600" :
+                      "bg-amber-50 text-amber-600"
+                    }`}>
+                      {a.status}
+                    </span>
+                    <span className="text-[9px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                      {a.department}
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {a.Patient?.patientNumber} · {new Date(a.appointmentDate).toLocaleTimeString("en-UG", { hour: "2-digit", minute: "2-digit" })}
+                    {a.Patient?.phoneNumber && ` · ${a.Patient.phoneNumber}`}
+                  </div>
+                  {a.reason && <div className="text-xs text-slate-500 mt-1">{a.reason}</div>}
+                  {a.notes && <div className="text-[11px] text-slate-400 mt-0.5 italic">{a.notes}</div>}
+                  {a.Staff && <div className="text-[10px] text-slate-400 mt-0.5">with {a.Staff.fullName} ({a.Staff.department})</div>}
+                </div>
+                <div className="flex gap-1.5 flex-shrink-0">
+                  {a.status === "PENDING" && (
+                    <button onClick={async () => {
+                      await fetch("/api/appointments", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: a.id, status: "CONFIRMED" }) });
+                      setAppointments((prev: any[]) => prev.map(x => x.id === a.id ? { ...x, status: "CONFIRMED" } : x));
+                    }}
+                      className="text-[10px] px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 font-medium transition-colors">
+                      Confirm
+                    </button>
+                  )}
+                  {a.status !== "COMPLETED" && a.status !== "CANCELLED" && (
+                    <button onClick={async () => {
+                      await fetch(`/api/appointments?id=${a.id}`, { method: "DELETE" });
+                      setAppointments((prev: any[]) => prev.map(x => x.id === a.id ? { ...x, status: "CANCELLED" } : x));
+                    }}
+                      className="text-[10px] px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 font-medium transition-colors">
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ─── CashierPOS ───────────────────────────────────────────────────────────────
 
@@ -626,12 +1266,15 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
 export default function ReceptionistPage() {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
-  const [activeTab, setActiveTab] = useState<"search" | "register" | "cashier">("search");
+  const [recordsSearch, setRecordsSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"search" | "register" | "cashier" | "attendance" | "schedule">("search");
   const [registrationMode, setRegistrationMode] = useState<"normal" | "emergency">("normal");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [isRouting, setIsRouting] = useState(false);
+
+  const [staffId, setStaffId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     firstName: "", lastName: "", age: "", dob: "", gender: "",
@@ -650,7 +1293,17 @@ export default function ReceptionistPage() {
 
   useEffect(() => {
     fetchActiveRegistry();
-    try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); if (u.id) { fetch("/api/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id }) }); } } } catch {}
+    try {
+      const r = sessionStorage.getItem("user") || localStorage.getItem("user");
+      if (r) {
+        const u = JSON.parse(r);
+        if (u.staffId) setStaffId(u.staffId);
+        else if (u.id) setStaffId(u.id);
+        if (u.id) {
+          fetch("/api/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id }) });
+        }
+      }
+    } catch {}
     const interval = setInterval(fetchActiveRegistry, 15_000);
     const hb = setInterval(() => { try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); if (u.id) { fetch("/api/heartbeat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id }) }); } } } catch {} }, 120000);
     return () => { clearInterval(interval); clearInterval(hb); };
@@ -758,6 +1411,14 @@ export default function ReceptionistPage() {
     p.patientNumber.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const recordsFilteredPatients = recordsSearch.trim()
+    ? patients.filter((p) =>
+        p.firstName.toLowerCase().includes(recordsSearch.toLowerCase()) ||
+        p.lastName.toLowerCase().includes(recordsSearch.toLowerCase()) ||
+        p.patientNumber.toLowerCase().includes(recordsSearch.toLowerCase())
+      )
+    : patients;
+
   const statusBadge = (status: string) => {
     const s = STATUS_LABELS[status] ?? { label: status.replace(/_/g, " "), color: "text-slate-500 bg-slate-50 border-slate-200" };
     return (
@@ -807,6 +1468,8 @@ export default function ReceptionistPage() {
             { key: "search",   label: "Tracking Desk",    icon: <Search size={15} />,  color: "border-[#00703C] text-[#00703C]" },
             { key: "register", label: "Register Patient",  icon: <UserPlus size={15} />, color: "border-[#00703C] text-[#00703C]" },
             { key: "cashier",  label: "Cashier & Billing", icon: <Receipt size={15} />, color: "border-amber-500 text-amber-600" },
+            { key: "attendance", label: "Staff Attendance", icon: <Clock size={15} />, color: "border-blue-500 text-blue-600" },
+            { key: "schedule", label: "Appointments", icon: <Calendar size={15} />, color: "border-purple-500 text-purple-600" },
           ] as const).map((tab) => (
             <button
               key={tab.key}
@@ -959,6 +1622,78 @@ export default function ReceptionistPage() {
                   </div>
                 )}
               </div>
+
+              {/* ── PATIENT RECORDS ──────────────────────────────────────────── */}
+              <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mt-6">
+                <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText size={15} className="text-[#00703C]" />
+                    <span className="text-xs font-extrabold uppercase tracking-widest text-slate-500">
+                      Patient Records
+                    </span>
+                  </div>
+                  {selectedPatient && (
+                    <button onClick={() => setSelectedPatient(null)}
+                      className="text-slate-400 hover:text-rose-500 transition flex-shrink-0 ml-2"
+                      title="Deselect patient">
+                      <X size={15} />
+                    </button>
+                  )}
+                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                    {patients.length} total
+                  </span>
+                </div>
+                <div className="px-4 py-2.5 border-b border-slate-50">
+                  <div className="relative">
+                    <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input type="text" value={recordsSearch} onChange={(e) => setRecordsSearch(e.target.value)}
+                      placeholder="Search all patient records..."
+                      className="w-full rounded-lg border border-slate-200 bg-slate-50 pl-8 pr-3 py-2 text-[11px] font-medium outline-none focus:border-[#00703C] focus:bg-white transition" />
+                  </div>
+                </div>
+                <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
+                  {recordsFilteredPatients.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-slate-300">
+                      <FileText size={28} />
+                      <p className="mt-2 text-[10px] font-bold uppercase tracking-wide">
+                        {recordsSearch.trim() ? "No matching records" : "No records found"}
+                      </p>
+                    </div>
+                  ) : (
+                    recordsFilteredPatients.map((patient) => (
+                      <div
+                        key={patient.id}
+                        onClick={() => {
+                          setSelectedPatient(patient);
+                        }}
+                        className={`flex items-center justify-between px-4 py-2.5 transition-all cursor-pointer hover:bg-slate-50/80 ${
+                          selectedPatient?.id === patient.id ? "bg-emerald-50/40 border-l-4 border-[#00703C]" : ""
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-[9px] font-bold text-slate-600 flex-shrink-0">
+                            {patient.firstName[0]}{patient.lastName[0]}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-[11px] font-semibold text-slate-800 truncate leading-tight">
+                              {patient.lastName}, {patient.firstName}
+                            </div>
+                            <div className="text-[9px] text-slate-400 font-mono truncate">
+                              {patient.patientNumber} · {patient.age}yrs {patient.gender}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                          {patient.isEmergency && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                          )}
+                          <ArrowRight size={12} className="text-slate-300" />
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -1016,6 +1751,12 @@ export default function ReceptionistPage() {
 
         {/* ── CASHIER TAB ───────────────────────────────────────────────────── */}
         {activeTab === "cashier" && <CashierPOS patients={patients} />}
+
+        {/* ── STAFF ATTENDANCE TAB ──────────────────────────────────────────── */}
+        {activeTab === "attendance" && <StaffAttendancePanel />}
+
+        {/* ── APPOINTMENTS TAB ──────────────────────────────────────────────── */}
+        {activeTab === "schedule" && <AppointmentsPanel staffId={staffId} patients={patients} />}
 
       </div>
     </main>
