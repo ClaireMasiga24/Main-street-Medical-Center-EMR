@@ -71,6 +71,8 @@ export async function POST(req: NextRequest) {
           treatmentPlan:         treatmentPlan         || null,
           notes:                 notes                 || null,
           doctorSignature:       doctorSignature       || null,
+          doctorId:              staffId                || null,
+          doctorName:            staffName              || null,
         },
       });
 

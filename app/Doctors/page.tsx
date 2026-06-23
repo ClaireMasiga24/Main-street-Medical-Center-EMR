@@ -2,12 +2,13 @@
 
 import Image from "next/image";
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import NotificationInbox from "../components/NotificationInbox";
 import {
   Users, Pill, ArrowLeft, ArrowRight, CheckCircle,
   LogOut, AlertTriangle, Stethoscope, DoorOpen, Hospital,
   Microscope, Waves, Radio, Home, CreditCard, X, Plus, Loader2, Calendar, ClipboardList, Printer,
-  Clock, Activity, AlertCircle, FileText, Bell, Search, User,
+  Clock, Activity, AlertCircle, FileText, Bell, Search, User, Pencil,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -243,27 +244,27 @@ function Sidebar({
 
 function MetricsBar({ metrics }: { metrics: DashboardMetrics }) {
   const cards = [
-    { label: "Waiting Patients", value: metrics.awaitingDoctor, icon: Users, color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200" },
-    { label: "Active Consultations", value: metrics.inConsultation, icon: Stethoscope, color: "text-amber-600", bg: "bg-amber-50", border: "border-amber-200" },
+    { label: "Waiting", value: metrics.awaitingDoctor, icon: Users, color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200" },
+    { label: "In Consultation", value: metrics.inConsultation, icon: Stethoscope, color: "text-amber-600", bg: "bg-amber-50", border: "border-amber-200" },
     { label: "Completed Today", value: metrics.completedToday, icon: CheckCircle, color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-200" },
-    { label: "Pending Lab Results", value: metrics.pendingLabs, icon: Microscope, color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-200" },
+    { label: "Pending Labs", value: metrics.pendingLabs, icon: Microscope, color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-200" },
     { label: "Pending Radiology", value: metrics.pendingRadiology, icon: Radio, color: "text-cyan-600", bg: "bg-cyan-50", border: "border-cyan-200" },
-    { label: "Today's Appointments", value: metrics.todayAppointments, icon: Calendar, color: "text-rose-600", bg: "bg-rose-50", border: "border-rose-200" },
+    { label: "Appointments", value: metrics.todayAppointments, icon: Calendar, color: "text-rose-600", bg: "bg-rose-50", border: "border-rose-200" },
   ];
 
   return (
-    <div className="grid grid-cols-6 gap-3 mb-6">
+    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-6">
       {cards.map((c) => (
         <div
           key={c.label}
-          className={`${c.bg} ${c.border} border rounded-xl px-4 py-3 flex items-center gap-3`}
+          className={`${c.bg} ${c.border} border rounded-lg px-2 py-2 flex items-center gap-2`}
         >
-          <div className={`${c.color} p-2 rounded-lg ${c.bg}`}>
-            <c.icon size={18} />
+          <div className={`${c.color} p-1.5 rounded-md ${c.bg} flex-shrink-0`}>
+            <c.icon size={15} />
           </div>
-          <div className="min-w-0">
-            <div className="text-2xl font-bold text-slate-800">{c.value}</div>
-            <div className="text-[10px] font-medium text-slate-500 uppercase tracking-wider truncate">
+          <div className="min-w-0 leading-none">
+            <div className="text-lg font-bold text-slate-800">{c.value}</div>
+            <div className="text-[9px] font-semibold text-slate-500 mt-0.5 whitespace-nowrap overflow-visible">
               {c.label}
             </div>
           </div>
@@ -278,15 +279,16 @@ function MetricsBar({ metrics }: { metrics: DashboardMetrics }) {
 function PatientCard({
   patient,
   onSelect,
+  onStartConsultation,
 }: {
   patient: DashboardPatient;
   onSelect: (p: DashboardPatient) => void;
+  onStartConsultation: (p: DashboardPatient) => void;
 }) {
   const SourceIcon = SOURCE_ICONS[patient.source] || User;
 
   return (
     <div
-      onClick={() => onSelect(patient)}
       className={`relative bg-white rounded-xl border-2 transition-all cursor-pointer
         ${patient.isEmergency
           ? "border-red-300 hover:border-red-500 shadow-sm shadow-red-100"
@@ -384,7 +386,7 @@ function PatientCard({
           </span>
         </div>
 
-        {/* Row 4: Pending items indicator */}
+        {/* Pending items */}
         {(patient.pendingLabs > 0 || patient.pendingImaging > 0) && (
           <div className="flex items-center gap-3 mt-2.5 pt-2.5 border-t border-slate-100">
             {patient.pendingLabs > 0 && (
@@ -400,6 +402,23 @@ function PatientCard({
               </span>
             )}
           </div>
+        )}
+
+        {/* Action Button */}
+        {patient.currentStatus === "AWAITING_DOCTOR" ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); onStartConsultation(patient); }}
+            className="mt-3 w-full bg-emerald-600 text-white py-2.5 rounded-lg text-xs font-bold hover:bg-emerald-700 active:bg-emerald-800 transition-colors flex items-center justify-center gap-1.5"
+          >
+            <Activity size={13} /> Start Consultation
+          </button>
+        ) : (
+          <button
+            onClick={() => onSelect(patient)}
+            className="mt-3 w-full bg-amber-100 text-amber-700 py-2.5 rounded-lg text-xs font-bold hover:bg-amber-200 transition-colors flex items-center justify-center gap-1.5"
+          >
+            <Stethoscope size={13} /> Open Consultation
+          </button>
         )}
       </div>
     </div>
@@ -515,10 +534,14 @@ function ConsultationPanel({
   patient,
   onBack,
   onComplete,
+  staffId,
+  staffName,
 }: {
   patient: DashboardPatient;
   onBack: () => void;
   onComplete: () => void;
+  staffId: number;
+  staffName: string;
 }) {
   const [tab, setTab] = useState<"history" | "exam" | "diagnosis" | "rx" | "notes">("history");
   const [symptoms, setSymptoms] = useState(patient.chiefComplaint || "");
@@ -539,6 +562,7 @@ function ConsultationPanel({
   const [saving, setSaving] = useState(false);
   const [savingAction, setSavingAction] = useState("");
   const [showReferralPicker, setShowReferralPicker] = useState(false);
+  const [consultationStarted, setConsultationStarted] = useState(patient.currentStatus === "IN_CONSULTATION");
 
   const addRx = () => {
     if (!newRx.medication) return;
@@ -558,7 +582,8 @@ function ConsultationPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patientId: patient.id,
-          staffId: 1,
+          staffId,
+          staffName,
           symptoms,
           historyOfPresentIllness,
           pastMedicalHistory,
@@ -601,13 +626,110 @@ function ConsultationPanel({
         body: JSON.stringify({ patientId: patient.id }),
       });
     }
+    setConsultationStarted(true);
   };
 
-  useEffect(() => {
-    if (patient.currentStatus !== "IN_CONSULTATION") {
-      handleStartConsultation();
-    }
-	  }, [patient.id]);
+  const handlePrint = () => {
+	    buildPrintHtml(true);
+	  };
+
+	  const handleDownload = () => {
+	    const fullHtml = buildPrintHtml(false);
+	    const pw = window.open("", "_blank", "width=800,height=600,scrollbars=yes");
+	    if (!pw) { alert("Please allow pop-ups to download."); return; }
+	    pw.document.write(fullHtml);
+	    pw.document.close();
+	    // Auto-trigger the browser's print dialog (user selects "Save as PDF")
+	    setTimeout(() => { pw.focus(); pw.print(); }, 800);
+	  };
+
+	  const buildPrintHtml = (doPrint: boolean): string => {
+	    const rxList = rxDrafts.map((r, i) => `${i + 1}. ${r.medication} \u2014 ${r.dosage} \u2014 ${r.instructions}`).join("<br>");
+	    const labList = Array.from(labChecked).join(", ");
+	    const fields = [
+	      { label: "Presenting Complaint", value: symptoms },
+	      { label: "History of Presenting Complaint", value: historyOfPresentIllness },
+	      { label: "Review of Other Systems", value: reviewOfOtherSystems },
+	      { label: "Past Medical / Surgical History", value: pastMedicalHistory },
+	      { label: "Examination Findings", value: physicalExamination },
+	      { label: "Diagnosis", value: diagnosis },
+	      { label: "Differential Diagnosis", value: differentialDiagnosis },
+	      { label: "Assessment", value: assessment },
+	      { label: "Treatment Plan", value: treatmentPlan },
+	      { label: "Clinical Notes", value: notes },
+	    ].filter((f) => f.value);
+	    const fieldsHtml = fields.map((f) =>
+	      `<div style="margin-bottom:16px;page-break-inside:avoid">
+	        <h3 style="font-size:12px;color:#0a2e1a;margin:0 0 4px 0;text-transform:uppercase;letter-spacing:1px">${f.label}</h3>
+	        <p style="font-size:13px;color:#333;margin:0;white-space:pre-wrap;line-height:1.5">${f.value}</p>
+	      </div>`
+	    ).join("");
+
+		    const today = new Date().toLocaleDateString("en-UG", { day: "numeric", month: "long", year: "numeric" });
+
+		    const html = `
+		      <!DOCTYPE html>
+		      <html>
+		      <head>
+		        <title>Main Street Medical Center - Consultation Record</title>
+		        <style>
+		          @page { margin: 15mm; }
+		          body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+		          .watermark { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: -1; opacity: 0.08; }
+		          .watermark img { width: 50%; height: auto; }
+		          table { width: 100%; font-size: 13px; border-collapse: collapse; margin-bottom: 20px; }
+		          td { padding: 4px 8px; }
+		          .sig-line { border-bottom: 1px solid #000; display: inline-block; min-width: 250px; padding: 4px 8px; font-size: 20px; font-family: 'Brush Script MT', 'Segoe Script', cursive, sans-serif; }
+		        </style>
+		      </head>
+		      <body style="position:relative">
+		        <img src="/Images/LOGO.jpg" alt="" style="position:fixed;inset:0;width:50%;margin:auto;opacity:0.08;pointer-events:none;z-index:-1;object-fit:contain">
+		        <div style="padding:40px;max-width:800px;margin:0 auto">
+		          <div style="text-align:center;margin-bottom:30px;border-bottom:2px solid #0a2e1a;padding-bottom:20px">
+		            <h1 style="font-size:22px;color:#0a2e1a;margin:0;font-weight:bold">MAIN STREET MEDICAL CENTER</h1>
+		            <p style="font-size:13px;color:#555;margin:4px 0 0 0">Consultation Clinical Record</p>
+		          </div>
+		          <table>
+		            <tr>
+		              <td style="font-weight:bold;color:#0a2e1a;width:150px">Patient Name:</td>
+		              <td style="border-bottom:1px solid #ccc">${patient.lastName}, ${patient.firstName}</td>
+		              <td style="font-weight:bold;color:#0a2e1a;width:100px">Patient ID:</td>
+		              <td style="border-bottom:1px solid #ccc">${patient.patientNumber}</td>
+		            </tr>
+		            <tr>
+		              <td style="font-weight:bold;color:#0a2e1a">Gender / Age:</td>
+		              <td style="border-bottom:1px solid #ccc">${patient.gender === "MALE" ? "Male" : "Female"} / ${patient.age} yrs</td>
+		              <td style="font-weight:bold;color:#0a2e1a">Date:</td>
+		              <td style="border-bottom:1px solid #ccc">${today}</td>
+		            </tr>
+		          </table>
+		          ${fieldsHtml}
+		          ${rxList ? `<div style="margin-bottom:16px;page-break-inside:avoid"><h3 style="font-size:12px;color:#0a2e1a;margin:0 0 4px 0;text-transform:uppercase;letter-spacing:1px">Prescriptions</h3><p style="font-size:13px;color:#333;margin:0">${rxList}</p></div>` : ""}
+		          ${labList ? `<div style="margin-bottom:16px;page-break-inside:avoid"><h3 style="font-size:12px;color:#0a2e1a;margin:0 0 4px 0;text-transform:uppercase;letter-spacing:1px">Laboratory Orders</h3><p style="font-size:13px;color:#333;margin:0">${labList}</p></div>` : ""}
+		          <div style="margin-top:40px;border-top:1px solid #ccc;padding-top:20px;display:flex;justify-content:space-between">
+		            <div>
+		              <p style="font-size:13px;color:#0a2e1a;font-weight:bold;margin-bottom:4px">By Dr:</p>
+		              ${doctorSignature ? `<p class="sig-line">${doctorSignature}</p>` : `<p style="border-bottom:1px solid #000;display:inline-block;min-width:250px;padding:4px 8px">&nbsp;</p>`}
+		            </div>
+		            <div style="text-align:right">
+		              <p style="font-size:13px;color:#0a2e1a;font-weight:bold;margin-bottom:4px">Date</p>
+		              <p style="font-size:13px;color:#333">${today}</p>
+		            </div>
+		          </div>
+		        </div>
+		        ${doPrint ? '<script>window.onload = function() { window.print(); window.close(); };<\/script>' : ''}
+		      </body>
+		      </html>
+		    `;
+
+		    if (doPrint) {
+		      const printWin = window.open("", "_blank", "width=800,height=600");
+		      if (!printWin) { alert("Please allow pop-ups to print."); return html; }
+		      printWin.document.write(html);
+		      printWin.document.close();
+		    }
+		    return html;
+		  };
 
 	  const isBusy = saving;
 
@@ -692,6 +814,22 @@ function ConsultationPanel({
         )}
       </div>
 
+      {!consultationStarted ? (
+        <div className="bg-white rounded-2xl border border-slate-100 p-10 text-center">
+          <Stethoscope size={48} className="mx-auto text-slate-200 mb-4" />
+          <h3 className="text-lg font-semibold text-slate-700 mb-2">Ready to begin consultation</h3>
+          <p className="text-sm text-slate-400 mb-6 max-w-md mx-auto">
+            Review the patient details above, then click below to start the consultation.
+          </p>
+          <button
+            onClick={handleStartConsultation}
+            className="bg-[#0a2e1a] text-white px-8 py-3.5 rounded-xl font-semibold text-sm hover:bg-[#0d3d24] transition-colors flex items-center gap-2 mx-auto"
+          >
+            <Activity size={16} /> Start Consultation
+          </button>
+        </div>
+      ) : (
+      <>
       {/* Tabs */}
       <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
         <div className="flex border-b border-slate-100 overflow-x-auto">
@@ -834,13 +972,21 @@ function ConsultationPanel({
                   </div>
                 </div>
               </div>
-              {/* ── Print Button ── */}
-              <button
-                onClick={() => window.print()}
-                className="w-full py-3 rounded-xl font-semibold text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors flex items-center justify-center gap-2 mt-4"
-              >
-                <Printer size={16} /> PRINT
-              </button>
+              {/* ── Print & Download Buttons ── */}
+              <div className="grid grid-cols-2 gap-3 mt-4">
+                <button
+                  onClick={handlePrint}
+                  className="w-full py-3 rounded-xl font-semibold text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
+                >
+                  <Printer size={16} /> PRINT
+                </button>
+                <button
+                  onClick={handleDownload}
+                  className="w-full py-3 rounded-xl font-semibold text-sm bg-[#0a2e1a] text-white hover:bg-[#0d3d24] transition-colors flex items-center justify-center gap-2"
+                >
+                  <FileText size={16} /> DOWNLOAD
+                </button>
+              </div>
             </div>
           )}
 
@@ -1099,105 +1245,20 @@ function ConsultationPanel({
               </div>
 
               {/* ── Print Button ── */}
-              <button
-                onClick={() => window.print()}
-                className="w-full py-3 rounded-xl font-semibold text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
-              >
-                <Printer size={16} /> PRINT
-              </button>
-
-              {/* ── Print Area (hidden on screen, shown in print) ── */}
-              <div className="print-area hidden print:block">
-                <div style={{ padding: "40px", maxWidth: "800px", margin: "0 auto", fontFamily: "Arial, sans-serif" }}>
-                  <div style={{ textAlign: "center", marginBottom: "30px", borderBottom: "2px solid #0a2e1a", paddingBottom: "20px" }}>
-                    <h1 style={{ fontSize: "22px", color: "#0a2e1a", margin: 0, fontWeight: "bold" }}>MAIN STREET MEDICAL CENTER</h1>
-                    <p style={{ fontSize: "13px", color: "#555", margin: "4px 0 0 0" }}>Consultation Clinical Record</p>
-                  </div>
-
-                  <table style={{ width: "100%", fontSize: "13px", marginBottom: "20px", borderCollapse: "collapse" }}>
-                    <tbody>
-                      <tr>
-                        <td style={{ fontWeight: "bold", color: "#0a2e1a", width: "150px", padding: "4px 8px" }}>Patient Name:</td>
-                        <td style={{ borderBottom: "1px solid #ccc", padding: "4px 8px" }}>{patient.lastName}, {patient.firstName}</td>
-                        <td style={{ fontWeight: "bold", color: "#0a2e1a", width: "100px", padding: "4px 8px" }}>Patient ID:</td>
-                        <td style={{ borderBottom: "1px solid #ccc", padding: "4px 8px" }}>{patient.patientNumber}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ fontWeight: "bold", color: "#0a2e1a", padding: "4px 8px" }}>Gender / Age:</td>
-                        <td style={{ borderBottom: "1px solid #ccc", padding: "4px 8px" }}>{patient.gender === "MALE" ? "Male" : "Female"} / {patient.age} yrs</td>
-                        <td style={{ fontWeight: "bold", color: "#0a2e1a", padding: "4px 8px" }}>Date:</td>
-                        <td style={{ borderBottom: "1px solid #ccc", padding: "4px 8px" }}>{new Date().toLocaleDateString("en-UG", { day: "numeric", month: "long", year: "numeric" })}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-
-                  {[
-                    { label: "Presenting Complaint", value: symptoms },
-                    { label: "History of Presenting Complaint", value: historyOfPresentIllness },
-                    { label: "Review of Other Systems", value: reviewOfOtherSystems },
-                    { label: "Past Medical / Surgical History", value: pastMedicalHistory },
-                    { label: "Examination Findings", value: physicalExamination },
-                    { label: "Diagnosis", value: diagnosis },
-                    { label: "Differential Diagnosis", value: differentialDiagnosis },
-                    { label: "Assessment", value: assessment },
-                    { label: "Treatment Plan", value: treatmentPlan },
-                    { label: "Clinical Notes", value: notes },
-                  ].filter((s) => s.value).map((s, i) => (
-                    <div key={i} style={{ marginBottom: "16px", pageBreakInside: "avoid" }}>
-                      <h3 style={{ fontSize: "12px", color: "#0a2e1a", margin: "0 0 4px 0", textTransform: "uppercase", letterSpacing: "1px" }}>
-                        {s.label}
-                      </h3>
-                      <p style={{ fontSize: "13px", color: "#333", margin: 0, whiteSpace: "pre-wrap", lineHeight: "1.5" }}>
-                        {s.value}
-                      </p>
-                    </div>
-                  ))}
-
-                  {rxDrafts.length > 0 && (
-                    <div style={{ marginBottom: "16px", pageBreakInside: "avoid" }}>
-                      <h3 style={{ fontSize: "12px", color: "#0a2e1a", margin: "0 0 4px 0", textTransform: "uppercase", letterSpacing: "1px" }}>
-                        Prescriptions
-                      </h3>
-                      {rxDrafts.map((rx, i) => (
-                        <p key={i} style={{ fontSize: "13px", color: "#333", margin: "2px 0" }}>
-                          {i + 1}. {rx.medication} — {rx.dosage} — {rx.instructions}
-                        </p>
-                      ))}
-                    </div>
-                  )}
-
-                  {Array.from(labChecked).length > 0 && (
-                    <div style={{ marginBottom: "16px", pageBreakInside: "avoid" }}>
-                      <h3 style={{ fontSize: "12px", color: "#0a2e1a", margin: "0 0 4px 0", textTransform: "uppercase", letterSpacing: "1px" }}>
-                        Laboratory Orders
-                      </h3>
-                      <p style={{ fontSize: "13px", color: "#333", margin: 0 }}>
-                        {Array.from(labChecked).join(", ")}
-                      </p>
-                    </div>
-                  )}
-
-                  <div style={{ marginTop: "40px", borderTop: "1px solid #ccc", paddingTop: "20px", display: "flex", justifyContent: "space-between" }}>
-                    <div>
-                      <p style={{ fontSize: "13px", color: "#0a2e1a", fontWeight: "bold", marginBottom: "4px" }}>By Dr:</p>
-                      {doctorSignature ? (
-                        <p style={{ fontSize: "20px", color: "#333", fontFamily: "'Brush Script MT', 'Segoe Script', cursive, sans-serif", borderBottom: "1px solid #000", display: "inline-block", minWidth: "250px", padding: "4px 8px" }}>
-                          {doctorSignature}
-                        </p>
-                      ) : (
-                        <p style={{ fontSize: "14px", color: "#333", borderBottom: "1px solid #000", display: "inline-block", minWidth: "250px", padding: "4px 8px" }}>
-                          _______________________
-                        </p>
-                      )}
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <p style={{ fontSize: "13px", color: "#0a2e1a", fontWeight: "bold", marginBottom: "4px" }}>Date</p>
-                      <p style={{ fontSize: "13px", color: "#333" }}>
-                        {new Date().toLocaleDateString("en-UG", { day: "numeric", month: "long", year: "numeric" })}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+              {/* ── Print & Download Buttons ── */}
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={handlePrint}
+                  className="w-full py-3 rounded-xl font-semibold text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"
+                >
+                  <Printer size={16} /> PRINT
+                </button>
+                <button
+                  onClick={handleDownload}
+                  className="w-full py-3 rounded-xl font-semibold text-sm bg-[#0a2e1a] text-white hover:bg-[#0d3d24] transition-colors flex items-center justify-center gap-2"
+                >
+                  <FileText size={16} /> DOWNLOAD
+                </button>
               </div>
             </div>
           )}
@@ -1294,6 +1355,8 @@ function ConsultationPanel({
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );
@@ -1489,10 +1552,18 @@ interface AdmittedPatient {
   chiefComplaint: string;
 }
 
-function AdmittedPatientsView({ onBack }: { onBack: () => void }) {
+function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => void; staffId: number; staffName: string }) {
   const [patients, setPatients] = useState<AdmittedPatient[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [selectedPatient, setSelectedPatient] = useState<AdmittedPatient | null>(null);
+  const [discharging, setDischarging] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [dischargedPatientName, setDischargedPatientName] = useState("");
+  const [followUpNotes, setFollowUpNotes] = useState("");
+  const [updatedTreatmentPlan, setUpdatedTreatmentPlan] = useState("");
+  const [editingTreatmentPlan, setEditingTreatmentPlan] = useState(false);
+  const [treatmentDraft, setTreatmentDraft] = useState("");
 
   const fetchAdmitted = useCallback(async () => {
     try {
@@ -1513,6 +1584,46 @@ function AdmittedPatientsView({ onBack }: { onBack: () => void }) {
     return () => clearInterval(i);
   }, [fetchAdmitted]);
 
+  // Initialize treatment plan when a patient is selected
+  useEffect(() => {
+    if (selectedPatient) {
+      setUpdatedTreatmentPlan(selectedPatient.treatmentPlan || "");
+    }
+  }, [selectedPatient]);
+
+  const handleDischarge = async () => {
+    if (!selectedPatient) return;
+    setDischarging(true);
+    try {
+      // Save follow-up notes and discharge the patient to cashier for billing
+      const res = await fetch("/api/doctor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: selectedPatient.id,
+          staffId,
+          staffName,
+          treatmentPlan: updatedTreatmentPlan,
+          notes: followUpNotes || selectedPatient.chiefComplaint,
+          routeTo: "CASHIER",
+        }),
+      });
+      if (!res.ok) throw new Error("Discharge failed");
+      setDischargedPatientName(`${selectedPatient.lastName}, ${selectedPatient.firstName}`);
+      setShowSuccess(true);
+      setPatients((prev) => prev.filter((p) => p.id !== selectedPatient.id));
+      setTimeout(() => {
+        setShowSuccess(false);
+        setSelectedPatient(null);
+        setFollowUpNotes("");
+      }, 3000);
+    } catch (err) {
+      alert("Failed to discharge patient. Please try again.");
+    } finally {
+      setDischarging(false);
+    }
+  };
+
   const filtered = search
     ? patients.filter((p) => {
         const q = search.toLowerCase();
@@ -1524,6 +1635,159 @@ function AdmittedPatientsView({ onBack }: { onBack: () => void }) {
       })
     : patients;
 
+  // ── Detail / Encounter View ──
+  if (selectedPatient) {
+    const p = selectedPatient;
+    return (
+      <div>
+        <button
+          onClick={() => { setSelectedPatient(null); setFollowUpNotes(""); }}
+          className="mb-4 text-slate-500 flex items-center gap-1 hover:text-slate-700"
+        >
+          <ArrowLeft size={15} /> Back to Admitted Patients
+        </button>
+
+        {/* Patient Banner */}
+        <div className="bg-white rounded-2xl border border-slate-100 p-6 mb-6">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-4">
+              <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold ${
+                p.isEmergency ? "bg-red-100 text-red-700" : "bg-teal-100 text-teal-700"
+              }`}>
+                {p.firstName[0]}{p.lastName[0]}
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">{p.lastName}, {p.firstName}</h2>
+                <div className="flex items-center gap-3 text-sm text-slate-500 mt-1">
+                  <span className="font-mono text-xs text-[#0a2e1a]/60">{p.patientNumber}</span>
+                  <span className="text-slate-300">|</span>
+                  <span>{p.gender === "MALE" ? "Male" : "Female"}</span>
+                  <span className="text-slate-300">|</span>
+                  <span>{p.age} years</span>
+                  {p.phoneNumber && (
+                    <><span className="text-slate-300">|</span><span>{p.phoneNumber}</span></>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="bg-teal-100 text-teal-700 text-xs font-bold px-3 py-1.5 rounded-full">
+                {p.lengthOfStay} stay
+              </div>
+              <div className="text-[10px] text-slate-400 mt-1">
+                Admitted {new Date(p.admittedAt).toLocaleString("en-UG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Detail Cards */}
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="bg-white rounded-xl border border-slate-100 p-4">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Diagnosis</p>
+            <p className="text-sm text-slate-700">{p.diagnosis || "Not specified"}</p>
+          </div>
+          <div className="bg-white rounded-xl border border-slate-100 p-4">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Chief Complaint</p>
+            <p className="text-sm text-slate-700">{p.chiefComplaint || "Not recorded"}</p>
+          </div>
+        </div>
+
+        {/* Treatment Plan (read-only with pencil to edit) */}
+        <div className="bg-white rounded-xl border border-slate-100 p-4 mb-6">
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Treatment Plan
+            </label>
+            {!editingTreatmentPlan && (
+              <button
+                onClick={() => { setTreatmentDraft(updatedTreatmentPlan); setEditingTreatmentPlan(true); }}
+                className="text-slate-400 hover:text-[#0a2e1a] p-1 rounded-lg hover:bg-slate-100 transition-colors"
+                title="Edit treatment plan"
+              >
+                <Pencil size={14} />
+              </button>
+            )}
+          </div>
+          {editingTreatmentPlan ? (
+            <div className="space-y-3">
+              <textarea
+                className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[100px]"
+                placeholder="Update the treatment plan..."
+                value={treatmentDraft}
+                onChange={(e) => setTreatmentDraft(e.target.value)}
+              ></textarea>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setUpdatedTreatmentPlan(treatmentDraft); setEditingTreatmentPlan(false); }}
+                  className="bg-[#0a2e1a] text-white px-4 py-2 rounded-lg text-xs font-medium hover:bg-[#0d3d24] transition-colors"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => { setEditingTreatmentPlan(false); }}
+                  className="text-slate-500 px-4 py-2 text-xs font-medium hover:text-slate-700 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-700 whitespace-pre-wrap">{updatedTreatmentPlan || "No treatment plan documented"}</p>
+          )}
+        </div>
+
+        {/* Follow-up Notes */}
+        <div className="bg-white rounded-xl border border-slate-100 p-4 mb-6">
+          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">
+            Follow-up / Discharge Notes
+          </label>
+          <textarea
+            className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[100px]"
+            placeholder="Document follow-up instructions, discharge summary, or additional notes..."
+            value={followUpNotes}
+            onChange={(e) => setFollowUpNotes(e.target.value)}
+          />
+        </div>
+
+        {/* Discharge Button */}
+        <button
+          onClick={handleDischarge}
+          disabled={discharging}
+          className="w-full py-3.5 rounded-xl font-semibold text-sm bg-amber-600 text-white hover:bg-amber-700 active:bg-amber-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {discharging ? (
+            <><Loader2 size={16} className="animate-spin" /> Processing Discharge...</>
+          ) : (
+            <><LogOut size={16} /> Discharge Patient — Transfer for Billing</>
+          )}
+        </button>
+
+        {/* Success Modal */}
+        {showSuccess && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => { setShowSuccess(false); setSelectedPatient(null); }}>
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-8 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+                <CheckCircle size={32} className="text-emerald-600" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-800 mb-2">Patient Discharged</h3>
+              <p className="text-sm text-slate-600 mb-1">
+                <span className="font-semibold">{dischargedPatientName}</span> has been transferred for billing.
+              </p>
+              <p className="text-xs text-slate-400">
+                The patient will be seen at the cashier desk.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── List View ──
   return (
     <div>
       <button onClick={onBack} className="mb-4 text-slate-500 flex items-center gap-1 hover:text-slate-700">
@@ -1571,13 +1835,17 @@ function AdmittedPatientsView({ onBack }: { onBack: () => void }) {
                   <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">ID</th>
                   <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Diagnosis</th>
                   <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Chief Complaint</th>
-                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Length of Stay</th>
+                  <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Stay</th>
                   <th className="text-left px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Treatment Plan</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filtered.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50 transition-colors">
+                  <tr
+                    key={p.id}
+                    onClick={() => setSelectedPatient(p)}
+                    className="hover:bg-teal-50 transition-colors cursor-pointer"
+                  >
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-2.5">
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
@@ -1633,12 +1901,28 @@ interface DoctorRecordPatient {
   currentStatus: string;
   lastVisitDate: string;
   diagnosis: string;
+  treatmentPlan: string;
+  assessment: string;
+  chiefComplaint: string;
   visitCount: number;
+  wasAdmitted: boolean;
+  visitHistory: {
+    id: number;
+    date: string;
+    diagnosis: string;
+    treatmentPlan: string;
+    assessment: string;
+    notes: string;
+    symptoms: string;
+    physicalExamination: string;
+  }[];
 }
 
 function DoctorRecordsView({ onBack }: { onBack: () => void }) {
   const [records, setRecords] = useState<DoctorRecordPatient[]>([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [selectedRecord, setSelectedRecord] = useState<DoctorRecordPatient | null>(null);
 
   const fetchRecords = useCallback(async () => {
     try {
@@ -1657,15 +1941,176 @@ function DoctorRecordsView({ onBack }: { onBack: () => void }) {
     fetchRecords();
   }, [fetchRecords]);
 
+  const filtered = search
+    ? records.filter((p) => {
+        const q = search.toLowerCase();
+        return (
+          p.firstName.toLowerCase().includes(q) ||
+          p.lastName.toLowerCase().includes(q) ||
+          p.patientNumber.toLowerCase().includes(q)
+        );
+      })
+    : records;
+
+  // ── Detail View ──
+  if (selectedRecord) {
+    const p = selectedRecord;
+    return (
+      <div>
+        <button
+          onClick={() => setSelectedRecord(null)}
+          className="mb-4 text-slate-500 flex items-center gap-1 hover:text-slate-700"
+        >
+          <ArrowLeft size={15} /> Back to All Records
+        </button>
+
+        {/* Patient Banner */}
+        <div className="bg-white rounded-2xl border border-slate-100 p-6 mb-6">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold bg-[#0a2e1a]/10 text-[#0a2e1a]">
+                {p.firstName[0]}{p.lastName[0]}
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">{p.lastName}, {p.firstName}</h2>
+                <div className="flex items-center gap-3 text-sm text-slate-500 mt-1">
+                  <span className="font-mono text-xs text-[#0a2e1a]/60">{p.patientNumber}</span>
+                  <span className="text-slate-300">|</span>
+                  <span>{p.gender === "MALE" ? "Male" : "Female"}</span>
+                  <span className="text-slate-300">|</span>
+                  <span>{p.age} years</span>
+                  {p.phoneNumber && (<><span className="text-slate-300">|</span><span>{p.phoneNumber}</span></>)}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {p.wasAdmitted && (
+                <span className="text-[10px] font-bold bg-teal-100 text-teal-700 px-3 py-1.5 rounded-full">
+                  Was Admitted
+                </span>
+              )}
+              <span className="text-[10px] font-medium bg-slate-100 text-slate-500 px-3 py-1.5 rounded-full">
+                {p.visitCount} visit{p.visitCount !== 1 ? "s" : ""}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="bg-white rounded-xl border border-slate-100 p-4">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Chief Complaint</p>
+            <p className="text-sm text-slate-700">{p.chiefComplaint || "Not recorded"}</p>
+          </div>
+          <div className="bg-white rounded-xl border border-slate-100 p-4">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Latest Diagnosis</p>
+            <p className="text-sm text-slate-700">{p.diagnosis || "Not specified"}</p>
+          </div>
+        </div>
+
+        {/* Treatment Plan */}
+        {p.treatmentPlan && (
+          <div className="bg-white rounded-xl border border-slate-100 p-4 mb-6">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Latest Treatment Plan</p>
+            <p className="text-sm text-slate-700 whitespace-pre-wrap">{p.treatmentPlan}</p>
+          </div>
+        )}
+
+        {/* Visit History */}
+        <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+          <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Visit History</h3>
+          </div>
+          {p.visitHistory.length === 0 ? (
+            <div className="py-10 text-center text-sm text-slate-400">No visit records found</div>
+          ) : (
+            <div className="divide-y divide-slate-50">
+              {p.visitHistory.map((v) => (
+                <div key={v.id} className="px-5 py-4 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Calendar size={13} className="text-[#0a2e1a]/40" />
+                    <span className="text-xs font-semibold text-slate-600">
+                      {new Date(v.date).toLocaleDateString("en-UG", {
+                        weekday: "short", day: "numeric", month: "short", year: "numeric",
+                        hour: "2-digit", minute: "2-digit",
+                      })}
+                    </span>
+                  </div>
+                  {v.symptoms && (
+                    <div className="mb-1.5">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase mr-2">Complaint:</span>
+                      <span className="text-sm text-slate-600">{v.symptoms}</span>
+                    </div>
+                  )}
+                  {v.diagnosis && (
+                    <div className="mb-1.5">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase mr-2">Diagnosis:</span>
+                      <span className="text-sm text-slate-700">{v.diagnosis}</span>
+                    </div>
+                  )}
+                  {v.treatmentPlan && (
+                    <div className="mb-1.5">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase mr-2">Plan:</span>
+                      <span className="text-sm text-slate-600">{v.treatmentPlan}</span>
+                    </div>
+                  )}
+                  {v.assessment && (
+                    <div className="mb-1.5">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase mr-2">Assessment:</span>
+                      <span className="text-sm text-slate-600 whitespace-pre-wrap line-clamp-2">{v.assessment}</span>
+                    </div>
+                  )}
+                  {v.notes && (
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase mr-2">Notes:</span>
+                      <span className="text-sm text-slate-500 italic">{v.notes}</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── List View ──
+  const statusLabel: Record<string, string> = {
+    ADMITTED: "Admitted", DISCHARGED: "Discharged", AWAITING_PHARMACY: "At Pharmacy",
+    AWAITING_LAB: "At Lab", AWAITING_RADIOLOGY: "At Radiology", AWAITING_CASHIER: "At Cashier",
+    AWAITING_DOCTOR: "Awaiting Doctor", IN_CONSULTATION: "In Consultation",
+  };
+  const statusColor: Record<string, string> = {
+    ADMITTED: "bg-teal-100 text-teal-700", DISCHARGED: "bg-slate-100 text-slate-600",
+    AWAITING_PHARMACY: "bg-blue-100 text-blue-600", AWAITING_LAB: "bg-amber-100 text-amber-600",
+    AWAITING_RADIOLOGY: "bg-cyan-100 text-cyan-600",
+  };
+
   return (
     <div>
       <button onClick={onBack} className="mb-4 text-slate-500 flex items-center gap-1 hover:text-slate-700">
         <ArrowLeft size={15} /> Back to Dashboard
       </button>
 
-      <div className="flex items-center justify-between mb-5">
-        <h2 className="text-lg font-bold text-slate-700">Doctor Records</h2>
-        <span className="text-xs text-slate-400">{records.length} patient{records.length !== 1 ? "s" : ""} seen</span>
+      <div className="flex items-center gap-3 mb-5">
+        <div className="relative flex-1 max-w-md">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search by name or ID..."
+            className="w-full pl-9 pr-4 py-2.5 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-[#0a2e1a]"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <span className="text-xs text-slate-400">{filtered.length} patient{filtered.length !== 1 ? "s" : ""}</span>
+        <button
+          onClick={fetchRecords}
+          className="text-xs px-3 py-2 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center gap-1.5"
+        >
+          <Loader2 size={12} className={loading ? "animate-spin" : ""} /> Refresh
+        </button>
       </div>
 
       {loading ? (
@@ -1673,10 +2118,10 @@ function DoctorRecordsView({ onBack }: { onBack: () => void }) {
           <Loader2 size={24} className="animate-spin mx-auto text-[#0a2e1a] mb-3" />
           <p className="text-sm font-medium text-slate-400">Loading records...</p>
         </div>
-      ) : records.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <div className="text-center py-20">
           <ClipboardList size={48} className="mx-auto text-slate-200 mb-4" />
-          <p className="text-base font-semibold text-slate-400">No records yet</p>
+          <p className="text-base font-semibold text-slate-400">No records found</p>
           <p className="text-sm text-slate-300 mt-1">Patient records will appear after consultations</p>
         </div>
       ) : (
@@ -1694,67 +2139,50 @@ function DoctorRecordsView({ onBack }: { onBack: () => void }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {records.map((p) => {
-                  const statusLabel: Record<string, string> = {
-                    ADMITTED: "Admitted",
-                    DISCHARGED: "Discharged",
-                    AWAITING_PHARMACY: "At Pharmacy",
-                    AWAITING_LAB: "At Lab",
-                    AWAITING_RADIOLOGY: "At Radiology",
-                    AWAITING_CASHIER: "At Cashier",
-                    AWAITING_DOCTOR: "Awaiting Doctor",
-                    IN_CONSULTATION: "In Consultation",
-                  };
-                  const statusColor: Record<string, string> = {
-                    ADMITTED: "bg-teal-100 text-teal-700",
-                    DISCHARGED: "bg-slate-100 text-slate-600",
-                    AWAITING_PHARMACY: "bg-blue-100 text-blue-600",
-                    AWAITING_LAB: "bg-amber-100 text-amber-600",
-                    AWAITING_RADIOLOGY: "bg-cyan-100 text-cyan-600",
-                  };
-                  return (
-                    <tr key={p.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 bg-[#0a2e1a]/10 text-[#0a2e1a]">
-                            {p.firstName[0]}{p.lastName[0]}
-                          </div>
-                          <div>
-                            <p className="text-sm font-semibold text-slate-800">{p.lastName}, {p.firstName}</p>
-                            <p className="text-[11px] text-slate-400">{p.gender === "MALE" ? "M" : "F"} · {p.age} yrs</p>
-                          </div>
+                {filtered.map((p) => (
+                  <tr
+                    key={p.id}
+                    onClick={() => setSelectedRecord(p)}
+                    className="hover:bg-slate-50 transition-colors cursor-pointer"
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 bg-[#0a2e1a]/10 text-[#0a2e1a]">
+                          {p.firstName[0]}{p.lastName[0]}
                         </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="font-mono text-xs text-[#0a2e1a]/60">{p.patientNumber}</span>
-                      </td>
-                      <td className="px-4 py-3 max-w-[200px]">
-                        <p className="text-sm text-slate-700 line-clamp-2">{p.diagnosis || "—"}</p>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-xs text-slate-500">
-                          {new Date(p.lastVisitDate).toLocaleDateString("en-UG", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
-                          {p.visitCount}x
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-[10px] font-medium px-2.5 py-1 rounded-full ${
-                          statusColor[p.currentStatus] || "bg-slate-100 text-slate-500"
-                        }`}>
-                          {statusLabel[p.currentStatus] || p.currentStatus}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
+                        <div>
+                          <p className="text-sm font-semibold text-slate-800">{p.lastName}, {p.firstName}</p>
+                          <p className="text-[11px] text-slate-400">{p.gender === "MALE" ? "M" : "F"} · {p.age} yrs</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="font-mono text-xs text-[#0a2e1a]/60">{p.patientNumber}</span>
+                    </td>
+                    <td className="px-4 py-3 max-w-[200px]">
+                      <p className="text-sm text-slate-700 line-clamp-2">{p.diagnosis || "—"}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs text-slate-500">
+                        {new Date(p.lastVisitDate).toLocaleDateString("en-UG", {
+                          day: "numeric", month: "short", year: "numeric",
+                        })}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full">
+                        {p.visitCount}x
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`text-[10px] font-medium px-2.5 py-1 rounded-full ${
+                        statusColor[p.currentStatus] || "bg-slate-100 text-slate-500"
+                      }`}>
+                        {statusLabel[p.currentStatus] || p.currentStatus}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -1780,6 +2208,8 @@ function formatTimestamp(date: string | Date): string {
 // ─── Main Page Component ──────────────────────────────────────────────────────
 
 export default function DoctorsPage() {
+  const router = useRouter();
+  const [currentUser, setCurrentUser] = useState<{ id: number; fullName: string; staffId: number | null } | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [activePatient, setActivePatient] = useState<DashboardPatient | null>(null);
   const [activeSection, setActiveSection] = useState<"queue" | "admitted" | "records" | "appointments" | "updates">("queue");
@@ -1787,10 +2217,33 @@ export default function DoctorsPage() {
   const [error, setError] = useState<string | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Load logged-in user
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("user") || localStorage.getItem("user");
+      if (raw) {
+        const u = JSON.parse(raw);
+        setCurrentUser({ id: u.id, fullName: u.fullName || "Doctor", staffId: u.staffId || u.id });
+        // Heartbeat
+        fetch("/api/heartbeat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: u.id }),
+        }).catch(() => {});
+      } else {
+        router.replace("/login");
+      }
+    } catch { router.replace("/login"); }
+  }, [router]);
+
+  const doctorId = currentUser?.id || 1;
+  const doctorName = currentUser?.fullName || "Doctor";
+  const doctorStaffId = currentUser?.staffId || doctorId;
+
   const fetchDashboard = useCallback(async () => {
     try {
       setError(null);
-      const res = await fetch("/api/doctor/dashboard");
+      const res = await fetch(`/api/doctor/dashboard?doctorId=${doctorId}`);
       if (!res.ok) throw new Error("Failed to load dashboard");
       const data = await res.json();
       setDashboard(data);
@@ -1799,7 +2252,7 @@ export default function DoctorsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [doctorId]);
 
   // Initial fetch
   useEffect(() => {
@@ -1845,10 +2298,38 @@ export default function DoctorsPage() {
     }
   };
 
+  const handleStartConsultation = async (patient: DashboardPatient) => {
+    try {
+      await fetch("/api/doctor", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patientId: patient.id }),
+      });
+      // Update local state so the card changes instantly
+      setDashboard((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          patients: prev.patients.map((p) =>
+            p.id === patient.id ? { ...p, currentStatus: "IN_CONSULTATION" } : p
+          ),
+          metrics: {
+            ...prev.metrics,
+            awaitingDoctor: Math.max(0, prev.metrics.awaitingDoctor - 1),
+            inConsultation: prev.metrics.inConsultation + 1,
+          },
+        };
+      });
+    } catch {
+      // If it fails, just refresh the dashboard
+      fetchDashboard();
+    }
+  };
+
   return (
     <div className="flex min-h-screen bg-slate-50 font-sans">
       <Sidebar
-        doctorName="Doctor"
+        doctorName={doctorName}
         queueCount={waitingCount}
         admittedCount={metrics?.admittedPatients ?? 0}
         activeSection={activeSection}
@@ -1872,7 +2353,22 @@ export default function DoctorsPage() {
           setActivePatient(null);
           setActiveSection("updates");
         }}
-        onLogout={() => {}}
+        onLogout={async () => {
+          try {
+            const raw = sessionStorage.getItem("user") || localStorage.getItem("user");
+            if (raw) {
+              const u = JSON.parse(raw);
+              await fetch("/api/logout", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ userId: u.id, username: u.username }),
+              });
+            }
+          } catch {}
+          sessionStorage.removeItem("user");
+          localStorage.removeItem("user");
+          router.push("/");
+        }}
       />
 
       <main className="ml-56 flex-1 p-6">
@@ -1881,13 +2377,15 @@ export default function DoctorsPage() {
             patient={activePatient}
             onBack={handleBackToQueue}
             onComplete={handleCompleteConsultation}
+            staffId={doctorStaffId}
+            staffName={doctorName}
           />
         ) : activeSection === "records" ? (
           <DoctorRecordsView onBack={() => setActiveSection("queue")} />
         ) : activeSection === "appointments" ? (
           <AppointmentsView onBack={() => setActiveSection("queue")} />
         ) : activeSection === "admitted" ? (
-          <AdmittedPatientsView onBack={() => setActiveSection("queue")} />
+          <AdmittedPatientsView onBack={() => setActiveSection("queue")} staffId={doctorStaffId} staffName={doctorName} />
         ) : (
           <div className="flex gap-6">
             {/* ── Left Column: Metrics + Queue ── */}
@@ -1895,13 +2393,13 @@ export default function DoctorsPage() {
               {/* Metrics Bar */}
               {metrics && <MetricsBar metrics={metrics} />}
 
-	              {/* Queue count */}
-	              <div className="flex items-center justify-between mb-5">
-	                <h2 className="text-lg font-bold text-slate-700">Patient Queue</h2>
-	                <span className="text-xs text-slate-400">
-	                  {patients.length} patient{patients.length !== 1 ? "s" : ""} waiting
-	                </span>
-	              </div>
+		              {/* Queue count */}
+		              <div className="flex items-center justify-between mb-5">
+		                <h2 className="text-lg font-bold text-slate-700">Patient Queue</h2>
+		                <span className="text-xs font-medium text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+		                  {metrics?.awaitingDoctor ?? 0} waiting
+		                </span>
+		              </div>
 
               {/* Loading */}
               {loading && (
@@ -1944,6 +2442,7 @@ export default function DoctorsPage() {
                       key={p.id}
                       patient={p}
                       onSelect={handleSelectPatient}
+                      onStartConsultation={handleStartConsultation}
                     />
                   ))}
                 </div>
