@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Bell, XCircle, CheckCircle, MessageSquare, FlaskConical, Send, AlertTriangle, RefreshCw, FileText } from "lucide-react";
+import { Bell, XCircle, CheckCircle, MessageSquare, FlaskConical, Send, AlertTriangle, RefreshCw, FileText, ExternalLink } from "lucide-react";
 
 interface NotificationItem {
   id: number;
@@ -12,6 +12,7 @@ interface NotificationItem {
   createdAt: string;
   referenceId: number | null;
   referenceType: string | null;
+  patientId: number | null;
 }
 
 const NOTIF_ICONS: Record<string, any> = {
@@ -38,12 +39,14 @@ export default function NotificationInbox({
   maxHeight = "400px",
   showTitle = true,
   sidebar = false,
+  onNotificationClick,
 }: {
   department?: string;
   userId?: number;
   maxHeight?: string;
   showTitle?: boolean;
   sidebar?: boolean;
+  onNotificationClick?: (notification: NotificationItem) => void;
 }) {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -106,6 +109,28 @@ export default function NotificationInbox({
     } catch {}
   };
 
+  const handleNotifClick = (n: NotificationItem) => {
+    if (!n.isRead) markRead(n.id);
+    if (onNotificationClick) {
+      onNotificationClick(n);
+    } else if (n.patientId) {
+      // Navigate to a relevant page based on notification type
+      const targetMap: Record<string, string> = {
+        CRITICAL_RESULT: "Doctors",
+        RESULT_READY: "Doctors",
+        RESULT_SHARED: "Doctors",
+        COMMUNICATION: "receptionist",
+      };
+      const page = targetMap[n.type] || "receptionist";
+      window.open(`/${page}?patientId=${n.patientId}`, "_blank");
+    }
+  };
+
+  const handleViewPatient = (e: React.MouseEvent, patientId: number) => {
+    e.stopPropagation();
+    window.open(`/receptionist?patientId=${patientId}`, "_blank");
+  };
+
   const formatTime = (iso: string) => {
     try {
       const d = new Date(iso);
@@ -123,47 +148,56 @@ export default function NotificationInbox({
 
   return (
     <div className={`${sidebar ? "" : "relative"}`}>
+      <style>{`
+        @keyframes drop-fade-in {
+          from { opacity: 0; transform: translateY(-6px) scale(0.96); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .drop-fade-in {
+          animation: drop-fade-in 0.15s ease-out;
+        }
+      `}</style>
       {/* Bell button — sidebar variant vs inline variant */}
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={`relative flex items-center gap-2 w-full transition-all duration-150 ${
           sidebar
-            ? "px-3 py-2.5 rounded-xl text-sm font-medium text-white/70 hover:text-white hover:bg-white/10"
+            ? "px-3 py-2 rounded-lg text-xs font-semibold text-white/70 hover:text-white hover:bg-white/10"
             : "bg-white border border-slate-200 hover:border-[#00703C] text-slate-600 px-3 py-2 rounded-xl text-xs font-semibold shadow-sm"
         }`}
       >
-        <Bell size={sidebar ? 16 : 15} />
-        <span>{showTitle ? "Inbox" : ""}</span>
+        <Bell size={sidebar ? 14 : 15} />
+        {showTitle && <span className="text-xs">Inbox</span>}
         {unreadCount > 0 && (
-          <span className={`ml-auto ${sidebar ? "bg-white/25 text-white" : "bg-red-500 text-white"} text-[10px] font-bold px-2 py-0.5 rounded-full`}>
+          <span className={`ml-auto ${sidebar ? "bg-white/25 text-white" : "bg-red-500 text-white"} text-[10px] font-bold px-1.5 py-0.5 rounded-full`}>
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}
       </button>
 
-      {/* Dropdown panel — fixed to viewport so it never clips */}
+      {/* Dropdown panel — centered modal for both variants */}
       {isOpen && (
         <>
           <div className="fixed inset-0 z-[100]" onClick={() => setIsOpen(false)} />
           <div
-            className="fixed z-[101] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+            className="fixed z-[101] bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden drop-fade-in"
             style={{
-              width: "min(420px, calc(100vw - 32px))",
-              maxHeight: "min(560px, calc(100vh - 100px))",
+              width: "min(480px, calc(100vw - 40px))",
+              maxHeight: "min(620px, calc(100vh - 80px))",
               top: "50%",
               left: "50%",
               transform: "translate(-50%, -50%)",
             }}
           >
             {/* Header */}
-            <div className="bg-gradient-to-r from-[#00803F] to-[#00A651] px-5 py-4 flex items-center justify-between">
+            <div className="bg-gradient-to-r from-[#00803F] to-[#00A651] px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Bell size={18} className="text-white/90" />
-                <span className="font-bold text-sm text-white">
+                <Bell size={15} className="text-white/90" />
+                <span className="font-bold text-xs text-white">
                   Notifications
                 </span>
                 {unreadCount > 0 && (
-                  <span className="bg-white/25 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                  <span className="bg-white/25 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
                     {unreadCount} new
                   </span>
                 )}
@@ -172,28 +206,28 @@ export default function NotificationInbox({
                 {unreadCount > 0 && (
                   <button
                     onClick={markAllRead}
-                    className="text-[10px] font-bold text-white/80 hover:text-white px-2 py-1 rounded-lg hover:bg-white/10 transition"
+                    className="text-[9px] font-bold text-white/80 hover:text-white px-2 py-1 rounded-lg hover:bg-white/10 transition"
                   >
                     Mark all read
                   </button>
                 )}
                 <button onClick={() => setIsOpen(false)} className="text-white/60 hover:text-white p-1 rounded-lg hover:bg-white/10 transition">
-                  <XCircle size={16} />
+                  <XCircle size={14} />
                 </button>
               </div>
             </div>
 
             {/* List */}
-            <div className="overflow-y-auto" style={{ maxHeight: "calc(560px - 60px)" }}>
+            <div className="overflow-y-auto" style={{ maxHeight: "calc(460px - 52px)" }}>
               {loading && notifications.length === 0 ? (
-                <div className="flex items-center justify-center py-16 text-slate-300">
-                  <RefreshCw size={24} className="animate-spin" />
+                <div className="flex items-center justify-center py-12 text-slate-300">
+                  <RefreshCw size={20} className="animate-spin" />
                 </div>
               ) : notifications.length === 0 ? (
-                <div className="py-16 text-center text-slate-400 text-sm">
-                  <Bell size={40} className="mx-auto mb-3 text-slate-200" />
+                <div className="py-12 text-center text-slate-400 text-xs">
+                  <Bell size={32} className="mx-auto mb-2 text-slate-200" />
                   <p className="font-semibold text-slate-500">No notifications</p>
-                  <p className="text-xs mt-1 text-slate-400">Updates and alerts will appear here</p>
+                  <p className="text-[11px] mt-1 text-slate-400">Updates and alerts will appear here</p>
                 </div>
               ) : (
                 notifications.map((n) => {
@@ -202,8 +236,8 @@ export default function NotificationInbox({
                   return (
                     <div
                       key={n.id}
-                      onClick={() => !n.isRead && markRead(n.id)}
-                      className={`px-5 py-3.5 border-b border-slate-100 cursor-pointer transition hover:bg-slate-50 ${
+                      onClick={() => handleNotifClick(n)}
+                      className={`px-4 py-3 border-b border-slate-100 cursor-pointer transition hover:bg-slate-50 active:bg-slate-100 ${
                         !n.isRead ? "bg-blue-50/30" : ""
                       }`}
                     >
@@ -214,29 +248,29 @@ export default function NotificationInbox({
                           }`}
                         >
                           <Icon
-                            size={16}
+                            size={15}
                             className={!n.isRead ? "text-[#00803F]" : "text-slate-400"}
                           />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-start justify-between gap-2">
                             <p
-                              className={`text-sm font-semibold truncate ${
+                              className={`text-xs font-semibold truncate ${
                                 !n.isRead ? "text-slate-800" : "text-slate-500"
                               }`}
                             >
                               {n.title}
                             </p>
-                            <span className="text-[11px] text-slate-400 flex-shrink-0 whitespace-nowrap">
+                            <span className="text-[10px] text-slate-400 flex-shrink-0 whitespace-nowrap">
                               {formatTime(n.createdAt)}
                             </span>
                           </div>
-                          <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">
+                          <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2 leading-relaxed">
                             {n.message}
                           </p>
                           <div className="flex items-center gap-2 mt-1.5">
                             <span
-                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
                                 !n.isRead
                                   ? "bg-[#00803F]/10 text-[#00803F]"
                                   : "bg-slate-100 text-slate-400"
@@ -244,8 +278,16 @@ export default function NotificationInbox({
                             >
                               {n.type.replace(/_/g, " ")}
                             </span>
+                            {n.patientId && (
+                              <button
+                                onClick={(e) => handleViewPatient(e, n.patientId!)}
+                                className="text-[9px] text-blue-600 font-semibold flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-blue-50 transition-colors"
+                              >
+                                <ExternalLink size={9} /> View Patient
+                              </button>
+                            )}
                             {!n.isRead && (
-                              <span className="w-2 h-2 rounded-full bg-[#00803F]" />
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#00803F] animate-pulse" />
                             )}
                           </div>
                         </div>

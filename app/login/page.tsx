@@ -91,7 +91,7 @@ export default function LoginPage() {
           </div>
 
           {/* FORM */}
-          <form onSubmit={handleLogin} className="p-6 space-y-5">
+          <form onSubmit={handleLogin} className="p-6 space-y-5" suppressHydrationWarning>
 
             {/* ERROR */}
             {error && (
@@ -111,6 +111,7 @@ export default function LoginPage() {
                 className="w-full mt-1 border border-gray-300 rounded-xl px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-600"
                 placeholder="Enter username"
                 required
+                suppressHydrationWarning
               />
             </div>
 
@@ -128,12 +129,14 @@ export default function LoginPage() {
                   className="w-full border border-gray-300 rounded-xl px-4 py-3 pr-16 focus:outline-none focus:ring-2 focus:ring-green-600"
                   placeholder="Enter password"
                   required
+                  suppressHydrationWarning
                 />
 
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute right-3 top-3 text-sm text-gray-500"
+                  suppressHydrationWarning
                 >
                   {showPassword ? "Hide" : "Show"}
                 </button>
@@ -150,6 +153,7 @@ export default function LoginPage() {
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
                 className="w-full mt-1 border border-gray-300 rounded-xl px-4 py-3 bg-white text-gray-900 font-medium focus:outline-none focus:ring-2 focus:ring-green-600"
+                suppressHydrationWarning
               >
                 <option value="RECEPTIONIST">Receptionist</option>
                 <option value="ADMINISTRATOR">Administrator</option>
@@ -167,6 +171,7 @@ export default function LoginPage() {
                 type="checkbox"
                 checked={rememberMe}
                 onChange={(e) => setRememberMe(e.target.checked)}
+                suppressHydrationWarning
               />
               Remember me
             </div>
@@ -175,6 +180,7 @@ export default function LoginPage() {
             <button
               disabled={loading}
               className="w-full bg-green-800 hover:bg-green-700 text-white py-3 rounded-xl font-semibold transition"
+              suppressHydrationWarning
             >
               {loading ? "Logging in..." : "Login"}
             </button>

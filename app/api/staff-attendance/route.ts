@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
 
-// GET — fetch attendance records
+// GET — fetch attendance records and/or staff list
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -9,7 +9,48 @@ export async function GET(req: NextRequest) {
     const date = searchParams.get("date");
     const staffId = searchParams.get("staffId");
     const active = searchParams.get("active"); // "true" = only clocked in but not out
+    const staffList = searchParams.get("staffList"); // "true" = return all eligible staff with today's attendance
 
+    // ── Staff list mode — return all staff (except receptionist & admin) with today's attendance ──
+    if (staffList === "true") {
+      const today = new Date();
+      const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const dayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+
+      const allStaff = await prisma.staff.findMany({
+        where: {
+          User: {
+            role: {
+              notIn: ["RECEPTIONIST", "ADMINISTRATOR"],
+            },
+          },
+        },
+        include: {
+          User: { select: { role: true } },
+          StaffAttendance: {
+            where: {
+              date: { gte: dayStart, lt: dayEnd },
+            },
+            orderBy: { clockIn: "desc" },
+            take: 1,
+          },
+        },
+        orderBy: { fullName: "asc" },
+      });
+
+      const mapped = allStaff.map((s) => ({
+        id: s.id,
+        fullName: s.fullName,
+        department: s.department,
+        role: s.User?.role || null,
+        todayAttendance: s.StaffAttendance[0] || null,
+        isClockedIn: s.StaffAttendance[0]?.clockOut === null || false,
+      }));
+
+      return NextResponse.json({ staffList: mapped });
+    }
+
+    // ── Normal attendance records mode ──
     const where: any = {};
     if (department) where.department = department;
     if (staffId) where.staffId = parseInt(staffId);
@@ -17,8 +58,8 @@ export async function GET(req: NextRequest) {
     if (date) {
       const d = new Date(date);
       where.date = {
-        gte: new Date(d.setHours(0,0,0,0)),
-        lt: new Date(new Date(date).setHours(23,59,59,999)),
+        gte: new Date(d.setHours(0, 0, 0, 0)),
+        lt: new Date(new Date(date).setHours(23, 59, 59, 999)),
       };
     }
 
@@ -112,15 +153,15 @@ export async function DELETE(req: NextRequest) {
   }
 }
 
-// PATCH — clock out
+// PATCH — clock out (with optional manual time)
 export async function PATCH(req: NextRequest) {
   try {
-    const { id } = await req.json();
+    const { id, clockOut } = await req.json();
     if (!id) return NextResponse.json({ error: "id required." }, { status: 400 });
 
     const updated = await prisma.staffAttendance.update({
       where: { id: parseInt(id) },
-      data: { clockOut: new Date() },
+      data: { clockOut: clockOut ? new Date(clockOut) : new Date() },
     });
 
     return NextResponse.json({ success: true, record: updated });

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Search, PackageCheck, Pill, LogOut, User } from "lucide-react";
 import NotificationInbox from "../components/NotificationInbox";
+import StaffMessaging from "../components/StaffMessaging";
 import { useRouter } from "next/navigation";
 
 type PrescriptionStatus = "PENDING" | "DISPENSED";
@@ -108,6 +109,7 @@ export default function PharmacyPage() {
         </div>
 
         <div className="mb-2"><NotificationInbox department="Pharmacy" /></div>
+        <div className="mb-2"><StaffMessaging /></div>
         <button
           onClick={handleLogout}
           className="flex items-center gap-2 text-red-200 hover:text-white"

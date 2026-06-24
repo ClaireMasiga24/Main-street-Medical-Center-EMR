@@ -214,6 +214,7 @@ export async function POST(req: NextRequest) {
           type: "GENERAL",
           referenceId: dentalRecord.id,
           referenceType: "dental_record",
+          patientId: patient?.id || patientId,
         });
       }
 

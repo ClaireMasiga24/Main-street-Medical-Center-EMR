@@ -267,7 +267,7 @@ export async function POST(req: Request) {
             department: labReq.referralSource || "GENERAL",
             title: "Lab Results Ready",
             message: `Results for ${labReq.testName} - ${labReq.Patient.firstName} ${labReq.Patient.lastName} (${labReq.Patient.patientNumber}) are now available.`,
-            type: "RESULT_READY", referenceId: labReq.id, referenceType: "lab_request",
+            type: "RESULT_READY", referenceId: labReq.id, referenceType: "lab_request", patientId: labReq.Patient.id,
           });
           // Send email to requesting department
           const emails = await getDepartmentEmails(labReq.referralSource || "");
@@ -328,7 +328,7 @@ export async function POST(req: Request) {
           department: targetDept,
           title: "Lab Result Shared With Your Department",
           message: `${sharedByName} shared lab results${note ? `: ${note}` : ""}`,
-          type: "RESULT_SHARED", referenceId: parseInt(labRequestId), referenceType: "lab_request",
+          type: "RESULT_SHARED", referenceId: parseInt(labRequestId), referenceType: "lab_request", patientId: parseInt(patientId),
         });
         // Send email to target department
         const emails = await getDepartmentEmails(targetDept);

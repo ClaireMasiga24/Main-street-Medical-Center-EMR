@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
       followUpNotes, examinationFindings,
       diagnosis, treatmentPlan,
       labOrders, imagingOrders,
+      notifyDepartment,
     } = await req.json();
 
     if (!patientId || !doctorId || !doctorName) {
@@ -130,14 +131,36 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // 5. Log to timeline
+      // 5. Create notification for the target department (e.g. Nurse/Midwife)
+      if (notifyDepartment) {
+        const deptName = notifyDepartment === "NURSE" ? "Nurse/Midwife" : notifyDepartment;
+        await tx.notification.create({
+          data: {
+            department: deptName,
+            title: "Patient sent for monitoring",
+            message: `${followUpNotes || `Dr. ${doctorName} sent patient for monitoring`}`,
+            type: "RESULT_READY",
+          },
+        });
+      }
+
+      // 6. Log to timeline
+      const timelineDesc = notifyDepartment === "NURSE"
+        ? `Dr. ${doctorName} sent patient to Nurse/Midwife for monitoring`
+        : `Dr. ${doctorName} performed a review — ${createdLabRequests.length} lab(s), ${createdImagingRequests.length} imaging(s) ordered`;
+
       await tx.patientTimeline.create({
         data: {
           patientId,
-          action: "PROCEDURE",
+          action: notifyDepartment === "NURSE" ? "REFERRAL" : "PROCEDURE",
           fromDepartment: "DOCTOR",
-          description: `Dr. ${doctorName} performed a review — ${createdLabRequests.length} lab(s), ${createdImagingRequests.length} imaging(s) ordered`,
-          metadata: JSON.stringify({ reviewId: review.id, labCount: createdLabRequests.length, imagingCount: createdImagingRequests.length }),
+          description: timelineDesc,
+          metadata: JSON.stringify({
+            reviewId: review.id,
+            labCount: createdLabRequests.length,
+            imagingCount: createdImagingRequests.length,
+            notifyDepartment: notifyDepartment || null,
+          }),
           performedBy: doctorName,
           performedById: doctorId,
         },

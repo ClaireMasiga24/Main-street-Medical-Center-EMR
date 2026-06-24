@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
 import NotificationInbox from "../components/NotificationInbox";
+import StaffMessaging from "../components/StaffMessaging";
 import { useRouter } from "next/navigation";
 import {
   Search, UserPlus, UserCheck, ArrowRight, CheckCircle2,
@@ -10,6 +11,7 @@ import {
   LogOut, Receipt, Plus, Trash2, CreditCard, Banknote, Smartphone,
   Printer, X, BadgeCheck, Stethoscope, FlaskConical, Scan, Baby,
   Waves, RadioTower, Calendar, Clock, UserRound, Loader2,
+  Pencil,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -114,6 +116,14 @@ const ROUTE_OPTIONS: RouteOption[] = [
     color: "bg-teal-600 hover:bg-teal-700",
     ringColor: "border-teal-500",
   },
+  // ── ANC / Midwife — not a status change; creates an ANC appointment ──
+  {
+    label: "MIDWIFE",
+    status: "MIDWIFE_ANC",
+    icon: <Baby size={14} />,
+    color: "bg-purple-600 hover:bg-purple-700",
+    ringColor: "border-purple-500",
+  },
 ];
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -132,6 +142,61 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 const formatUGX = (n: number) =>
   "UGX " + Math.round(n).toLocaleString("en-UG");
 
+// ─── Lab Test Price List ────────────────────────────────────────────────────────
+
+interface LabTestItem {
+  code: string;
+  name: string;
+  defaultPrice: number;
+}
+
+const LAB_TESTS: LabTestItem[] = [
+  { code: "LAB003", name: "Blood Group", defaultPrice: 10000 },
+  { code: "LAB004", name: "Brucella Agglutination Test", defaultPrice: 15000 },
+  { code: "LAB009", name: "Complete Blood Count / CBC", defaultPrice: 20000 },
+  { code: "T002",   name: "ESR", defaultPrice: 15000 },
+  { code: "LAB050", name: "Fasting Blood Sugar / FBS", defaultPrice: 5000 },
+  { code: "T001",   name: "Full Haemogram / CBC", defaultPrice: 15000 },
+  { code: "LAB007", name: "H. Pylori Antigen", defaultPrice: 20000 },
+  { code: "LAB012", name: "Hepatitis B SAg", defaultPrice: 15000 },
+  { code: "LAB031", name: "HIV 1/2", defaultPrice: 5000 },
+  { code: "T019",   name: "Malaria BS × MPS", defaultPrice: 5000 },
+  { code: "LAB001", name: "Malaria MRDT", defaultPrice: 5000 },
+  { code: "LAB035", name: "Post BS", defaultPrice: 10000 },
+  { code: "LAB011", name: "Pregnancy Urine Test", defaultPrice: 5000 },
+  { code: "LAB051", name: "Random Blood Sugar / RBS", defaultPrice: 5000 },
+  { code: "LAB023", name: "Sickling Test MHS", defaultPrice: 20000 },
+  { code: "LAB027", name: "Stool Analysis", defaultPrice: 10000 },
+  { code: "LAB028", name: "Syphilis TPHA", defaultPrice: 10000 },
+  { code: "LAB002", name: "Typhoid", defaultPrice: 5000 },
+  { code: "LAB030", name: "Urinalysis", defaultPrice: 10000 },
+];
+
+const LAB_PRICE_STORAGE_KEY = "msmc_lab_prices";
+
+function getLabPrice(code: string): number {
+  if (typeof window === "undefined") return 0;
+  try {
+    const stored = localStorage.getItem(LAB_PRICE_STORAGE_KEY);
+    if (stored) {
+      const prices: Record<string, number> = JSON.parse(stored);
+      if (prices[code] !== undefined) return prices[code];
+    }
+  } catch {}
+  const test = LAB_TESTS.find((t) => t.code === code);
+  return test?.defaultPrice ?? 0;
+}
+
+function setLabPrice(code: string, price: number) {
+  if (typeof window === "undefined") return;
+  try {
+    const stored = localStorage.getItem(LAB_PRICE_STORAGE_KEY);
+    const prices: Record<string, number> = stored ? JSON.parse(stored) : {};
+    prices[code] = price;
+    localStorage.setItem(LAB_PRICE_STORAGE_KEY, JSON.stringify(prices));
+  } catch {}
+}
+
 // ─── StaffAttendancePanel ──────────────────────────────────────────────────────
 
 interface AttendanceRecord {
@@ -146,41 +211,118 @@ interface AttendanceRecord {
   Staff: { fullName: string; department: string } | null;
 }
 
+interface StaffMember {
+  id: number;
+  fullName: string;
+  department: string;
+  role: string | null;
+  todayAttendance: AttendanceRecord | null;
+  isClockedIn: boolean;
+}
+
 function StaffAttendancePanel() {
+  const [panelTab, setPanelTab] = useState<"clock" | "records">("clock");
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"all" | "active" | "checked-out">("all");
-  const [showForm, setShowForm] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [clockingId, setClockingId] = useState<number | null>(null);
 
-  // Form state
-  const [formName, setFormName] = useState("");
-  const [formDept, setFormDept] = useState("");
-  const [formClockIn, setFormClockIn] = useState(new Date().toISOString().slice(0, 16));
-  const [formClockOut, setFormClockOut] = useState("");
+  // Manual time-entry modal state
+  const [timeEntry, setTimeEntry] = useState<{
+    staff: StaffMember;
+    mode: "clockIn" | "clockOut";
+  } | null>(null);
+  const [entryTime, setEntryTime] = useState("");
 
-  // Confirmation state for delete
-  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
-
-  const fetchAttendance = useCallback(async () => {
-    setLoading(true);
+  // ── Fetch staff list (for Quick Clock) ──────────────────────────────────────
+  const fetchStaffList = useCallback(async () => {
     try {
-      const params = new URLSearchParams();
-      if (filter === "active") params.set("active", "true");
+      const res = await fetch("/api/staff-attendance?staffList=true");
+      const data = await res.json();
+      setStaffList(data.staffList ?? []);
+    } catch {
+      setStaffList([]);
+    }
+  }, []);
+
+  // ── Fetch attendance records (for Records view) ─────────────────────────────
+  const fetchRecords = useCallback(async () => {
+    try {
       const today = new Date().toISOString().split("T")[0];
-      params.set("date", today);
-      const res = await fetch(`/api/staff-attendance?${params}`);
+      const res = await fetch(`/api/staff-attendance?date=${today}`);
       const data = await res.json();
       setRecords(data.records ?? []);
     } catch {
       setRecords([]);
-    } finally {
-      setLoading(false);
     }
-  }, [filter]);
+  }, []);
 
-  useEffect(() => { fetchAttendance(); }, [fetchAttendance]);
+  // ── Initial fetch & auto-refresh ────────────────────────────────────────────
+  useEffect(() => {
+    fetchStaffList();
+    fetchRecords();
+    const interval = setInterval(() => {
+      fetchStaffList();
+      fetchRecords();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [fetchStaffList, fetchRecords]);
 
+  // ── Open manual time-entry modal ────────────────────────────────────────────
+  const openTimeEntry = (staff: StaffMember, mode: "clockIn" | "clockOut") => {
+    setEntryTime(new Date().toISOString().slice(0, 16));
+    setTimeEntry({ staff, mode });
+  };
+
+  // ── Submit manual time entry ────────────────────────────────────────────────
+  const handleManualTimeEntry = async () => {
+    if (!timeEntry || clockingId) return;
+    setClockingId(timeEntry.mode === "clockIn" ? timeEntry.staff.id : (timeEntry.staff.todayAttendance?.id ?? timeEntry.staff.id));
+    try {
+      if (timeEntry.mode === "clockIn") {
+        const res = await fetch("/api/staff-attendance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            staffId: timeEntry.staff.id,
+            clockIn: entryTime,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(err.error || "Failed to clock in");
+        }
+      } else {
+        const attendanceId = timeEntry.staff.todayAttendance?.id;
+        if (!attendanceId) { alert("No active attendance record to clock out"); return; }
+        const res = await fetch("/api/staff-attendance", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: attendanceId, clockOut: entryTime }),
+        });
+        if (!res.ok) {
+          alert("Failed to clock out");
+        }
+      }
+      setTimeEntry(null);
+      await fetchStaffList();
+      await fetchRecords();
+    } catch {
+      alert("Failed to save time entry");
+    } finally {
+      setClockingId(null);
+    }
+  };
+
+  // ── Delete record ───────────────────────────────────────────────────────────
+  const handleDelete = async (id: number) => {
+    try {
+      await fetch(`/api/staff-attendance?id=${id}`, { method: "DELETE" });
+      await fetchRecords();
+    } catch {}
+  };
+
+  // ── Formatters ──────────────────────────────────────────────────────────────
   const formatTime = (iso: string) =>
     new Date(iso).toLocaleTimeString("en-UG", { hour: "2-digit", minute: "2-digit" });
 
@@ -192,47 +334,8 @@ function StaffAttendancePanel() {
     return `${h}h ${m}m`;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formName.trim()) return;
-    setSaving(true);
-    try {
-      const body: any = { staffName: formName.trim(), department: formDept.trim() || null };
-      const now = new Date();
-      const clockInDate = new Date(formClockIn);
-      // Only send clockIn if it differs from current time by more than a minute
-      if (Math.abs(clockInDate.getTime() - now.getTime()) > 60000) {
-        body.clockIn = formClockIn;
-      }
-      if (formClockOut) body.clockOut = formClockOut;
-
-      const res = await fetch("/api/staff-attendance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        setFormName("");
-        setFormDept("");
-        setFormClockIn(new Date().toISOString().slice(0, 16));
-        setFormClockOut("");
-        setShowForm(false);
-        fetchAttendance();
-      }
-    } catch {} finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (id: number) => {
-    try {
-      await fetch(`/api/staff-attendance?id=${id}`, { method: "DELETE" });
-      setConfirmDelete(null);
-      fetchAttendance();
-    } catch {}
-  };
-
-  const activeCount = records.filter((r) => !r.clockOut).length;
+  const activeCount = staffList.filter((s) => s.isClockedIn).length;
+  const totalCount = staffList.length;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -244,7 +347,7 @@ function StaffAttendancePanel() {
             Staff Attendance
           </span>
           <span className="text-[10px] text-slate-400 ml-1">
-            {records.length} records
+            {new Date().toLocaleDateString("en-UG", { day: "numeric", month: "short", year: "numeric" })}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -253,167 +356,272 @@ function StaffAttendancePanel() {
               {activeCount} active
             </span>
           )}
-          <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full">
-            {new Date().toLocaleDateString("en-UG", { day: "numeric", month: "short", year: "numeric" })}
-          </span>
+          <button
+            onClick={() => { fetchStaffList(); fetchRecords(); }}
+            className="text-[10px] font-bold text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg hover:bg-blue-50 transition"
+          >
+            Refresh
+          </button>
         </div>
       </div>
 
-      {/* Filter tabs + Add button */}
-      <div className="flex items-center justify-between px-5 pt-3 pb-1 border-b border-slate-50">
-        <div className="flex gap-1">
-          {(["all", "active", "checked-out"] as const).map((f) => (
-            <button key={f} onClick={() => setFilter(f)}
-              className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full transition-colors ${
-                filter === f
-                  ? "bg-blue-600 text-white"
-                  : "bg-slate-100 text-slate-500 hover:bg-slate-200"
-              }`}>
-              {f === "all" ? "All" : f === "active" ? "Active" : "Checked Out"}
-            </button>
-          ))}
-        </div>
-        <button onClick={() => { setShowForm(!showForm); setConfirmDelete(null); }}
-          className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full transition-colors ${
-            showForm ? "bg-slate-200 text-slate-600" : "bg-blue-600 text-white hover:bg-blue-700"
-          }`}>
-          {showForm ? "Cancel" : "+ Add Record"}
+      {/* Sub-tabs: Quick Clock | Records */}
+      <div className="flex gap-1 px-5 pt-3 pb-1 border-b border-slate-50">
+        <button
+          onClick={() => setPanelTab("clock")}
+          className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-full transition-colors ${
+            panelTab === "clock"
+              ? "bg-blue-600 text-white"
+              : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+          }`}
+        >
+          Quick Clock
+        </button>
+        <button
+          onClick={() => setPanelTab("records")}
+          className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-full transition-colors ${
+            panelTab === "records"
+              ? "bg-blue-600 text-white"
+              : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+          }`}
+        >
+          Attendance Records
         </button>
       </div>
 
-      {/* ── ADD RECORD FORM ──────────────────────────────────────────────────── */}
-      {showForm && (
-        <div className="border-b border-slate-100 bg-slate-50/60 px-5 py-4">
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
-            <div className="sm:col-span-2 lg:col-span-1">
-              <label className="block text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">Staff Name *</label>
-              <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)} required
-                placeholder="e.g. Jane Smith"
-                className="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-500" />
+      {/* ── QUICK CLOCK TAB ──────────────────────────────────────────────────── */}
+      {panelTab === "clock" && (
+        <div className="p-5">
+          {staffList.length === 0 && loading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 size={20} className="text-slate-300 animate-spin" />
             </div>
-            <div>
-              <label className="block text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">Department / Role</label>
-              <input type="text" value={formDept} onChange={(e) => setFormDept(e.target.value)}
-                placeholder="e.g. Nursing"
-                className="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-500" />
+          ) : staffList.length === 0 ? (
+            <div className="text-center py-10 text-slate-400">
+              <UserRound size={32} className="mx-auto text-slate-200 mb-3" />
+              <p className="text-xs font-medium">No staff members found</p>
+              <p className="text-[10px] text-slate-300 mt-1">Staff accounts need to be created in the system first</p>
             </div>
-            <div>
-              <label className="block text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">Check In</label>
-              <input type="datetime-local" value={formClockIn} onChange={(e) => setFormClockIn(e.target.value)}
-                className="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-500" />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {staffList.map((staff) => (
+                <div
+                  key={staff.id}
+                  className={`relative rounded-xl border-2 p-4 transition-all ${
+                    staff.isClockedIn
+                      ? "border-emerald-300 bg-emerald-50/40 shadow-sm"
+                      : "border-slate-100 bg-white hover:border-slate-200 hover:shadow-sm"
+                  }`}
+                >
+                  {/* Avatar + Name */}
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-extrabold flex-shrink-0 ${
+                      staff.isClockedIn
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-slate-100 text-slate-500"
+                    }`}>
+                      {staff.fullName.split(" ").map((s) => s[0]).join("").slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-slate-800 truncate">{staff.fullName}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[9px] font-semibold text-slate-400 truncate">{staff.department}</span>
+                        {staff.isClockedIn && (
+                          <span className="text-[8px] font-extrabold uppercase text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded-full flex-shrink-0">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Today's attendance info */}
+                  {staff.todayAttendance && (
+                    <div className="text-[10px] text-slate-500 mb-3 space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <LogOut size={10} className="text-slate-400" />
+                        <span className="font-medium">In: {formatTime(staff.todayAttendance.clockIn)}</span>
+                      </div>
+                      {staff.todayAttendance.clockOut && (
+                        <div className="flex items-center gap-1.5">
+                          <LogOut size={10} className="rotate-180 text-slate-400" />
+                          <span className="font-medium">Out: {formatTime(staff.todayAttendance.clockOut)}</span>
+                          <span className="text-slate-300">({formatDuration(staff.todayAttendance.clockIn, staff.todayAttendance.clockOut)})</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Two buttons — Clock In & Clock Out always visible */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => openTimeEntry(staff, "clockIn")}
+                      disabled={clockingId !== null}
+                      className="flex-1 flex items-center justify-center gap-1 rounded-lg bg-[#00703C] py-2 text-[10px] font-extrabold uppercase tracking-wider text-white hover:bg-emerald-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {clockingId === staff.id ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <LogOut size={12} />
+                      )}
+                      Clock In
+                    </button>
+                    <button
+                      onClick={() => openTimeEntry(staff, "clockOut")}
+                      disabled={clockingId !== null}
+                      className="flex-1 flex items-center justify-center gap-1 rounded-lg border border-red-200 bg-red-50 py-2 text-[10px] font-extrabold uppercase tracking-wider text-red-600 hover:bg-red-100 hover:border-red-300 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {clockingId === (staff.todayAttendance?.id ?? staff.id) ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <LogOut size={12} className="rotate-180" />
+                      )}
+                      Clock Out
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {/* ── Manual Time-Entry Modal ──────────────────────────────── */}
+              {timeEntry && (
+                <>
+                  <div className="fixed inset-0 z-[200] bg-black/30" onClick={() => setTimeEntry(null)} />
+                  <div className="fixed z-[201] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-2xl border border-slate-200 w-[min(380px,calc(100vw-32px))] p-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-extrabold text-slate-800">
+                        {timeEntry.mode === "clockIn" ? "Clock In" : "Clock Out"}
+                      </h3>
+                      <button onClick={() => setTimeEntry(null)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition">
+                        <X size={16} />
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-600 mb-1">
+                      {timeEntry.staff.fullName} &middot; {timeEntry.staff.department}
+                    </p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-3">
+                      {timeEntry.mode === "clockIn" ? "Enter clock-in time" : "Enter clock-out time"}
+                    </p>
+                    <input
+                      type="datetime-local"
+                      value={entryTime}
+                      onChange={(e) => setEntryTime(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold outline-none transition focus:border-[#00703C] mb-4"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setTimeEntry(null)}
+                        className="flex-1 rounded-xl border border-slate-200 py-2.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50 transition"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleManualTimeEntry}
+                        disabled={clockingId !== null || !entryTime}
+                        className="flex-1 rounded-xl bg-[#00703C] py-2.5 text-[10px] font-extrabold uppercase tracking-wider text-white hover:bg-emerald-700 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {clockingId !== null ? (
+                          <Loader2 size={12} className="animate-spin mx-auto" />
+                        ) : (
+                          `Save ${timeEntry.mode === "clockIn" ? "Clock In" : "Clock Out"}`
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
             </div>
-            <div>
-              <label className="block text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-1">Check Out</label>
-              <input type="datetime-local" value={formClockOut} onChange={(e) => setFormClockOut(e.target.value)}
-                className="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-500" />
-            </div>
-            <button type="submit" disabled={saving || !formName.trim()}
-              className="w-full text-xs font-bold px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
-              {saving ? "Saving..." : "Save"}
-            </button>
-          </form>
+          )}
         </div>
       )}
 
-      {/* List */}
-      <div className="p-5">
-        {loading ? (
-          <div className="flex items-center justify-center py-10">
-            <Loader2 size={20} className="text-slate-300 animate-spin" />
-          </div>
-        ) : records.length === 0 ? (
-          <div className="text-center py-10 text-slate-400">
-            <Clock size={32} className="mx-auto text-slate-200 mb-3" />
-            <p className="text-xs font-medium">No attendance records for today</p>
-            <p className="text-[10px] text-slate-300 mt-1">Click "+ Add Record" above to enter a staff member's attendance</p>
-          </div>
-        ) : (
-          <div className="space-y-1.5">
-            {/* Column headers */}
-            <div className="hidden sm:grid grid-cols-12 gap-1.5 px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400">
-              <div className="col-span-3">Staff</div>
-              <div className="col-span-2 flex items-center gap-1">
-                <LogOut size={10} /> Check In
-              </div>
-              <div className="col-span-2 flex items-center gap-1">
-                <LogOut size={10} className="rotate-180" /> Check Out
-              </div>
-              <div className="col-span-2 text-center">Duration</div>
-              <div className="col-span-3 text-right">Action</div>
+      {/* ── ATTENDANCE RECORDS TAB ───────────────────────────────────────────── */}
+      {panelTab === "records" && (
+        <div className="p-5">
+          {records.length === 0 ? (
+            <div className="text-center py-10 text-slate-400">
+              <Clock size={32} className="mx-auto text-slate-200 mb-3" />
+              <p className="text-xs font-medium">No attendance records for today</p>
+              <p className="text-[10px] text-slate-300 mt-1">Use Quick Clock to record staff attendance</p>
             </div>
-
-            {records.map((r) => (
-              <div key={r.id}
-                className="grid grid-cols-1 sm:grid-cols-12 gap-1.5 items-center rounded-lg border border-slate-100 px-3 py-2.5 hover:bg-slate-50/50 transition-colors relative">
-                {/* Name + Dept */}
-                <div className="sm:col-span-3 flex items-center gap-2">
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
-                    !r.clockOut ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
-                  }`}>
-                    {(r.Staff?.fullName || r.staffName || "?").split(" ").map((s: string) => s[0]).join("").slice(0, 2)}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-bold text-slate-700 truncate">{r.Staff?.fullName || r.staffName || "Unknown"}</p>
-                    <p className="text-[9px] text-slate-400 truncate">{r.Staff?.department || r.department || "—"}</p>
-                  </div>
+          ) : (
+            <div className="space-y-1.5">
+              {/* Column headers */}
+              <div className="hidden sm:grid grid-cols-12 gap-1.5 px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                <div className="col-span-3">Staff</div>
+                <div className="col-span-2 flex items-center gap-1">
+                  <LogOut size={10} /> In
                 </div>
-
-                {/* Clock In */}
-                <div className="sm:col-span-2 flex sm:block items-center gap-2">
-                  <span className="sm:hidden text-[9px] font-bold text-slate-400 uppercase">In</span>
-                  <span className="text-xs font-semibold text-slate-600">{formatTime(r.clockIn)}</span>
+                <div className="col-span-2 flex items-center gap-1">
+                  <LogOut size={10} className="rotate-180" /> Out
                 </div>
+                <div className="col-span-2 text-center">Duration</div>
+                <div className="col-span-3 text-right">Action</div>
+              </div>
 
-                {/* Clock Out */}
-                <div className="sm:col-span-2 flex sm:block items-center gap-2">
-                  <span className="sm:hidden text-[9px] font-bold text-slate-400 uppercase">Out</span>
-                  {r.clockOut ? (
-                    <span className="text-xs font-semibold text-slate-600">{formatTime(r.clockOut)}</span>
-                  ) : (
-                    <span className="text-[9px] font-extrabold uppercase text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full inline-block">
-                      Active
-                    </span>
-                  )}
-                </div>
-
-                {/* Duration */}
-                <div className="sm:col-span-2 text-center">
-                  {r.clockOut ? (
-                    <span className="text-[10px] font-mono text-slate-400">
-                      {formatDuration(r.clockIn, r.clockOut)}
-                    </span>
-                  ) : (
-                    <span className="text-[9px] text-emerald-500">—</span>
-                  )}
-                </div>
-
-                {/* Delete action */}
-                <div className="sm:col-span-3 text-right">
-                  {confirmDelete === r.id ? (
-                    <div className="flex items-center justify-end gap-1">
-                      <span className="text-[9px] text-red-600 font-medium">Delete?</span>
-                      <button onClick={() => handleDelete(r.id)}
-                        className="text-[9px] font-bold px-2 py-1 rounded bg-red-600 text-white hover:bg-red-700 transition-colors">
-                        Yes
-                      </button>
-                      <button onClick={() => setConfirmDelete(null)}
-                        className="text-[9px] font-bold px-2 py-1 rounded bg-slate-200 text-slate-600 hover:bg-slate-300 transition-colors">
-                        No
-                      </button>
+              {records.map((r) => (
+                <div key={r.id}
+                  className="grid grid-cols-1 sm:grid-cols-12 gap-1.5 items-center rounded-lg border border-slate-100 px-3 py-2.5 hover:bg-slate-50/50 transition-colors relative">
+                  {/* Name + Dept */}
+                  <div className="sm:col-span-3 flex items-center gap-2">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
+                      !r.clockOut ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                    }`}>
+                      {(r.Staff?.fullName || r.staffName || "?").split(" ").map((s: string) => s[0]).join("").slice(0, 2)}
                     </div>
-                  ) : (
-                    <button onClick={() => setConfirmDelete(r.id)}
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-700 truncate">{r.Staff?.fullName || r.staffName || "Unknown"}</p>
+                      <p className="text-[9px] text-slate-400 truncate">{r.Staff?.department || r.department || "—"}</p>
+                    </div>
+                  </div>
+
+                  {/* Clock In */}
+                  <div className="sm:col-span-2 flex sm:block items-center gap-2">
+                    <span className="sm:hidden text-[9px] font-bold text-slate-400 uppercase">In</span>
+                    <span className="text-xs font-semibold text-slate-600">{formatTime(r.clockIn)}</span>
+                  </div>
+
+                  {/* Clock Out */}
+                  <div className="sm:col-span-2 flex sm:block items-center gap-2">
+                    <span className="sm:hidden text-[9px] font-bold text-slate-400 uppercase">Out</span>
+                    {r.clockOut ? (
+                      <span className="text-xs font-semibold text-slate-600">{formatTime(r.clockOut)}</span>
+                    ) : (
+                      <span className="text-[9px] font-extrabold uppercase text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full inline-block">
+                        Active
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Duration */}
+                  <div className="sm:col-span-2 text-center">
+                    {r.clockOut ? (
+                      <span className="text-[10px] font-mono text-slate-400">
+                        {formatDuration(r.clockIn, r.clockOut)}
+                      </span>
+                    ) : (
+                      <span className="text-[9px] text-emerald-500">—</span>
+                    )}
+                  </div>
+
+                  {/* Delete */}
+                  <div className="sm:col-span-3 text-right">
+                    <button
+                      onClick={() => {
+                        if (window.confirm("Delete this attendance record?")) handleDelete(r.id);
+                      }}
                       className="text-[9px] text-slate-400 hover:text-red-600 transition-colors"
-                      title="Delete record">
+                      title="Delete record"
+                    >
                       <Trash2 size={13} />
                     </button>
-                  )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -795,6 +1003,32 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
   const [receiptVisible, setReceiptVisible] = useState(false);
   const [savedInvoiceNumber, setSavedInvoiceNumber] = useState("");
 
+  // ── Lab test billing state ─────────────────────────────────────────────
+  const [showLabTests, setShowLabTests] = useState(false);
+  const [labPrices, setLabPrices] = useState<Record<string, number>>(() => {
+    const p: Record<string, number> = {};
+    LAB_TESTS.forEach((t) => { p[t.code] = getLabPrice(t.code); });
+    return p;
+  });
+  const [editingPrice, setEditingPrice] = useState<string | null>(null);
+  const [editPriceValue, setEditPriceValue] = useState("");
+
+  const updateLabPrice = (code: string, newPrice: number) => {
+    const price = Math.max(0, Math.round(newPrice));
+    setLabPrices((prev) => ({ ...prev, [code]: price }));
+    setLabPrice(code, price);
+    setEditingPrice(null);
+  };
+
+  const addLabTestToBill = (test: LabTestItem) => {
+    const price = labPrices[test.code] || test.defaultPrice;
+    setBillLines((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), description: `${test.code} — ${test.name}`, qty: 1, unitPrice: price, subtotal: price },
+    ]);
+    setInvoiceConfirmed(false);
+  };
+
   const subtotal = billLines.reduce((s, l) => s + l.subtotal, 0);
   const total = subtotal;
   const tendered = parseFloat(amountTendered) || 0;
@@ -1072,6 +1306,110 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
             </button>
           </div>
         </div>
+
+        {/* ── Lab Test Quick-Add Panel ─────────────────────────────────────── */}
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <button
+            onClick={() => setShowLabTests(!showLabTests)}
+            className="flex w-full items-center justify-between border-b border-slate-100 bg-slate-50/70 px-5 py-3 transition hover:bg-slate-50"
+          >
+            <div className="flex items-center gap-2">
+              <FlaskConical size={14} className="text-amber-600" />
+              <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
+                Lab Tests — Quick Add
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] text-slate-400 font-medium">{LAB_TESTS.length} tests</span>
+              <svg
+                className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showLabTests ? "rotate-180" : ""}`}
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </div>
+          </button>
+          {showLabTests && (
+            <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
+              {LAB_TESTS.map((test) => {
+                const currentPrice = labPrices[test.code] || test.defaultPrice;
+                const isEditing = editingPrice === test.code;
+                return (
+                  <div
+                    key={test.code}
+                    className="flex items-center gap-2 px-4 py-2.5 hover:bg-slate-50/50 transition group"
+                  >
+                    <button
+                      onClick={() => addLabTestToBill(test)}
+                      className="flex-1 min-w-0 text-left"
+                      title={`Add ${test.name} to bill`}
+                    >
+                      <p className="text-[11px] font-semibold text-slate-700 truncate leading-tight">
+                        <span className="font-mono text-[10px] text-amber-600">{test.code}</span>{" "}
+                        {test.name}
+                      </p>
+                    </button>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {isEditing ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min={0}
+                            value={editPriceValue}
+                            onChange={(e) => setEditPriceValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                const p = parseInt(editPriceValue.replace(/,/g, "")) || 0;
+                                updateLabPrice(test.code, p);
+                              }
+                              if (e.key === "Escape") setEditingPrice(null);
+                            }}
+                            className="w-20 rounded-lg border border-[#00703C] px-2 py-1 text-[10px] font-bold text-right outline-none"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => {
+                              const p = parseInt(editPriceValue.replace(/,/g, "")) || 0;
+                              updateLabPrice(test.code, p);
+                            }}
+                            className="text-[#00703C] hover:text-emerald-700 p-0.5"
+                          >
+                            <CheckCircle2 size={12} />
+                          </button>
+                          <button
+                            onClick={() => setEditingPrice(null)}
+                            className="text-slate-400 hover:text-rose-500 p-0.5"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => addLabTestToBill(test)}
+                            className="rounded-lg bg-[#00703C]/10 px-2.5 py-1 text-[10px] font-extrabold text-[#00703C] hover:bg-[#00703C]/20 transition"
+                          >
+                            + {formatUGX(currentPrice)}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingPrice(test.code);
+                              setEditPriceValue(String(currentPrice));
+                            }}
+                            className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-amber-600 p-1 transition-all"
+                            title="Edit price"
+                          >
+                            <Pencil size={11} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── RIGHT ── */}
@@ -1221,15 +1559,12 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
                 <span className="font-bold">{paymentMethod.replace("_", " ")}</span>
               </div>
               <div className="border-t border-dashed border-slate-200 pt-3 space-y-1">
-                {billLines.map((l) => (
-                  <div key={l.id} className="flex justify-between text-[10px]">
-                    <span className="truncate pr-2">{l.description} ×{l.qty}</span>
-                    <span>{formatUGX(l.subtotal)}</span>
-                  </div>
-                ))}
+                <div className="flex justify-between text-[10px] text-slate-400">
+                  <span>Medical Services (itemized bill internal)</span>
+                </div>
               </div>
-              <div className="border-t border-slate-200 pt-2 flex justify-between font-extrabold text-sm">
-                <span>TOTAL</span><span className="text-[#00703C]">{formatUGX(total)}</span>
+              <div className="border-t border-slate-200 pt-2 flex justify-between font-extrabold text-lg">
+                <span>TOTAL BILL</span><span className="text-[#00703C]">{formatUGX(total)}</span>
               </div>
               {paymentMethod === "CASH" && (
                 <>
@@ -1379,6 +1714,29 @@ export default function ReceptionistPage() {
   const handleDispatchPipeline = async (patientId: number, targetStatus: string, label: string) => {
     setIsRouting(true);
     try {
+      // MIDWIFE is special — create an ANC appointment instead of changing status
+      if (targetStatus === "MIDWIFE_ANC") {
+        const res = await fetch("/api/appointments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            patientId,
+            department: "Nurse_Midwife",
+            appointmentDate: new Date().toISOString(),
+            reason: "ANC - Antenatal Care",
+            notes: "Referred from Reception for ANC monitoring",
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json();
+          throw new Error(body.error || "Failed to create ANC appointment.");
+        }
+        await fetchActiveRegistry();
+        setSelectedPatient(null);
+        alert("✓ Patient sent to MIDWIFE (ANC)");
+        return;
+      }
+
       const response = await fetch("/api/receptionist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1449,6 +1807,7 @@ export default function ReceptionistPage() {
               <span className="text-xs font-bold text-emerald-800 tracking-wide uppercase">Receptionist Desk Active</span>
             </div>
             <NotificationInbox department="Reception" />
+            <StaffMessaging />
             <button
               onClick={async () => { try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: u.id, username: u.username }) }); } } catch {} router.push("/"); }}
               className="flex items-center gap-2 rounded-full bg-red-50 px-4 py-1.5 border border-red-100 text-red-600 hover:bg-red-100 transition-all"

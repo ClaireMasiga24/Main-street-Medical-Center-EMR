@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import NotificationInbox from "../components/NotificationInbox";
+import StaffMessaging from "../components/StaffMessaging";
 import {
   Activity, AlertTriangle, ArrowRight, Baby, Bell, Camera, CheckCircle,
   Clock, Download, FileText, Filter, Image, LogOut, Mic, Monitor,
@@ -448,6 +449,7 @@ export default function RadiologyDashboard() {
             <p style={{ margin: "2px 0 0", fontSize: "11px", opacity: 0.7 }}>Logged In</p>
           </div>
           <div style={{ marginBottom: "8px" }}><NotificationInbox department="Radiology" /></div>
+          <div style={{ marginBottom: "8px" }}><StaffMessaging /></div>
           <button onClick={async () => { try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: u.id, username: u.username }) }); } } catch {} router.push("/"); }}
             style={{ width: "100%", padding: "12px", borderRadius: "10px", border: "none", backgroundColor: "#b91c1c", color: "white", cursor: "pointer", fontWeight: "bold", fontSize: "13px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
             <LogOut size={16} /> Sign Out

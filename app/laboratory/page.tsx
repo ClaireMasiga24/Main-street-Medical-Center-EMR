@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import StaffMessaging from "../components/StaffMessaging";
 import {
   FlaskConical, Search, RefreshCw, LogOut, AlertTriangle, Clock,
   User, Phone, ArrowRight, CheckCircle, XCircle, Save, Printer,
@@ -603,6 +604,9 @@ export default function LaboratoryPage() {
               <p className="font-bold text-lg">{stats.pending}</p>
               <p className="text-green-100">Pending</p>
             </div>
+          </div>
+          <div className="px-3 py-2">
+            <StaffMessaging />
           </div>
           <button onClick={handleLogout} className="flex w-full items-center justify-center gap-2 bg-red-600 hover:bg-red-500 py-3 rounded-xl font-bold text-sm transition">
             <LogOut size={16} /> Logout

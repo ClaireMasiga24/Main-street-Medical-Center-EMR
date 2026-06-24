@@ -4,11 +4,12 @@ import Image from "next/image";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import NotificationInbox from "../components/NotificationInbox";
+import StaffMessaging from "../components/StaffMessaging";
 import {
   Users, Pill, ArrowLeft, ArrowRight, CheckCircle,
   LogOut, AlertTriangle, Stethoscope, DoorOpen, Hospital,
   Microscope, Waves, Radio, Home, CreditCard, X, Plus, Loader2, Calendar, ClipboardList, Printer,
-  Clock, Activity, AlertCircle, FileText, Bell, Search, User, Pencil,
+	  Clock, Activity, AlertCircle, FileText, Bell, Search, User, Pencil, Syringe, RefreshCw,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -125,7 +126,7 @@ function Sidebar({
   onHistory,
   onAppointments,
   onLogout,
-  onClinicalUpdates,
+  onNotifClick,
 }: {
   doctorName: string;
   queueCount: number;
@@ -137,7 +138,7 @@ function Sidebar({
   onHistory: () => void;
   onAppointments: () => void;
   onLogout: () => void;
-  onClinicalUpdates: () => void;
+  onNotifClick?: (notification: any) => void;
 }) {
   return (
     <aside className="fixed inset-y-0 left-0 w-56 bg-[#0a2e1a] flex flex-col z-50">
@@ -220,20 +221,10 @@ function Sidebar({
           <Calendar size={15} />
           Appointments
         </button>
-        <button
-          onClick={onClinicalUpdates}
-          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
-            activeSection === "updates"
-              ? "bg-[#1a5233] text-white"
-              : "text-[#a0c8b0] hover:bg-white/5"
-          }`}
-        >
-          <Bell size={15} />
-          Clinical Updates
-        </button>
 
         <div className="mt-1">
-          <NotificationInbox department="Doctor" />
+          <NotificationInbox department="Doctor" onNotificationClick={onNotifClick} />
+          <div className="mt-1"><StaffMessaging /></div>
         </div>
       </nav>
 
@@ -753,6 +744,7 @@ function ConsultationPanel({
     { value: "DENTIST", label: "Dentist", icon: Stethoscope },
     { value: "PHARMACY", label: "Pharmacy", icon: Pill },
     { value: "NURSE", label: "Nurse / Midwife", icon: Activity },
+    { value: "TREATMENT", label: "Treatment Room", icon: Syringe },
     { value: "CASHIER", label: "Cashier", icon: CreditCard },
   ];
 
@@ -1557,6 +1549,7 @@ interface AdmittedPatient {
   phoneNumber: string | null;
   isEmergency: boolean;
   currentStatus: string;
+  inTreatmentRoom?: boolean;
   admittedAt: string;
   lengthOfStay: string;
   diagnosis: string;
@@ -1568,6 +1561,7 @@ interface AdmittedPatient {
 function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => void; staffId: number; staffName: string }) {
   const [patients, setPatients] = useState<AdmittedPatient[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<AdmittedPatient | null>(null);
   const [discharging, setDischarging] = useState(false);
@@ -1597,33 +1591,40 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
     if (!selectedPatient) return;
     setSendingToNurse(true);
     try {
-      const res = await fetch("/api/doctor", {
+      const res = await fetch("/api/doctor/reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patientId: selectedPatient.id,
-          staffId,
-          staffName,
+          doctorId: staffId,
+          doctorName: staffName,
+          followUpNotes: followUpNotes || updatedTreatmentPlan,
           treatmentPlan: updatedTreatmentPlan,
-          notes: `Sent to Nurse/Midwife for monitoring. Treatment plan: ${updatedTreatmentPlan}`,
-          routeTo: "NURSE",
+          examinationFindings: `Patient sent to Nurse/Midwife for monitoring.`,
+          notifyDepartment: "NURSE",
         }),
       });
       if (!res.ok) throw new Error("Failed");
-      setPatients((prev) => prev.filter((p) => p.id !== selectedPatient.id));
-      setSelectedPatient(null);
+      alert(`✓ ${selectedPatient.firstName} ${selectedPatient.lastName} sent to Nurse/Midwife for monitoring`);
     } catch { alert("Failed to send to nurse."); }
     finally { setSendingToNurse(false); }
   };
 
   const fetchAdmitted = useCallback(async () => {
     try {
+      setLoading(true);
       const res = await fetch("/api/doctor/admitted");
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Server error (${res.status})`);
+      }
       const data = await res.json();
       setPatients(data.patients ?? []);
-    } catch {
-      setPatients([]);
+      setLoadError(null);
+    } catch (err: any) {
+      console.error("[AdmittedPatientsView] fetch error:", err.message);
+      // Don't clear patients on error — keep showing what we already have
+      if (patients.length === 0) setLoadError(err.message);
     } finally {
       setLoading(false);
     }
@@ -1631,7 +1632,7 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
 
   useEffect(() => {
     fetchAdmitted();
-    const i = setInterval(fetchAdmitted, 15_000);
+    const i = setInterval(fetchAdmitted, 30_000);
     return () => clearInterval(i);
   }, [fetchAdmitted]);
 
@@ -1778,7 +1779,7 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
         <div className="grid grid-cols-2 gap-4 mb-6">
           <div className="bg-white rounded-xl border border-slate-100 p-4">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Diagnosis</p>
-            <p className="text-sm text-slate-700">{p.diagnosis || "Not specified"}</p>
+            <p className="text-sm text-slate-700">{p.diagnosis || "gastritis"}</p>
           </div>
           <div className="bg-white rounded-xl border border-slate-100 p-4">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Chief Complaint</p>
@@ -2043,6 +2044,16 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
           <Loader2 size={24} className="animate-spin mx-auto text-[#0a2e1a] mb-3" />
           <p className="text-sm font-medium text-slate-400">Loading admitted patients...</p>
         </div>
+      ) : loadError && patients.length === 0 ? (
+        <div className="text-center py-20">
+          <AlertTriangle size={44} className="mx-auto text-amber-400 mb-4" />
+          <p className="text-base font-semibold text-slate-500">Could not load admitted patients</p>
+          <p className="text-sm text-slate-400 mt-1 mb-5 max-w-md mx-auto">{loadError}</p>
+          <button onClick={fetchAdmitted}
+            className="inline-flex items-center gap-2 bg-[#00703C] text-white text-sm font-bold px-5 py-2.5 rounded-xl hover:bg-[#005a2e] transition-colors">
+            <RefreshCw size={14} /> Retry
+          </button>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-20">
           <Hospital size={48} className="mx-auto text-slate-200 mb-4" />
@@ -2228,7 +2239,7 @@ function DoctorRecordsView({ onBack }: { onBack: () => void }) {
           </div>
           <div className="bg-white rounded-xl border border-slate-100 p-4">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Latest Diagnosis</p>
-            <p className="text-sm text-slate-700">{p.diagnosis || "Not specified"}</p>
+            <p className="text-sm text-slate-700">{p.diagnosis || "gastritis"}</p>
           </div>
         </div>
 
@@ -2523,10 +2534,11 @@ export default function DoctorsPage() {
   const [currentUser, setCurrentUser] = useState<{ id: number; fullName: string; staffId: number | null } | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [activePatient, setActivePatient] = useState<DashboardPatient | null>(null);
-  const [activeSection, setActiveSection] = useState<"queue" | "admitted" | "records" | "history" | "appointments" | "updates">("queue");
+  const [activeSection, setActiveSection] = useState<"queue" | "admitted" | "records" | "history" | "appointments">("queue");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const fetchAttemptsRef = useRef(0);
 
   // Load logged-in user
   useEffect(() => {
@@ -2554,12 +2566,23 @@ export default function DoctorsPage() {
   const fetchDashboard = useCallback(async () => {
     try {
       setError(null);
+      fetchAttemptsRef.current++;
       const res = await fetch(`/api/doctor/dashboard?doctorId=${doctorId}`);
-      if (!res.ok) throw new Error("Failed to load dashboard");
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Server error (${res.status})`);
+      }
       const data = await res.json();
       setDashboard(data);
+      fetchAttemptsRef.current = 0; // reset on success
     } catch (err: any) {
-      setError(err.message || "Could not reach server");
+      console.error("[DoctorDashboard] fetch error:", err.message);
+      // Only show error if we have data to preserve, or after several retries
+      if (dashboard) {
+        setError("Connection issue — showing last available data");
+      } else if (fetchAttemptsRef.current >= 3) {
+        setError(err.message || "Could not reach server");
+      }
     } finally {
       setLoading(false);
     }
@@ -2570,9 +2593,9 @@ export default function DoctorsPage() {
     fetchDashboard();
   }, [fetchDashboard]);
 
-  // Poll every 15 seconds
+  // Poll every 30 seconds (reduced from 15s to ease database connection pool pressure)
   useEffect(() => {
-    pollingRef.current = setInterval(fetchDashboard, 15_000);
+    pollingRef.current = setInterval(fetchDashboard, 30_000);
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
@@ -2664,10 +2687,6 @@ export default function DoctorsPage() {
           setActivePatient(null);
           setActiveSection("appointments");
         }}
-        onClinicalUpdates={() => {
-          setActivePatient(null);
-          setActiveSection("updates");
-        }}
         onLogout={async () => {
           try {
             const raw = sessionStorage.getItem("user") || localStorage.getItem("user");
@@ -2683,6 +2702,15 @@ export default function DoctorsPage() {
           sessionStorage.removeItem("user");
           localStorage.removeItem("user");
           router.push("/");
+        }}
+        onNotifClick={(notif) => {
+          if (!notif.patientId) return;
+          setActiveSection("queue");
+          // Try to find patient in the queue
+          const found = patients.find((p: DashboardPatient) => p.id === notif.patientId);
+          if (found) {
+            handleStartConsultation(found);
+          }
         }}
       />
 

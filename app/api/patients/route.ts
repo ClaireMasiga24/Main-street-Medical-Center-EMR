@@ -72,11 +72,15 @@ export async function POST(request: Request) {
 // 3. PATCH: Update patient status directly by passing the ID inside the JSON body
 export async function PATCH(request: Request) {
   try {
-    const { id, status } = await request.json(); // Clean: no dynamic URL parsing needed
+    const { id, status, sentToTreatmentRoom } = await request.json();
+
+    const data: any = {};
+    if (status) data.currentStatus = status;
+    if (sentToTreatmentRoom !== undefined) data.sentToTreatmentRoom = sentToTreatmentRoom;
 
     const updated = await prisma.patient.update({
       where: { id: parseInt(id) },
-      data: { currentStatus: status }
+      data,
     });
 
     return NextResponse.json(updated);

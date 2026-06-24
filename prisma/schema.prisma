@@ -38,6 +38,10 @@ model Patient {
   // The operational status engine that shares the patient across rooms
   currentStatus PatientStatus @default(AWAITING_TRIAGE)
 
+  // Flag: ADMITTED patient sent to the nurse/midwife Treatment Room
+  // Status stays ADMITTED so the doctor still sees them in Admitted Patients
+  sentToTreatmentRoom Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -51,13 +55,15 @@ model Patient {
   ImagingRequest ImagingRequest[]
   CriticalNotifications CriticalNotification[]
   LabCommunications     LabCommunication[]
+  Notification          Notification[]
   ResultShares          ResultShare[]
   OdontogramFinding OdontogramFinding[]
   DentalProcedure   DentalProcedure[]
   DentalImage       DentalImage[]
-  PatientTimeline   PatientTimeline[]
-  PatientReview    PatientReview[]
-}
+	  PatientTimeline   PatientTimeline[]
+	  PatientReview    PatientReview[]
+	  ANCAssessment     ANCAssessment[]
+	}
 
 model Visit {
   id        Int      @id @default(autoincrement())
@@ -91,9 +97,10 @@ model Visit {
   Billing      Billing[]
   DentalRecord DentalRecord[]
   DentalProcedure DentalProcedure[]
-  Triage       Triage[]
-  ImagingRequest ImagingRequest[]
-}
+	  Triage       Triage[]
+	  ImagingRequest ImagingRequest[]
+	  ANCAssessment ANCAssessment[]
+	}
 
 model Triage {
   id                    Int      @id @default(autoincrement())
@@ -440,6 +447,62 @@ model PatientTimeline {
   @@index([createdAt])
 }
 
+model ANCAssessment {
+  id                    Int      @id @default(autoincrement())
+  patientId             Int
+  visitId               Int?
+
+  // ── Demographics ──────────────────────────────────────────────────
+  gestationalAgeWeeks   Int?     // weeks
+  gravida               Int?
+  para                  Int?
+  LMP                   DateTime? // Last Menstrual Period
+  EDD                   DateTime? // Estimated Delivery Date (auto-calc from LMP)
+
+  // ── Clinical Assessment ───────────────────────────────────────────
+  fundalHeight          Float?   // cm
+  fetalHeartRate        Int?     // bpm
+  fetalPresentation     String?  // CEPHALIC | BREECH | TRANSVERSE | OBLIQUE
+  fetalMovement         String?  // PRESENT | ABSENT | REDUCED
+
+  // ── Maternal Vitals ───────────────────────────────────────────────
+  bpSystolic            Int?     // mmHg
+  bpDiastolic           Int?     // mmHg
+  maternalWeight        Float?   // kg
+
+  // ── Urine Dipstick ────────────────────────────────────────────────
+  urineProtein          String?  // NEGATIVE | TRACE | PLUS_1 | PLUS_2 | PLUS_3
+  urineGlucose          String?  // NEGATIVE | TRACE | PLUS_1 | PLUS_2 | PLUS_3
+  urineNitrites         String?  // NEGATIVE | TRACE | PLUS_1 | PLUS_2 | PLUS_3
+
+  // ── Edema ─────────────────────────────────────────────────────────
+  edema                 String?  // NONE | MILD | MODERATE | SEVERE
+  edemaLocation         String?
+
+  // ── Symptoms & Notes ──────────────────────────────────────────────
+  complaints            String?  @db.Text
+  clinicalNotes         String?  @db.Text
+
+  // ── Follow-Up ─────────────────────────────────────────────────────
+  nextAppointmentDate   DateTime?
+  outcome               String?  // CONTINUE_MONITORING | REFER_TO_DOCTOR | ADMIT | DISCHARGE
+
+  // ── Referral Source ───────────────────────────────────────────────
+  referredBy            String?  // Doctor name or "Receptionist"
+  referringDoctorName   String?
+
+  // ── Meta ──────────────────────────────────────────────────────────
+  assessedBy            String?
+  assessedById          Int?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  Patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Visit   Visit?  @relation(fields: [visitId], references: [id])
+
+  @@index([patientId])
+}
+
 model PatientReview {
   id              Int      @id @default(autoincrement())
   patientId       Int
@@ -607,17 +670,21 @@ model LabCommunication {
 }
 
 model Notification {
-  id          Int      @id @default(autoincrement())
-  userId      Int?
-  department  String?  // Target department
-  title       String
-  message     String   @db.Text
-  type        String   // CRITICAL_RESULT | RESULT_READY | RESULT_SHARED | COMMUNICATION | REPEAT_REQUEST | GENERAL
-  referenceId Int?     // Optional: ID of related entity (lab request, etc.)
-  referenceType String? // lab_request | communication | etc.
-  isRead      Boolean  @default(false)
-  readAt      DateTime?
-  createdAt   DateTime @default(now())
+  id            Int      @id @default(autoincrement())
+  userId        Int?
+  patientId     Int?     // So the recipient can jump straight to the patient
+  department    String?  // Target department
+  title         String
+  message       String   @db.Text
+  type          String   // CRITICAL_RESULT | RESULT_READY | RESULT_SHARED | COMMUNICATION | REPEAT_REQUEST | GENERAL
+  referenceId   Int?     // Optional: ID of related entity (lab request, etc.)
+  referenceType String?  // lab_request | communication | etc.
+  isRead        Boolean  @default(false)
+  readAt        DateTime?
+  createdAt     DateTime @default(now())
+
+
+  Patient Patient? @relation(fields: [patientId], references: [id])
 }
 
 model ResultShare {
@@ -693,6 +760,15 @@ model AuditLog {
   userId    Int
   createdAt DateTime @default(now())
   User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model StaffMessage {
+  id          Int      @id @default(autoincrement())
+  senderName  String
+  senderDept  String
+  message     String   @db.Text
+  targetDept  String?  // null = all departments / facility-wide
+  createdAt   DateTime @default(now())
 }
 
 // --- ENUMS ---

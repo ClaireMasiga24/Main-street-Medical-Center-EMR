@@ -2,10 +2,11 @@ import { prisma } from "./prisma";
 
 // ─── Create a notification ────────────────────────────────────────────
 export async function createNotification({
-  department, userId, title, message, type, referenceId, referenceType,
+  department, userId, patientId, title, message, type, referenceId, referenceType,
 }: {
   department?: string;
   userId?: number;
+  patientId?: number;
   title: string;
   message: string;
   type: string;
@@ -17,6 +18,7 @@ export async function createNotification({
       data: {
         department: department || null,
         userId: userId || null,
+        patientId: patientId || null,
         title,
         message,
         type,

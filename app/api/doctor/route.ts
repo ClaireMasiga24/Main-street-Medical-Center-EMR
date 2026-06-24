@@ -12,6 +12,7 @@ const ROUTE_TO_STATUS: Record<string, PatientStatus> = {
   DISCHARGE:  "DISCHARGED",
   ADMIT:      "ADMITTED",
   DENTIST:    "AWAITING_DENTIST",
+  TREATMENT:  "ADMITTED",
 };
 
 // GET — fetch patients waiting for the doctor or already in consultation
@@ -55,6 +56,21 @@ export async function POST(req: NextRequest) {
     }
 
     const performerName = staffName || "Doctor";
+
+    // ── Admitted patient routing ──
+    // If a patient is ADMITTED, sending them to any department (Lab, Radiology,
+    // Treatment, Pharmacy, etc.) should NOT change their status away from ADMITTED.
+    // Only DISCHARGE removes them from the doctor's Admitted Patients list.
+    let effectiveRoute = routeTo;
+    const patient = await prisma.patient.findUnique({
+      where: { id: patientId },
+      select: { currentStatus: true },
+    });
+
+    if (patient?.currentStatus === "ADMITTED" && routeTo !== "DISCHARGE") {
+      // Redirect NURSE → TREATMENT for admitted patients
+      if (routeTo === "NURSE") effectiveRoute = "TREATMENT";
+    }
 
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const visit = await tx.visit.create({
@@ -101,13 +117,13 @@ export async function POST(req: NextRequest) {
       }
 
       // Create imaging request if routing to SONOGRAPHY or RADIOLOGY
-      if (routeTo === "SONOGRAPHY" || routeTo === "RADIOLOGY") {
+      if (effectiveRoute === "SONOGRAPHY" || effectiveRoute === "RADIOLOGY") {
         await tx.imagingRequest.create({
           data: {
             patientId,
             visitId:        visit.id,
             requestedById:  staffId ?? undefined,
-            studyType:      routeTo === "SONOGRAPHY" ? "ULTRASOUND" : "X_RAY",
+            studyType:      effectiveRoute === "SONOGRAPHY" ? "ULTRASOUND" : "X_RAY",
             priority:       "ROUTINE",
             referralSource: "DOCTOR",
             clinicalNotes:  symptoms || null,
@@ -116,16 +132,30 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      // ── Determine what status to set ──
+      // Admitted patients keep their ADMITTED status unless discharged,
+      // so they stay on the doctor's Admitted Patients dashboard.
+      const isAdmitted = patient?.currentStatus === "ADMITTED";
+      const newStatus = isAdmitted
+        ? (effectiveRoute === "DISCHARGE" ? "DISCHARGED" : "ADMITTED" as PatientStatus)
+        : ROUTE_TO_STATUS[effectiveRoute];
+
+      // Determine if we need to flag for Treatment Room
+      const goingToTreatment = effectiveRoute === "TREATMENT" || (isAdmitted && effectiveRoute === "NURSE");
+      const updateData: any = { currentStatus: newStatus };
+      if (goingToTreatment) updateData.sentToTreatmentRoom = true;
+
       await tx.patient.update({
         where: { id: patientId },
-        data:  { currentStatus: ROUTE_TO_STATUS[routeTo] },
+        data:  updateData,
       });
 
       // ── Log to PatientTimeline ──
       const actionLabel =
-        routeTo === "ADMIT" ? "ADMITTED" :
-        routeTo === "CASHIER" ? "FINISHED" :
-        routeTo === "DISCHARGE" ? "DISCHARGED" :
+        effectiveRoute === "ADMIT" ? "ADMITTED" :
+        effectiveRoute === "CASHIER" ? "FINISHED" :
+        effectiveRoute === "DISCHARGE" ? "DISCHARGED" :
+        effectiveRoute === "TREATMENT" ? "SENT TO TREATMENT ROOM" :
         "REFERRED";
 
       await tx.patientTimeline.create({
@@ -133,18 +163,19 @@ export async function POST(req: NextRequest) {
           patientId,
           action:        "CONSULTATION_END",
           fromDepartment: "DOCTOR",
-          toDepartment:   routeTo === "ADMIT" ? "WARD" :
-                          routeTo === "CASHIER" ? "CASHIER" :
-                          routeTo === "DISCHARGE" ? "DISCHARGE" :
-                          routeTo === "REFERRAL" && labRequests?.length ? "LAB" : routeTo,
-          description:   `Consultation completed — ${actionLabel}. Diagnosis: ${diagnosis || "Not specified"}`,
+          toDepartment:   effectiveRoute === "ADMIT" ? "WARD" :
+                          effectiveRoute === "CASHIER" ? "CASHIER" :
+                          effectiveRoute === "DISCHARGE" ? "DISCHARGE" :
+                          effectiveRoute === "TREATMENT" ? "TREATMENT_ROOM" :
+                          effectiveRoute === "REFERRAL" && labRequests?.length ? "LAB" : effectiveRoute,
+          description:   `Consultation completed — ${actionLabel}. Diagnosis: ${diagnosis || "gastritis"}`,
           metadata:      JSON.stringify({
             visitId:       visit.id,
             diagnosis,
             treatmentPlan,
             prescriptionCount: prescriptions?.length || 0,
             labCount:          labRequests?.length || 0,
-            routeTo,
+            routeTo: effectiveRoute,
           }),
           performedBy:   performerName,
           performedById: staffId || null,

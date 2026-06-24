@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useState, useEffect, useTransition, useRef, useCallback } from "react";
 import NotificationInbox from "../components/NotificationInbox";
+import StaffMessaging from "../components/StaffMessaging";
 import {
   Users, ClipboardList, Pill, ArrowLeft, CheckCircle,
   LogOut, ChevronRight, AlertTriangle, Stethoscope,
@@ -661,7 +662,10 @@ function Sidebar({
 
         {/* Notification Inbox — directly under Appointments */}
         <div className="pt-1">
-to          <NotificationInbox department="Dentist" sidebar={true} />
+          <NotificationInbox department="Dentist" sidebar={true} />
+        </div>
+        <div className="pt-1">
+          <StaffMessaging />
         </div>
       </nav>
 
