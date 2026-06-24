@@ -56,6 +56,7 @@ model Patient {
   DentalProcedure   DentalProcedure[]
   DentalImage       DentalImage[]
   PatientTimeline   PatientTimeline[]
+  PatientReview    PatientReview[]
 }
 
 model Visit {
@@ -434,6 +435,29 @@ model PatientTimeline {
   createdAt      DateTime @default(now())
 
   Patient        Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([createdAt])
+}
+
+model PatientReview {
+  id              Int      @id @default(autoincrement())
+  patientId       Int
+
+  // ── Review Content ─────────────────────────────────────────────────
+  followUpNotes        String? @db.Text
+  examinationFindings String? @db.Text
+  diagnosis           String? @db.Text
+  treatmentPlan       String? @db.Text
+  labOrders           String? @db.Text  // JSON array
+  imagingOrders       String? @db.Text  // JSON array
+
+  // ── Doctor Info ────────────────────────────────────────────────────
+  doctorId   Int
+  doctorName String
+
+  createdAt DateTime @default(now())
+  Patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
   @@index([patientId])
   @@index([createdAt])

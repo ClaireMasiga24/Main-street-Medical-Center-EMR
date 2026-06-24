@@ -122,6 +122,7 @@ function Sidebar({
   onQueue,
   onAdmitted,
   onRecords,
+  onHistory,
   onAppointments,
   onLogout,
   onClinicalUpdates,
@@ -133,6 +134,7 @@ function Sidebar({
   onQueue: () => void;
   onAdmitted: () => void;
   onRecords: () => void;
+  onHistory: () => void;
   onAppointments: () => void;
   onLogout: () => void;
   onClinicalUpdates: () => void;
@@ -195,6 +197,17 @@ function Sidebar({
         >
           <ClipboardList size={15} />
           Doctor Records
+        </button>
+        <button
+          onClick={onHistory}
+          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+            activeSection === "history"
+              ? "bg-[#1a5233] text-white"
+              : "text-[#a0c8b0] hover:bg-white/5"
+          }`}
+        >
+          <Clock size={15} />
+          History
         </button>
         <button
           onClick={onAppointments}
@@ -1562,8 +1575,46 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
   const [dischargedPatientName, setDischargedPatientName] = useState("");
   const [followUpNotes, setFollowUpNotes] = useState("");
   const [updatedTreatmentPlan, setUpdatedTreatmentPlan] = useState("");
-  const [editingTreatmentPlan, setEditingTreatmentPlan] = useState(false);
-  const [treatmentDraft, setTreatmentDraft] = useState("");
+
+  // Review system state
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [patientLabRequests, setPatientLabRequests] = useState<any[]>([]);
+  const [patientImagingRequests, setPatientImagingRequests] = useState<any[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewForm, setReviewForm] = useState({
+    followUpNotes: "",
+    examinationFindings: "",
+    diagnosis: "",
+    treatmentPlan: "",
+    labOrders: [] as string[],
+    imagingOrders: [] as string[],
+  });
+  const [savingReview, setSavingReview] = useState(false);
+  const [sendingToNurse, setSendingToNurse] = useState(false);
+
+  const handleSendToNurse = async () => {
+    if (!selectedPatient) return;
+    setSendingToNurse(true);
+    try {
+      const res = await fetch("/api/doctor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: selectedPatient.id,
+          staffId,
+          staffName,
+          treatmentPlan: updatedTreatmentPlan,
+          notes: `Sent to Nurse/Midwife for monitoring. Treatment plan: ${updatedTreatmentPlan}`,
+          routeTo: "NURSE",
+        }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setPatients((prev) => prev.filter((p) => p.id !== selectedPatient.id));
+      setSelectedPatient(null);
+    } catch { alert("Failed to send to nurse."); }
+    finally { setSendingToNurse(false); }
+  };
 
   const fetchAdmitted = useCallback(async () => {
     try {
@@ -1588,8 +1639,50 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
   useEffect(() => {
     if (selectedPatient) {
       setUpdatedTreatmentPlan(selectedPatient.treatmentPlan || "");
+      fetchReviews(selectedPatient.id);
     }
   }, [selectedPatient]);
+
+  const fetchReviews = async (patientId: number) => {
+    setReviewsLoading(true);
+    try {
+      const res = await fetch(`/api/doctor/reviews?patientId=${patientId}`);
+      if (res.ok) {
+        const d = await res.json();
+        setReviews(d.reviews ?? []);
+        setPatientLabRequests(d.labRequests ?? []);
+        setPatientImagingRequests(d.imagingRequests ?? []);
+      }
+    } catch {} finally { setReviewsLoading(false); }
+  };
+
+  const handleAddReview = async () => {
+    if (!selectedPatient) return;
+    setSavingReview(true);
+    try {
+      const res = await fetch("/api/doctor/reviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: selectedPatient.id,
+          doctorId: staffId,
+          doctorName: staffName,
+          followUpNotes: reviewForm.followUpNotes,
+          examinationFindings: reviewForm.examinationFindings,
+          diagnosis: reviewForm.diagnosis,
+          treatmentPlan: reviewForm.treatmentPlan,
+          labOrders: reviewForm.labOrders,
+          imagingOrders: reviewForm.imagingOrders,
+        }),
+      });
+      if (res.ok) {
+        setReviewForm({ followUpNotes: "", examinationFindings: "", diagnosis: "", treatmentPlan: "", labOrders: [], imagingOrders: [] });
+        setShowReviewForm(false);
+        fetchReviews(selectedPatient.id);
+      } else { alert("Failed to save review."); }
+    } catch { alert("Network error saving review."); }
+    finally { setSavingReview(false); }
+  };
 
   const handleDischarge = async () => {
     if (!selectedPatient) return;
@@ -1693,62 +1786,193 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
           </div>
         </div>
 
-        {/* Treatment Plan (read-only with pencil to edit) */}
-        <div className="bg-white rounded-xl border border-slate-100 p-4 mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              Treatment Plan
-            </label>
-            {!editingTreatmentPlan && (
-              <button
-                onClick={() => { setTreatmentDraft(updatedTreatmentPlan); setEditingTreatmentPlan(true); }}
-                className="text-slate-400 hover:text-[#0a2e1a] p-1 rounded-lg hover:bg-slate-100 transition-colors"
-                title="Edit treatment plan"
-              >
-                <Pencil size={14} />
-              </button>
-            )}
+        {/* Review Timeline */}
+        <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden mb-6">
+          <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Review History</h3>
+            <button
+              onClick={() => setShowReviewForm(!showReviewForm)}
+              className="text-[10px] font-bold bg-[#0a2e1a] text-white px-3 py-1.5 rounded-lg hover:bg-[#0d3d24] transition-colors flex items-center gap-1"
+            >
+              <Plus size={12} /> {showReviewForm ? "Cancel" : "Add Review"}
+            </button>
           </div>
-          {editingTreatmentPlan ? (
-            <div className="space-y-3">
-              <textarea
-                className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[100px]"
-                placeholder="Update the treatment plan..."
-                value={treatmentDraft}
-                onChange={(e) => setTreatmentDraft(e.target.value)}
-              ></textarea>
-              <div className="flex gap-2">
+
+          {/* Add Review Form */}
+          {showReviewForm && (
+            <div className="p-4 border-b border-slate-100 bg-slate-50/50">
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Follow-up Notes</label>
+                  <textarea className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[60px]" placeholder="Follow-up observations, progress notes..." value={reviewForm.followUpNotes} onChange={(e) => setReviewForm({...reviewForm, followUpNotes: e.target.value})} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Examination Findings</label>
+                  <textarea className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[60px]" placeholder="Physical exam findings from this review..." value={reviewForm.examinationFindings} onChange={(e) => setReviewForm({...reviewForm, examinationFindings: e.target.value})} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Diagnosis</label>
+                    <textarea className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[50px]" placeholder="Updated diagnosis..." value={reviewForm.diagnosis} onChange={(e) => setReviewForm({...reviewForm, diagnosis: e.target.value})} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Treatment Plan</label>
+                    <textarea className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[50px]" placeholder="Updated treatment plan..." value={reviewForm.treatmentPlan} onChange={(e) => setReviewForm({...reviewForm, treatmentPlan: e.target.value})} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Lab Orders</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {["FBC", "Urinalysis", "Blood glucose", "Malaria RDT", "HIV", "LFTs", "RFTs"].map((t) => (
+                        <label key={t} className={`text-[10px] px-2 py-1 rounded-full border cursor-pointer transition-colors ${reviewForm.labOrders.includes(t) ? "bg-[#0a2e1a] text-white border-[#0a2e1a]" : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"}`}>
+                          <input type="checkbox" className="hidden" checked={reviewForm.labOrders.includes(t)} onChange={() => setReviewForm({...reviewForm, labOrders: reviewForm.labOrders.includes(t) ? reviewForm.labOrders.filter(x => x !== t) : [...reviewForm.labOrders, t] })} />
+                          {t}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Imaging Orders</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {["X-Ray", "Ultrasound", "CT Scan", "MRI", "Mammography"].map((t) => (
+                        <label key={t} className={`text-[10px] px-2 py-1 rounded-full border cursor-pointer transition-colors ${reviewForm.imagingOrders.includes(t) ? "bg-[#0a2e1a] text-white border-[#0a2e1a]" : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"}`}>
+                          <input type="checkbox" className="hidden" checked={reviewForm.imagingOrders.includes(t)} onChange={() => setReviewForm({...reviewForm, imagingOrders: reviewForm.imagingOrders.includes(t) ? reviewForm.imagingOrders.filter(x => x !== t) : [...reviewForm.imagingOrders, t] })} />
+                          {t}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
                 <button
-                  onClick={() => { setUpdatedTreatmentPlan(treatmentDraft); setEditingTreatmentPlan(false); }}
-                  className="bg-[#0a2e1a] text-white px-4 py-2 rounded-lg text-xs font-medium hover:bg-[#0d3d24] transition-colors"
+                  onClick={handleAddReview}
+                  disabled={savingReview}
+                  className="w-full bg-[#0a2e1a] text-white py-2.5 rounded-lg text-sm font-bold hover:bg-[#0d3d24] disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
                 >
-                  Save
-                </button>
-                <button
-                  onClick={() => { setEditingTreatmentPlan(false); }}
-                  className="text-slate-500 px-4 py-2 text-xs font-medium hover:text-slate-700 transition-colors"
-                >
-                  Cancel
+                  {savingReview ? <><Loader2 size={14} className="animate-spin" /> Saving...</> : <><CheckCircle size={14} /> Save Review</>}
                 </button>
               </div>
             </div>
-          ) : (
-            <p className="text-sm text-slate-700 whitespace-pre-wrap">{updatedTreatmentPlan || "No treatment plan documented"}</p>
           )}
+
+          {/* Reviews List */}
+          <div className="divide-y divide-slate-50 max-h-[400px] overflow-y-auto">
+            {reviews.length === 0 && !reviewsLoading ? (
+              <div className="py-8 text-center text-sm text-slate-400">No reviews yet. Click "Add Review" to document a follow-up.</div>
+            ) : reviewsLoading ? (
+              <div className="py-8 text-center text-sm text-slate-400"><Loader2 size={14} className="animate-spin inline mr-1" /> Loading reviews...</div>
+            ) : (
+              reviews.map((r: any) => (
+                <div key={r.id} className="px-5 py-4 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-[#0a2e1a]/10 flex items-center justify-center text-[9px] font-bold text-[#0a2e1a]">
+                        {r.doctorName?.[0] || "D"}
+                      </div>
+                      <span className="text-xs font-semibold text-slate-700">{r.doctorName}</span>
+                      <span className="text-[10px] text-slate-400">·</span>
+                      <span className="text-[10px] text-slate-400">
+                        {new Date(r.createdAt).toLocaleString("en-UG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    <span className="text-[9px] text-slate-300 font-mono">#{r.id}</span>
+                  </div>
+                  {r.followUpNotes && <div className="mb-1"><span className="text-[10px] font-bold text-slate-400 uppercase mr-1">Notes:</span><span className="text-sm text-slate-600">{r.followUpNotes}</span></div>}
+                  {r.examinationFindings && <div className="mb-1"><span className="text-[10px] font-bold text-slate-400 uppercase mr-1">Exam:</span><span className="text-sm text-slate-600">{r.examinationFindings}</span></div>}
+                  {r.diagnosis && <div className="mb-1"><span className="text-[10px] font-bold text-slate-400 uppercase mr-1">Dx:</span><span className="text-sm text-slate-700 font-medium">{r.diagnosis}</span></div>}
+                  {r.treatmentPlan && <div className="mb-1"><span className="text-[10px] font-bold text-slate-400 uppercase mr-1">Plan:</span><span className="text-sm text-slate-600">{r.treatmentPlan}</span></div>}
+                  {r.labOrders && (() => { try { return JSON.parse(r.labOrders); } catch { return []; } })().length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {JSON.parse(r.labOrders).map((l: string, i: number) => <span key={i} className="text-[9px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full">{l}</span>)}
+                    </div>
+                  )}
+                  {r.imagingOrders && (() => { try { return JSON.parse(r.imagingOrders); } catch { return []; } })().length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {JSON.parse(r.imagingOrders).map((img: string, i: number) => <span key={i} className="text-[9px] bg-cyan-50 text-cyan-600 px-2 py-0.5 rounded-full">{img}</span>)}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
         </div>
 
-        {/* Follow-up Notes */}
+        {/* Lab & Imaging Orders Status */}
+        <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden mb-6">
+          <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Orders & Results</h3>
+          </div>
+          <div className="divide-y divide-slate-50">
+            {patientLabRequests.length === 0 && patientImagingRequests.length === 0 ? (
+              <div className="py-6 text-center text-sm text-slate-400">No lab or imaging orders yet</div>
+            ) : (
+              <>
+                {patientLabRequests.map((lr: any) => (
+                  <div key={`lab-${lr.id}`} className="px-5 py-3 flex items-center gap-3">
+                    <Microscope size={14} className="text-purple-500 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-700">{lr.testName}</p>
+                      <p className="text-[10px] text-slate-400">{new Date(lr.createdAt).toLocaleDateString("en-UG", { day: "numeric", month: "short" })}</p>
+                    </div>
+                    {lr.status === "COMPLETED" ? (
+                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
+                        <CheckCircle size={9} /> Results Ready
+                      </span>
+                    ) : lr.status === "PENDING" ? (
+                      <span className="text-[9px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">Pending</span>
+                    ) : (
+                      <span className="text-[9px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-medium">{lr.status}</span>
+                    )}
+                  </div>
+                ))}
+                {patientImagingRequests.map((ir: any) => (
+                  <div key={`img-${ir.id}`} className="px-5 py-3 flex items-center gap-3">
+                    <Radio size={14} className="text-cyan-500 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-700">{ir.studyType}</p>
+                      <p className="text-[10px] text-slate-400">{new Date(ir.createdAt).toLocaleDateString("en-UG", { day: "numeric", month: "short" })}</p>
+                    </div>
+                    {ir.status === "REPORTED" ? (
+                      <span className="text-[9px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
+                        <CheckCircle size={9} /> Report Ready
+                      </span>
+                    ) : ir.status === "ORDERED" ? (
+                      <span className="text-[9px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">Ordered</span>
+                    ) : (
+                      <span className="text-[9px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-medium">{ir.status}</span>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Follow-up / Discharge Notes */}
         <div className="bg-white rounded-xl border border-slate-100 p-4 mb-6">
           <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">
-            Follow-up / Discharge Notes
+            Discharge Summary Notes
           </label>
           <textarea
             className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[100px]"
-            placeholder="Document follow-up instructions, discharge summary, or additional notes..."
+            placeholder="Document final discharge summary, instructions, and follow-up plan..."
             value={followUpNotes}
             onChange={(e) => setFollowUpNotes(e.target.value)}
           />
         </div>
+
+        {/* Send to Nurse Button */}
+        <button
+          onClick={handleSendToNurse}
+          disabled={sendingToNurse}
+          className="w-full py-3 rounded-xl font-semibold text-sm bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 transition-all flex items-center justify-center gap-2 mb-3 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {sendingToNurse ? (
+            <><Loader2 size={16} className="animate-spin" /> Sending...</>
+          ) : (
+            <><Activity size={16} /> Send Treatment Plan to Nurse/Midwife</>
+          )}
+        </button>
 
         {/* Discharge Button */}
         <button
@@ -2192,6 +2416,93 @@ function DoctorRecordsView({ onBack }: { onBack: () => void }) {
   );
 }
 
+// ─── Doctor History View ──────────────────────────────────────────────────────
+
+interface HistoryEntry {
+  id: number;
+  patientId: number;
+  patientName: string;
+  patientNumber: string;
+  action: string;
+  description: string;
+  fromDepartment: string | null;
+  toDepartment: string | null;
+  performedBy: string;
+  createdAt: string;
+}
+
+function DoctorHistoryView({ onBack }: { onBack: () => void }) {
+  const [entries, setEntries] = useState<HistoryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchHistory = useCallback(async () => {
+    try {
+      const res = await fetch("/api/doctor/history");
+      if (!res.ok) throw new Error();
+      const d = await res.json();
+      setEntries(d.entries ?? []);
+    } catch { setEntries([]); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchHistory(); }, [fetchHistory]);
+
+  const getIcon = (action: string) => {
+    switch (action) {
+      case "CONSULTATION_END": return <CheckCircle size={13} className="text-emerald-500" />;
+      case "STATUS_CHANGE": return <Activity size={13} className="text-blue-500" />;
+      case "TRANSFER": return <ArrowRight size={13} className="text-amber-500" />;
+      case "PROCEDURE": return <FileText size={13} className="text-purple-500" />;
+      default: return <Clock size={13} className="text-slate-400" />;
+    }
+  };
+
+  return (
+    <div>
+      <button onClick={onBack} className="mb-4 text-slate-500 flex items-center gap-1 hover:text-slate-700">
+        <ArrowLeft size={15} /> Back to Dashboard
+      </button>
+      <h2 className="text-lg font-bold text-slate-700 mb-5">Doctor Activity History</h2>
+
+      {loading ? (
+        <div className="text-center py-20"><Loader2 size={24} className="animate-spin mx-auto text-[#0a2e1a] mb-3" /><p className="text-sm font-medium text-slate-400">Loading history...</p></div>
+      ) : entries.length === 0 ? (
+        <div className="text-center py-20"><Clock size={48} className="mx-auto text-slate-200 mb-4" /><p className="text-base font-semibold text-slate-400">No activity recorded yet</p></div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+          <div className="divide-y divide-slate-50 max-h-[calc(100vh-250px)] overflow-y-auto">
+            {entries.map((e) => (
+              <div key={e.id} className="px-5 py-3.5 hover:bg-slate-50 transition-colors flex items-start gap-3">
+                <div className="mt-0.5 flex-shrink-0">{getIcon(e.action)}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-semibold text-slate-700">{e.performedBy}</span>
+                    <span className="text-[10px] text-slate-400">
+                      {new Date(e.createdAt).toLocaleString("en-UG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
+                  <p className="text-sm text-slate-600 mt-0.5">{e.description}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[10px] font-mono text-[#0a2e1a]/60">{e.patientNumber}</span>
+                    <span className="text-[10px] text-slate-400">·</span>
+                    <span className="text-[10px] text-slate-500 font-medium">{e.patientName}</span>
+                    {e.toDepartment && (
+                      <>
+                        <span className="text-[10px] text-slate-300">→</span>
+                        <span className="text-[10px] text-slate-500">{e.toDepartment}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatTimestamp(date: string | Date): string {
@@ -2212,7 +2523,7 @@ export default function DoctorsPage() {
   const [currentUser, setCurrentUser] = useState<{ id: number; fullName: string; staffId: number | null } | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [activePatient, setActivePatient] = useState<DashboardPatient | null>(null);
-  const [activeSection, setActiveSection] = useState<"queue" | "admitted" | "records" | "appointments" | "updates">("queue");
+  const [activeSection, setActiveSection] = useState<"queue" | "admitted" | "records" | "history" | "appointments" | "updates">("queue");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -2345,6 +2656,10 @@ export default function DoctorsPage() {
           setActivePatient(null);
           setActiveSection("records");
         }}
+        onHistory={() => {
+          setActivePatient(null);
+          setActiveSection("history");
+        }}
         onAppointments={() => {
           setActivePatient(null);
           setActiveSection("appointments");
@@ -2380,6 +2695,8 @@ export default function DoctorsPage() {
             staffId={doctorStaffId}
             staffName={doctorName}
           />
+        ) : activeSection === "history" ? (
+          <DoctorHistoryView onBack={() => setActiveSection("queue")} />
         ) : activeSection === "records" ? (
           <DoctorRecordsView onBack={() => setActiveSection("queue")} />
         ) : activeSection === "appointments" ? (
@@ -2390,6 +2707,13 @@ export default function DoctorsPage() {
           <div className="flex gap-6">
             {/* ── Left Column: Metrics + Queue ── */}
             <div className="flex-1 min-w-0">
+              {/* Welcome Banner */}
+              <div className="bg-white rounded-2xl border border-slate-100 p-5 mb-5">
+                <h1 className="text-xl font-bold text-slate-800">
+                  Welcome to <span className="text-[#0a2e1a]">Mainstreet Medical Center</span> Doctor Dashboard
+                </h1>
+                <p className="text-sm text-slate-500 mt-1">Dr. {doctorName}</p>
+              </div>
               {/* Metrics Bar */}
               {metrics && <MetricsBar metrics={metrics} />}
 

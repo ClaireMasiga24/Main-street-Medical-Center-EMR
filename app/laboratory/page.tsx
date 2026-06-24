@@ -167,6 +167,9 @@ export default function LaboratoryPage() {
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [persistedNotifs, setPersistedNotifs] = useState<any[]>([]);
 
+  // Print / Signature
+  const [labSignature, setLabSignature] = useState("");
+
   // Stats
   const [stats, setStats] = useState<LabStats>({
     totalToday: 0, pending: 0, completed: 0, rejected: 0, critical: 0, urgent: 0, avgTatMinutes: 0, departments: [],
@@ -387,49 +390,135 @@ export default function LaboratoryPage() {
 
   // ── Print handler ──────────────────────────────────────────────────
   const handlePrint = (sectionId: string) => {
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) return;
-    const content = document.getElementById(sectionId);
-    if (!content) return;
-    printWindow.document.write(`
-      <html><head><title>Main Street Medical Center — Laboratory Report</title>
-        <style>
-          @page { margin: 15mm; }
-          body { font-family: 'Times New Roman', Times, serif; color: #1e293b; line-height: 1.5; }
-          table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-          th, td { border: 1px solid #cbd5e1; padding: 8px 12px; text-align: left; font-size: 11px; }
-          th { background: #f1f5f9; font-weight: 700; }
-          .header { text-align: center; margin-bottom: 20px; position: relative; }
-          .header h1 { color: #00703C; font-size: 20px; margin: 8px 0 2px; letter-spacing: 1px; }
-          .header h2 { color: #166534; font-size: 14px; margin: 0 0 4px; font-weight: 400; }
-          .header p { color: #64748b; font-size: 11px; margin: 0; }
-          .watermark { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0.04; pointer-events: none; z-index: -1; font-size: 80px; color: #00703C; font-weight: 900; transform: rotate(-30deg); }
-          .print-area { padding: 20px; background: white; }
-          .print-area::before { content: ""; position: fixed; inset: 0; background: url('/Images/LOGO.jpg') center / 50% auto no-repeat; opacity: 0.03; pointer-events: none; z-index: -1; }
-          .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
-          .info-block { border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; }
-          .info-block h4 { margin: 0 0 4px; font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
-          .info-block p { margin: 0; font-size: 13px; font-weight: 600; }
-          .signature-area { display: flex; justify-content: space-between; margin-top: 32px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
-          .signature-block { text-align: center; }
-          .signature-line { width: 200px; height: 0; border-top: 1px solid #1e293b; margin: 32px 0 4px; }
-          .abnormal { color: #dc2626; font-weight: 700; }
-          .normal { color: #16a34a; }
-          .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 9px; color: #94a3b8; padding: 8px; border-top: 1px solid #e2e8f0; }
-        </style></head>
-        <body><div class="watermark">MAIN STREET MEDICAL CENTER</div>
-          <div class="header">
-            <img src="/Images/LOGO.jpg" style="width:65px;height:65px;border-radius:50%;" />
-            <h1>MAIN STREET MEDICAL CENTER</h1>
-            <h2>Laboratory Information System — Patient Report</h2>
-            <p>Report Generated: ${new Date().toLocaleString("en-UG")}</p>
+    const today = new Date().toLocaleDateString("en-UG", { day: "numeric", month: "long", year: "numeric" });
+
+    // Print queue list
+    if (sectionId === "lab-queue-print") {
+      const filtered = filteredRequests.length > 0 ? filteredRequests : allRequests;
+      const rows = filtered.slice(0, 50).map((r: LabRequestItem) => `
+        <tr>
+          <td style="border:1px solid #cbd5e1;padding:6px 10px;font-size:11px">${r.lastName}, ${r.firstName}</td>
+          <td style="border:1px solid #cbd5e1;padding:6px 10px;font-size:11px;font-family:monospace">${r.patientNumber}</td>
+          <td style="border:1px solid #cbd5e1;padding:6px 10px;font-size:11px">${r.testName}</td>
+          <td style="border:1px solid #cbd5e1;padding:6px 10px;font-size:11px">${r.status}</td>
+          <td style="border:1px solid #cbd5e1;padding:6px 10px;font-size:11px">${new Date(r.createdAt).toLocaleDateString("en-UG", { day: "numeric", month: "short" })}</td>
+        </tr>`).join("");
+
+      const html = `<!DOCTYPE html>
+      <html><head><title>Main Street Medical Center — Lab Queue</title>
+      <style>
+        @page { margin: 10mm; }
+        body { font-family: Arial, sans-serif; margin:0; padding:20px; color:#1e293b; }
+        table { width:100%; border-collapse:collapse; }
+        th, td { border:1px solid #cbd5e1; padding:6px 10px; text-align:left; font-size:11px; }
+        th { background:#f1f5f9; font-weight:700; font-size:10px; text-transform:uppercase; }
+        .watermark { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:-1; opacity:0.05; }
+        .watermark img { width:50%; height:auto; }
+      </style></head>
+      <body>
+        <img src="/Images/LOGO.jpg" style="position:fixed;inset:0;width:50%;margin:auto;opacity:0.05;pointer-events:none;z-index:-1;object-fit:contain" />
+        <div style="text-align:center;margin-bottom:20px;border-bottom:2px solid #0a2e1a;padding-bottom:15px">
+          <h1 style="font-size:18px;color:#0a2e1a;margin:0">MAIN STREET MEDICAL CENTER</h1>
+          <p style="font-size:12px;color:#555;margin:4px 0 0 0">Laboratory Request Queue — ${today}</p>
+          <p style="font-size:10px;color:#94a3b8;margin:4px 0 0 0">Total: ${filtered.length} request(s)</p>
+        </div>
+        <table>
+          <thead><tr><th>Patient</th><th>ID</th><th>Test</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#94a3b8">No requests</td></tr>'}</tbody>
+        </table>
+        <div style="margin-top:20px;text-align:center;font-size:8px;color:#94a3b8">Main Street Medical Center &bull; Laboratory Queue &bull; ${new Date().toLocaleString("en-UG")}</div>
+      </body></html>`;
+
+      const pw = window.open("", "_blank", "width=800,height=600");
+      if (!pw) { alert("Please allow pop-ups to print."); return; }
+      pw.document.write(html);
+      pw.document.close();
+      setTimeout(() => { pw.focus(); pw.print(); }, 800);
+      return;
+    }
+
+    // Build self-contained HTML for the individual report
+    const request = reportRequest;
+    if (!request) return;
+
+    let results: any[] = [];
+    if (request.results) { try { const p = JSON.parse(request.results); if (Array.isArray(p)) results = p; } catch {} }
+
+    const resultsRows = results.map((r: any, i: number) => {
+      const abn = r.flag === "high" || r.flag === "low" || r.flag === "critical";
+      return `<tr${abn ? ' style="background:#fef2f2"' : ""}>
+        <td style="border:1px solid #cbd5e1;padding:8px 12px;font-size:12px">${i + 1}</td>
+        <td style="border:1px solid #cbd5e1;padding:8px 12px;font-size:13px;font-weight:600${abn ? ';color:#b91c1c' : ''}">${r.test}</td>
+        <td style="border:1px solid #cbd5e1;padding:8px 12px;font-size:13px;font-weight:700${abn ? ';color:#dc2626' : ''}">${r.result}</td>
+        <td style="border:1px solid #cbd5e1;padding:8px 12px;font-size:12px;color:#64748b">${r.unit || ""}</td>
+        <td style="border:1px solid #cbd5e1;padding:8px 12px;font-size:12px;color:#64748b">${r.referenceRange || ""}</td>
+        <td style="border:1px solid #cbd5e1;padding:8px 12px;text-align:center">${abn ? `<span style="font-size:10px;font-weight:bold;padding:2px 8px;border-radius:4px;background:${r.flag === 'critical' ? '#fecaca' : '#fde68a'};color:${r.flag === 'critical' ? '#991b1b' : '#92400e'}">${r.flag.toUpperCase()}</span>` : '<span style="color:#16a34a;font-size:12px">Normal</span>'}</td>
+      </tr>`;
+    }).join("");
+
+    const html = `<!DOCTYPE html>
+    <html><head><title>Main Street Medical Center — Lab Report</title>
+    <style>
+      @page { margin: 15mm; }
+      body { font-family: Arial, sans-serif; margin:0; padding:0; color:#1e293b; }
+      table { width:100%; border-collapse:collapse; margin:16px 0; }
+      th, td { border:1px solid #cbd5e1; padding:8px 12px; text-align:left; font-size:12px; }
+      th { background:#f1f5f9; font-weight:700; font-size:11px; text-transform:uppercase; }
+      .watermark img { position:fixed; inset:0; width:50%; margin:auto; opacity:0.06; pointer-events:none; z-index:-1; object-fit:contain; }
+    </style></head>
+    <body>
+      <img src="/Images/LOGO.jpg" style="position:fixed;inset:0;width:50%;margin:auto;opacity:0.06;pointer-events:none;z-index:-1;object-fit:contain" />
+      <div style="padding:40px;max-width:800px;margin:0 auto">
+        <div style="text-align:center;margin-bottom:30px;border-bottom:2px solid #0a2e1a;padding-bottom:20px">
+          <h1 style="font-size:22px;color:#0a2e1a;margin:0;font-weight:bold">MAIN STREET MEDICAL CENTER</h1>
+          <p style="font-size:13px;color:#555;margin:4px 0 0 0">Laboratory Report</p>
+          <p style="font-size:11px;color:#94a3b8;margin:4px 0 0 0">Report #: LAB-RPT-${String(request.id).padStart(6, "0")} | Date: ${today}</p>
+        </div>
+        <table style="border:none">
+          <tr>
+            <td style="border:none;font-weight:bold;color:#0a2e1a;width:150px">Patient:</td>
+            <td style="border-bottom:1px solid #ccc">${request.lastName}, ${request.firstName}</td>
+            <td style="border:none;font-weight:bold;color:#0a2e1a;width:100px">ID:</td>
+            <td style="border-bottom:1px solid #ccc">${request.patientNumber}</td>
+          </tr>
+          <tr>
+            <td style="border:none;font-weight:bold;color:#0a2e1a">Gender / Age:</td>
+            <td style="border-bottom:1px solid #ccc">${request.gender} / ${request.age}y</td>
+            <td style="border:none;font-weight:bold;color:#0a2e1a">Test:</td>
+            <td style="border-bottom:1px solid #ccc">${request.testName}</td>
+          </tr>
+          <tr>
+            <td style="border:none;font-weight:bold;color:#0a2e1a">Doctor:</td>
+            <td style="border-bottom:1px solid #ccc">${request.requestedBy || "—"}</td>
+            <td style="border:none;font-weight:bold;color:#0a2e1a">Specimen:</td>
+            <td style="border-bottom:1px solid #ccc">${request.specimenId || "—"}</td>
+          </tr>
+        </table>
+        ${results.length > 0 ? `
+        <table>
+          <thead><tr><th>#</th><th>Investigation</th><th>Result</th><th>Unit</th><th>Range</th><th style="text-align:center">Flag</th></tr></thead>
+          <tbody>${resultsRows}</tbody>
+        </table>` : '<p style="text-align:center;color:#94a3b8;padding:20px">No results entered yet</p>'}
+        ${request.clinicalNotes ? `<div style="margin-bottom:16px"><h3 style="font-size:11px;color:#0a2e1a;text-transform:uppercase;letter-spacing:1px">Clinical Notes</h3><p style="font-size:12px;color:#475569;margin:0">${request.clinicalNotes}</p></div>` : ""}
+        <div style="margin-top:40px;border-top:1px solid #ccc;padding-top:24px;display:flex;justify-content:space-between">
+          <div style="text-align:center">
+            <p style="border-top:1px solid #000;width:200px;margin:36px auto 4px;padding-top:4px;font-size:13px;font-weight:bold">${labSignature || "Technician"}</p>
+            <p style="font-size:10px;color:#64748b;margin:0">Lab Technician</p>
           </div>
-          <div class="print-area">${content.innerHTML}</div>
-          <div class="footer">Main Street Medical Center &bull; Laboratory Information System &bull; Report ${new Date().toISOString().split("T")[0]}</div>
-        </body></html>
-    `);
-    printWindow.document.close();
-    setTimeout(() => printWindow.print(), 500);
+          <div style="text-align:center">
+            <p style="border-top:1px solid #000;width:200px;margin:36px auto 4px;padding-top:4px;font-size:13px;font-weight:bold">${request.validatedByName || "—"}</p>
+            <p style="font-size:10px;color:#64748b;margin:0">Validator</p>
+          </div>
+        </div>
+        <div style="margin-top:20px;text-align:center;font-size:9px;color:#94a3b8">Main Street Medical Center &bull; Laboratory Report &bull; ${new Date().toLocaleString("en-UG")}</div>
+      </div>
+    </body></html>`;
+
+    const pw = window.open("", "_blank", "width=800,height=600");
+    if (!pw) { alert("Please allow pop-ups to print."); return; }
+    pw.document.write(html);
+    pw.document.close();
+    setTimeout(() => { pw.focus(); pw.print(); }, 800);
   };
 
   // ── Early auth loading ──────────────────────────────────────────────
@@ -806,6 +895,8 @@ ld                Welcome to Main Street Medical Centre Laboratory System, <stro
           onClose={() => setReportRequest(null)}
           formatDate={formatDate}
           handlePrint={handlePrint}
+          labSignature={labSignature}
+          setLabSignature={setLabSignature}
         />
       )}
     </div>
@@ -1428,13 +1519,20 @@ function StatsPanel({ stats, onClose }: any) {
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 // REPORT PREVIEW MODAL
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
-function ReportPreviewModal({ request, onClose, formatDate, handlePrint }: any) {
+function ReportPreviewModal({ request, onClose, formatDate, handlePrint, labSignature, setLabSignature }: any) {
   const results: TestResultEntry[] = (() => { if (request.results) { try { const p = JSON.parse(request.results); if (Array.isArray(p)) return p; } catch {} } return []; })();
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center pt-8 pb-8 overflow-y-auto" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="bg-white shadow-2xl w-full max-w-4xl mx-4 rounded-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="bg-[#00703C] text-white px-6 py-4 flex items-center justify-between"><h2 className="text-lg font-bold flex items-center gap-2"><FileText size={20} /> Report</h2>
-          <div className="flex items-center gap-2"><button onClick={() => handlePrint("report-content")} className="bg-white text-[#00703C] px-4 py-2 rounded-xl font-bold text-sm hover:bg-green-50"><Printer size={16} className="inline mr-1" /> Print</button><button onClick={onClose} className="text-white/80"><XCircle size={20} /></button></div>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-white/10 rounded-lg px-3 py-1.5">
+              <input type="text" placeholder="Tech signature..." value={labSignature} onChange={(e) => setLabSignature(e.target.value)}
+                className="bg-transparent text-white text-xs placeholder-white/50 border-b border-white/30 w-28 focus:outline-none" />
+            </div>
+            <button onClick={() => handlePrint("report-content")} className="bg-white text-[#00703C] px-4 py-2 rounded-xl font-bold text-sm hover:bg-green-50"><Printer size={16} className="inline mr-1" /> Print</button>
+            <button onClick={onClose} className="text-white/80"><XCircle size={20} /></button>
+          </div>
         </div>
         <div id="report-content" className="p-8 max-h-[80vh] overflow-y-auto">
           <div className="text-center border-b-2 border-[#00703C] pb-6 mb-6">
@@ -1447,7 +1545,25 @@ function ReportPreviewModal({ request, onClose, formatDate, handlePrint }: any) 
           </div>
           {results.length > 0 && <table className="w-full border-collapse mb-6"><thead><tr className="bg-[#00703C]/10"><th className="border border-slate-200 px-4 py-2.5 text-left text-[11px] font-bold uppercase">#</th><th className="border border-slate-200 px-4 py-2.5 text-left text-[11px] font-bold uppercase">Investigation</th><th className="border border-slate-200 px-4 py-2.5 text-left text-[11px] font-bold uppercase">Result</th><th className="border border-slate-200 px-4 py-2.5 text-left text-[11px] font-bold uppercase">Unit</th><th className="border border-slate-200 px-4 py-2.5 text-left text-[11px] font-bold uppercase">Range</th><th className="border border-slate-200 px-4 py-2.5 text-center text-[11px] font-bold uppercase">Flag</th></tr></thead>
             <tbody>{results.map((r: any, i: number) => { const abn = r.flag === "high" || r.flag === "low" || r.flag === "critical"; return (<tr key={i} className={abn ? "bg-red-50/50" : ""}><td className="border border-slate-200 px-4 py-2.5 text-xs">{i+1}</td><td className={`border border-slate-200 px-4 py-2.5 text-sm font-semibold ${abn ? "text-red-700" : ""}`}>{r.test}</td><td className={`border border-slate-200 px-4 py-2.5 text-sm font-bold ${abn ? "text-red-600" : ""}`}>{r.result}</td><td className="border border-slate-200 px-4 py-2.5 text-sm text-slate-500">{r.unit}</td><td className="border border-slate-200 px-4 py-2.5 text-sm text-slate-500">{r.referenceRange}</td><td className="border border-slate-200 px-4 py-2.5 text-center">{abn ? <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${r.flag === "critical" ? "bg-red-200 text-red-800 animate-pulse" : "bg-amber-100 text-amber-700"}`}>{r.flag === "critical" ? "CRITICAL" : r.flag === "high" ? "HIGH" : "LOW"}</span> : <span className="text-green-600 text-xs">N</span>}</td></tr>); })}</tbody></table>}
-          <div className="border-t-2 border-slate-200 pt-6"><div className="grid grid-cols-3 gap-8 text-center"><div><div className="border-t border-slate-300 mt-8 mb-1" /><p className="text-xs font-bold">Technician</p><p className="text-xs text-slate-400">{request.enteredByName || "—"}</p></div><div><div className="border-t border-slate-300 mt-8 mb-1" /><p className="text-xs font-bold">Validator</p><p className="text-xs text-slate-400">{request.validatedByName || "—"}</p></div><div><div className="border-t border-slate-300 mt-8 mb-1" /><p className="text-xs font-bold">Authorized</p><p className="text-xs text-slate-400">MSMC</p></div></div></div>
+          <div className="border-t-2 border-slate-200 pt-6">
+            <div className="grid grid-cols-3 gap-8 text-center">
+              <div>
+                <div className="border-t border-slate-300 mt-8 mb-1" />
+                <p className="text-xs font-bold text-[#0a2e1a]">{labSignature || "_________________"}</p>
+                <p className="text-xs text-slate-400">Lab Technician</p>
+              </div>
+              <div>
+                <div className="border-t border-slate-300 mt-8 mb-1" />
+                <p className="text-xs font-bold">{request.validatedByName || "—"}</p>
+                <p className="text-xs text-slate-400">Validator</p>
+              </div>
+              <div>
+                <div className="border-t border-slate-300 mt-8 mb-1" />
+                <p className="text-xs font-bold">MSMC</p>
+                <p className="text-xs text-slate-400">Authorized</p>
+              </div>
+            </div>
+          </div>
           <div className="mt-6 text-center text-[9px] text-slate-400">Main Street Medical Center &bull; Report {new Date().toLocaleString("en-UG")}</div>
         </div>
       </div>
