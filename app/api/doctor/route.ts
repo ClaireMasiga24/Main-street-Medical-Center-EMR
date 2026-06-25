@@ -142,8 +142,10 @@ export async function POST(req: NextRequest) {
 
       // Determine if we need to flag for Treatment Room
       const goingToTreatment = effectiveRoute === "TREATMENT" || (isAdmitted && effectiveRoute === "NURSE");
+      const beingDischarged = effectiveRoute === "DISCHARGE";
       const updateData: any = { currentStatus: newStatus };
       if (goingToTreatment) updateData.sentToTreatmentRoom = true;
+      if (beingDischarged) updateData.sentToTreatmentRoom = false;
 
       await tx.patient.update({
         where: { id: patientId },

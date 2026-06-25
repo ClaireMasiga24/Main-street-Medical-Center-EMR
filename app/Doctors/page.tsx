@@ -1668,7 +1668,8 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
       const res = await fetch("/api/doctor/admitted");
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody.error || `Server error (${res.status})`);
+        const detail = errBody.detail ? ` — ${errBody.detail}` : "";
+        throw new Error(`${errBody.error || `Server error (${res.status})`}${detail}`);
       }
       const data = await res.json();
       setPatients(data.patients ?? []);
@@ -1751,7 +1752,7 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
           staffName,
           treatmentPlan: updatedTreatmentPlan,
           notes: followUpNotes || selectedPatient.chiefComplaint,
-          routeTo: "CASHIER",
+          routeTo: "DISCHARGE",
         }),
       });
       if (!res.ok) throw new Error("Discharge failed");
@@ -2696,34 +2697,49 @@ export default function DoctorsPage() {
   const doctorStaffId = currentUser?.staffId || doctorId;
 
   const fetchDashboard = useCallback(async () => {
+    if (!currentUser) return;
+
+    // Try cache first for instant loading
+    try {
+      const cached = localStorage.getItem("doctorDashboardCache");
+      if (cached) {
+        const parsed = JSON.parse(cached) as DashboardData;
+        setDashboard(parsed);
+        setLoading(false);
+      }
+    } catch { /* ignore stale cache */ }
+
     try {
       setError(null);
       fetchAttemptsRef.current++;
       const res = await fetch(`/api/doctor/dashboard?doctorId=${doctorId}`);
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody.error || `Server error (${res.status})`);
+        const detail = errBody.detail ? ` — ${errBody.detail}` : "";
+        throw new Error(`${errBody.error || `Server error (${res.status})`}${detail}`);
       }
       const data = await res.json();
       setDashboard(data);
       fetchAttemptsRef.current = 0; // reset on success
-    } catch (err: any) {
-      console.error("[DoctorDashboard] fetch error:", err.message);
+      localStorage.setItem("doctorDashboardCache", JSON.stringify(data));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[DoctorDashboard] fetch error:", message);
       // Only show error if we have data to preserve, or after several retries
       if (dashboard) {
         setError("Connection issue — showing last available data");
       } else if (fetchAttemptsRef.current >= 3) {
-        setError(err.message || "Could not reach server");
+        setError(message || "Could not reach server");
       }
     } finally {
       setLoading(false);
     }
-  }, [doctorId]);
+  }, [doctorId, currentUser]);
 
   // Initial fetch
   useEffect(() => {
     fetchDashboard();
-  }, [fetchDashboard]);
+  }, [fetchDashboard, currentUser]);
 
   // Poll every 30 seconds (reduced from 15s to ease database connection pool pressure)
   useEffect(() => {

@@ -30,15 +30,13 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    const [awaitingDoctor, inConsultation, completedToday, pendingLabs, pendingRadiology, todayAppointments, admittedPatients] = await Promise.all([
-      prisma.patient.count({ where: { currentStatus: "AWAITING_DOCTOR" } }),
-      prisma.patient.count({ where: { currentStatus: "IN_CONSULTATION" } }),
-      prisma.visit.count({ where: { createdAt: { gte: today, lt: todayEnd }, diagnosis: { not: null }, ...(doctorId ? { doctorId } : {}) } }),
-      prisma.labRequest.count({ where: { status: { notIn: ["COMPLETED", "REJECTED"] }, Patient: { currentStatus: { in: ["AWAITING_DOCTOR", "IN_CONSULTATION"] } } } }),
-      prisma.imagingRequest.count({ where: { status: { notIn: ["REPORTED", "CANCELLED"] }, Patient: { currentStatus: { in: ["AWAITING_DOCTOR", "IN_CONSULTATION"] } } } }),
-      prisma.appointment.count({ where: { appointmentDate: { gte: today, lt: todayEnd }, department: "Doctor", status: { not: "CANCELLED" } } }),
-      prisma.patient.count({ where: { currentStatus: "ADMITTED" } }),
-    ]);
+    const awaitingDoctor = await prisma.patient.count({ where: { currentStatus: "AWAITING_DOCTOR" } });
+    const inConsultation = await prisma.patient.count({ where: { currentStatus: "IN_CONSULTATION" } });
+    const completedToday = await prisma.visit.count({ where: { createdAt: { gte: today, lt: todayEnd }, diagnosis: { not: null }, ...(doctorId ? { doctorId } : {}) } });
+    const pendingLabs = await prisma.labRequest.count({ where: { status: { notIn: ["COMPLETED", "REJECTED"] }, Patient: { currentStatus: { in: ["AWAITING_DOCTOR", "IN_CONSULTATION"] } } } });
+    const pendingRadiology = await prisma.imagingRequest.count({ where: { status: { notIn: ["REPORTED", "CANCELLED"] }, Patient: { currentStatus: { in: ["AWAITING_DOCTOR", "IN_CONSULTATION"] } } } });
+    const todayAppointments = await prisma.appointment.count({ where: { appointmentDate: { gte: today, lt: todayEnd }, department: "Doctor", status: { not: "CANCELLED" } } });
+    const admittedPatients = await prisma.patient.count({ where: { currentStatus: "ADMITTED" } });
 
     const recentNotifications = await prisma.notification.findMany({
       where: { department: "Doctor", createdAt: { gte: twentyFourHoursAgo } },
@@ -102,10 +100,17 @@ export async function GET(req: NextRequest) {
       metrics: { awaitingDoctor, inConsultation, completedToday, pendingLabs, pendingRadiology, todayAppointments, admittedPatients },
       clinicalUpdates,
     });
-  } catch (err: any) {
-    console.error("[doctor/dashboard GET] Error:", err.message || err);
-    if (err.code) console.error("[doctor/dashboard GET] Error code:", err.code);
-    if (err?.meta?.cause) console.error("[doctor/dashboard GET] Error cause:", err.meta.cause);
-    return NextResponse.json({ error: "Failed to load dashboard data." }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof Object && "code" in err ? (err as any).code : undefined;
+    const meta = err instanceof Object && "meta" in err ? (err as any).meta : undefined;
+    console.error("[doctor/dashboard GET] Error:", message);
+    if (code) console.error("[doctor/dashboard GET] Error code:", code);
+    if (meta?.cause) console.error("[doctor/dashboard GET] Error cause:", meta.cause);
+    return NextResponse.json({
+      error: "Failed to load dashboard data.",
+      detail: process.env.NODE_ENV === "development" ? message : undefined,
+      code: process.env.NODE_ENV === "development" ? code : undefined,
+    }, { status: 500 });
   }
 }
