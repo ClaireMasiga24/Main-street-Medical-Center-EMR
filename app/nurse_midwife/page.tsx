@@ -3,11 +3,11 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import NotificationInbox from "../components/NotificationInbox";
 import StaffMessaging from "../components/StaffMessaging";
 import {
-  Activity, Baby, FileText, LogOut, Printer, PlusCircle, Trash2,
-  RefreshCw, Phone, User, Clock, AlertTriangle, X, Thermometer,
-  Droplets, Heart, Wind, Scale, Ruler, Eye, AlertCircle, Stethoscope,
-  ArrowRight, CheckCircle, Save, ClipboardList, Calendar, Loader2,
-  Syringe, ChevronRight, Circle
+	  Activity, Baby, FileText, LogOut, Pill, Printer, PlusCircle, Trash2,
+	  RefreshCw, Phone, User, Clock, AlertTriangle, X, Thermometer,
+	  Droplets, Heart, Wind, Scale, Ruler, Eye, AlertCircle, Stethoscope,
+	  ArrowRight, CheckCircle, Save, ClipboardList, Calendar, Loader2,
+	  Syringe, ChevronRight, Circle
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -161,6 +161,11 @@ export default function NurseMidwifeDashboard() {
   const [medFormPatientId, setMedFormPatientId] = useState<number | null>(null);
   const [medFormName, setMedFormName] = useState("");
   const [medFormTime, setMedFormTime] = useState("");
+  // ── Mobile sidebar state ─────────────────────────────────────────────
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // ── Doctor Records Modal state ──────────────────────────────────────────
+  const [showDoctorModal, setShowDoctorModal] = useState(false);
+  const [doctorModalPatient, setDoctorModalPatient] = useState<any>(null);
 
   // ── ANC state ────────────────────────────────────────────────────────────
   const [ancPatients, setAncPatients] = useState<any[]>([]);
@@ -424,13 +429,13 @@ export default function NurseMidwifeDashboard() {
 
   // ── Sticky header component ─────────────────────────────────────────────
   const StickyHeader = ({ tabName, children }: { tabName: string; children?: React.ReactNode }) => (
-    <div className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 px-6 py-3.5 flex items-center justify-between rounded-t-xl shadow-[0_1px_4px_rgba(0,0,0,0.04)]">
+    <div className="sticky top-0 lg:top-0 z-20 bg-white/90 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 py-3 flex items-center justify-between rounded-t-xl shadow-[0_1px_4px_rgba(0,0,0,0.04)]">
       <div className="flex items-center gap-3">
-        <h2 className="text-base font-bold text-slate-800 tracking-tight">{tabName}</h2>
+        <h2 className="text-sm sm:text-base font-bold text-slate-800 tracking-tight">{tabName}</h2>
       </div>
-      <div className="flex items-center gap-5">
+      <div className="flex items-center gap-2 sm:gap-5">
         {children}
-        <div className="flex items-center gap-4 text-xs font-medium text-slate-500">
+        <div className="hidden sm:flex items-center gap-4 text-xs font-medium text-slate-500">
           <div className="flex items-center gap-1.5 bg-slate-100/70 px-2.5 py-1 rounded-lg">
             <Clock size={13} className="text-[#00703C]" />
             <span className="tabular-nums font-semibold text-slate-700">{clock}</span>
@@ -475,20 +480,31 @@ export default function NurseMidwifeDashboard() {
       `}</style>
 
       {/* ═══════════════════════════════════════════════════════════════════════
-          SIDEBAR
+          SIDEBAR — slides in from left on mobile, fixed on desktop
           ═══════════════════════════════════════════════════════════════════════ */}
-      <aside className="w-[280px] flex-shrink-0 flex flex-col text-white" style={{ background: "linear-gradient(180deg, #00703C 0%, #006633 45%, #005a2e 100%)", boxShadow: "4px 0 24px rgba(0, 0, 0, 0.12)" }}>
+
+      {/* Mobile overlay */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setMobileMenuOpen(false)} />
+      )}
+
+      <aside className={`
+        fixed inset-y-0 left-0 z-50 w-[280px] flex-shrink-0 flex flex-col text-white
+        transform transition-transform duration-300 ease-in-out
+        lg:relative lg:translate-x-0
+        ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"}
+      `} style={{ background: "linear-gradient(180deg, #00703C 0%, #006633 45%, #005a2e 100%)", boxShadow: "4px 0 24px rgba(0, 0, 0, 0.12)" }}>
         {/* Logo section */}
-        <div className="px-6 pt-7 pb-5 text-center border-b border-white/10">
-          <div className="mx-auto w-20 h-20 rounded-full border-[3px] border-white/80 shadow-lg overflow-hidden bg-white/10 flex items-center justify-center">
+        <div className="px-4 sm:px-6 pt-5 sm:pt-7 pb-4 sm:pb-5 text-center border-b border-white/10">
+          <div className="mx-auto w-14 h-14 sm:w-20 sm:h-20 rounded-full border-[3px] border-white/80 shadow-lg overflow-hidden bg-white/10 flex items-center justify-center">
             <img src="/Images/LOGO.jpg" alt="Logo" className="w-full h-full object-cover" />
           </div>
-          <h2 className="text-base font-extrabold tracking-wider mt-3 text-white/95">MAIN STREET EMR</h2>
-          <p className="text-[11px] font-medium text-white/70 mt-1 leading-tight">Welcome to Mainstreet Medical Center</p>
-          <p className="text-[10px] font-bold text-white/90 bg-white/10 px-3 py-1 rounded-lg mt-1.5 inline-block">Nurse / Midwife</p>
+          <h2 className="text-sm sm:text-base font-extrabold tracking-wider mt-2 sm:mt-3 text-white/95">MAIN STREET EMR</h2>
+          <p className="text-[10px] sm:text-[11px] font-medium text-white/70 mt-1 leading-tight">Welcome to Mainstreet Medical Center</p>
+          <p className="text-[9px] sm:text-[10px] font-bold text-white/90 bg-white/10 px-2 sm:px-3 py-1 rounded-lg mt-1.5 inline-block">Nurse / Midwife</p>
           {nurseName && nurseName !== "Nurse" && (
-            <p className="text-[13px] font-bold text-white mt-2 flex items-center justify-center gap-1.5">
-              <User size={14} className="text-white/70" />
+            <p className="text-[12px] sm:text-[13px] font-bold text-white mt-2 flex items-center justify-center gap-1.5">
+              <User size={13} className="text-white/70" />
               {nurseName}
             </p>
           )}
@@ -501,14 +517,21 @@ export default function NurseMidwifeDashboard() {
             { id: "treatment-room", label: "Treatment Room", icon: Syringe },
             { id: "antenatal", label: "ANC Monitoring", icon: Baby },
             { id: "treatment", label: "Treatment Chart", icon: ClipboardList },
+            { id: "pharmacy", label: "Pharmacy", icon: Pill },
             { id: "appointments", label: "Appointments", icon: Calendar },
           ].map(tab => {
             const isActive = activeTab === tab.id;
             const Icon = tab.icon;
+            const tabCount = 
+              tab.id === "triage" ? patients.length :
+              tab.id === "treatment-room" ? treatmentRoomPatients.length :
+              tab.id === "antenatal" ? ancPatients.length :
+              tab.id === "appointments" ? nurseAppts.length :
+              null;
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => { setActiveTab(tab.id); setMobileMenuOpen(false); }}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-bold transition-all duration-200 ${
                   isActive
                     ? "bg-white text-[#00703C] shadow-md"
@@ -517,19 +540,26 @@ export default function NurseMidwifeDashboard() {
               >
                 <Icon size={20} className={isActive ? "text-[#00703C]" : "text-white/50"} />
                 <span className="flex-1 text-left">{tab.label}</span>
+                {tabCount !== null && tabCount > 0 && (
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    isActive ? "bg-[#00703C] text-white" : "bg-white/20 text-white"
+                  }`}>
+                    {tabCount}
+                  </span>
+                )}
                 {isActive && <ChevronRight size={14} className="text-[#00703C]" />}
               </button>
             );
           })}
-
-          {/* Divider */}
-          <div className="border-t border-white/10 my-3" />
 
           {/* Sidebar tools — compact */}
           <div className="space-y-1.5">
             <NotificationInbox department="Nurse/Midwife" sidebar={true} showTitle={true} />
             <StaffMessaging />
           </div>
+
+          {/* Divider — below messages */}
+          <div className="border-t border-white/10 my-3" />
         </nav>
 
         {/* Bottom area */}
@@ -541,7 +571,7 @@ export default function NurseMidwifeDashboard() {
                 if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id, username: u.username }) }); }
               } catch {} router.push("/");
             }}
-            className="w-full flex items-center justify-center gap-2 bg-red-600/90 hover:bg-red-600 text-white font-bold py-3.5 px-4 rounded-xl transition-colors duration-200 text-sm shadow-sm"
+            className="w-full flex items-center justify-center gap-2 bg-red-600/90 hover:bg-red-600 text-white font-bold py-3 sm:py-3.5 px-4 rounded-xl transition-colors duration-200 text-sm shadow-sm"
           >
             <LogOut size={16} /> Logout
           </button>
@@ -552,8 +582,23 @@ export default function NurseMidwifeDashboard() {
           MAIN CONTENT
           ═══════════════════════════════════════════════════════════════════════ */}
       <main className="flex-1 flex flex-col min-h-screen overflow-auto">
+        {/* Mobile top bar with hamburger */}
+        <div className="sticky top-0 z-30 lg:hidden bg-white/95 backdrop-blur-md border-b border-slate-200 px-3 py-2.5 flex items-center justify-between">
+          <button onClick={() => setMobileMenuOpen(true)}
+            className="flex items-center gap-2 text-[#00703C] font-bold text-xs">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+            Menu
+          </button>
+          <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+            <span className="bg-[#00703C]/10 text-[#00703C] px-2 py-1 rounded-lg font-bold">Nurse / Midwife</span>
+            <span className="tabular-nums font-semibold text-slate-600">{clock}</span>
+          </div>
+        </div>
+
         {/* Tab content wrapper with fade-in */}
-        <div key={animKey} className="animate-fade-in flex-1 p-6">
+        <div key={animKey} className="animate-fade-in flex-1 p-3 sm:p-4 md:p-6">
 
           {/* ────────────────────────────────────────────────────────────────
               TRIAGE TAB
@@ -566,9 +611,9 @@ export default function NurseMidwifeDashboard() {
                   <RefreshCw size={13} className={isLoading ? "animate-spin" : ""} /> Refresh
                 </button>
               </StickyHeader>
-              <div className="p-6">
-                <div className="flex items-center gap-2 mb-5">
-                  <h3 className="text-sm font-bold text-slate-600">Patients Awaiting Triage</h3>
+              <div className="p-3 sm:p-4 md:p-6">
+                <div className="flex items-center gap-2 mb-4 sm:mb-5">
+                  <h3 className="text-xs sm:text-sm font-bold text-slate-600">Patients Awaiting Triage</h3>
                   <span className="bg-[#00703C] text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full">{patients.length}</span>
                 </div>
 
@@ -601,7 +646,7 @@ export default function NurseMidwifeDashboard() {
 
                 {/* Patient cards */}
                 {patients.map((p) => (
-                  <div key={p.id} className={`rounded-xl border-l-4 ${p.isEmergency ? "border-l-red-500 bg-red-50/40" : "border-l-[#00703C] bg-white"} border border-slate-200/80 p-5 mb-3 hover:shadow-md transition-all duration-200`}>
+                  <div key={p.id} className={`rounded-xl border-l-4 ${p.isEmergency ? "border-l-red-500 bg-red-50/40" : "border-l-[#00703C] bg-white"} border border-slate-200/80 p-3 sm:p-5 mb-3 hover:shadow-md transition-all duration-200`}>
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-[11px] font-extrabold text-[#00703C] bg-[#dcfce7] px-2 py-0.5 rounded">{p.patientNumber}</span>
@@ -644,13 +689,13 @@ export default function NurseMidwifeDashboard() {
             <Card>
               <StickyHeader tabName="Treatment Room">
                 <button onClick={fetchTreatmentRoomPatients} disabled={trLoading}
-                  className="flex items-center gap-1.5 text-xs font-bold text-[#00703C] bg-[#00703C]/10 hover:bg-[#00703C]/20 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
-                  <RefreshCw size={13} className={trLoading ? "animate-spin" : ""} /> Refresh
+                  className="flex items-center gap-1.5 text-xs font-bold text-[#00703C] bg-[#00703C]/10 hover:bg-[#00703C]/20 px-2 sm:px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                  <RefreshCw size={13} className={trLoading ? "animate-spin" : ""} /> <span className="hidden sm:inline">Refresh</span>
                 </button>
               </StickyHeader>
-              <div className="p-6">
-                <div className="flex items-center gap-2 mb-5">
-                  <h3 className="text-sm font-bold text-slate-600">Admitted Patients &mdash; Treatment Room</h3>
+              <div className="p-3 sm:p-4 md:p-6">
+                <div className="flex items-center gap-2 mb-4 sm:mb-5">
+                  <h3 className="text-xs sm:text-sm font-bold text-slate-600">Admitted Patients &mdash; Treatment Room</h3>
                   <span className="bg-[#00703C] text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full">{treatmentRoomPatients.length}</span>
                 </div>
 
@@ -684,57 +729,69 @@ export default function NurseMidwifeDashboard() {
                   const patientMeds = treatmentMeds[p.id] || [];
                   const isMedFormOpen = medFormPatientId === p.id;
                   return (
-                    <div key={p.id} className={`rounded-xl border-l-4 ${p.isEmergency ? "border-l-red-500 bg-red-50/40" : "border-l-blue-500"} border border-slate-200/80 p-5 mb-3 hover:shadow-md transition-all duration-200 bg-white`}>
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-mono text-[11px] font-extrabold text-[#00703C] bg-[#dcfce7] px-2 py-0.5 rounded">{p.patientNumber}</span>
-                          {p.isEmergency && <Badge color="red"><AlertTriangle size={10} /> EMERGENCY</Badge>}
-                          <StatusBadge status="ADMITTED" />
-                          {medAlert.status === "overdue" && (
-                            <span className="pulse-overdue inline-flex items-center gap-1 text-[10px] font-bold bg-red-500 text-white px-2.5 py-1 rounded-full shadow-md shadow-red-200">
-                              <Clock size={10} /> {medAlert.label}
+                    <div key={p.id} className={`rounded-xl border-l-4 ${p.isEmergency ? "border-l-red-500 bg-red-50/40" : "border-l-blue-500"} border border-slate-200/80 p-3 sm:p-5 mb-3 transition-all duration-200 bg-white`}>
+                      {/* ── Clickable overlay for entire card ───────────────────── */}
+                      <button onClick={() => { setDoctorModalPatient(p); setShowDoctorModal(true); }}
+                        className="w-full text-left cursor-pointer">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-[11px] font-extrabold text-[#00703C] bg-[#dcfce7] px-2 py-0.5 rounded">{p.patientNumber}</span>
+                            {p.isEmergency && <Badge color="red"><AlertTriangle size={10} /> EMERGENCY</Badge>}
+                            <StatusBadge status="ADMITTED" />
+                            {medAlert.status === "overdue" && (
+                              <span className="pulse-overdue inline-flex items-center gap-1 text-[10px] font-bold bg-red-500 text-white px-2.5 py-1 rounded-full shadow-md shadow-red-200">
+                                <Clock size={10} /> {medAlert.label}
+                              </span>
+                            )}
+                            {medAlert.status === "due" && (
+                              <span className="pulse-due inline-flex items-center gap-1 text-[10px] font-bold bg-amber-500 text-white px-2.5 py-1 rounded-full shadow-md shadow-amber-200">
+                                <Clock size={10} /> {medAlert.label}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-right text-[11px] text-slate-400 flex items-center gap-2">
+                            <span className="text-[10px] font-medium text-[#00703C] bg-[#dcfce7] px-2 py-0.5 rounded-full">
+                              View Records &rarr;
                             </span>
-                          )}
-                          {medAlert.status === "due" && (
-                            <span className="pulse-due inline-flex items-center gap-1 text-[10px] font-bold bg-amber-500 text-white px-2.5 py-1 rounded-full shadow-md shadow-amber-200">
-                              <Clock size={10} /> {medAlert.label}
-                            </span>
-                          )}
+                            <div className="font-semibold text-slate-500">{p.gender} &middot; {p.age} yrs</div>
+                          </div>
                         </div>
-                        <div className="text-right text-[11px] text-slate-400">
-                          <div className="font-semibold text-slate-500">{p.gender} &middot; {p.age} yrs</div>
-                        </div>
-                      </div>
 
-                      <h4 className="text-base font-bold text-slate-800 mb-3">{p.lastName}, {p.firstName}</h4>
+                        <h4 className="text-base font-bold text-slate-800 hover:text-[#00703C] transition-colors mb-3">
+                          {p.lastName}, {p.firstName}
+                        </h4>
 
-                      {latestVisit?.diagnosis && (
-                        <div className="bg-slate-50/70 rounded-lg px-4 py-2.5 border border-slate-100 mb-2">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Diagnosis</p>
-                          <p className="text-sm text-slate-600 font-medium">{latestVisit.diagnosis}</p>
-                        </div>
-                      )}
+                        {latestVisit?.diagnosis && (
+                          <div className="bg-slate-50/70 rounded-lg px-4 py-2.5 border border-slate-100 mb-2">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Diagnosis</p>
+                            <p className="text-sm text-slate-600 font-medium">{latestVisit.diagnosis}</p>
+                          </div>
+                        )}
 
-                      {latestVisit?.treatmentPlan && (
-                        <div className="bg-slate-50/70 rounded-lg px-4 py-2.5 border border-slate-100 mb-2">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Treatment Plan</p>
-                          <p className="text-sm text-slate-600 font-medium">{latestVisit.treatmentPlan}</p>
-                        </div>
-                      )}
+                        {latestVisit?.treatmentPlan && (
+                          <div className="bg-slate-50/70 rounded-lg px-4 py-2.5 border border-slate-100 mb-2">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Treatment Plan</p>
+                            <p className="text-sm text-slate-600 font-medium">{latestVisit.treatmentPlan}</p>
+                          </div>
+                        )}
 
-                      {latestTriage?.chiefComplaint && (
-                        <div className="bg-slate-50/70 rounded-lg px-4 py-2.5 border border-slate-100 mb-3">
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Chief Complaint</p>
-                          <p className="text-sm text-slate-600 font-medium">{latestTriage.chiefComplaint}</p>
-                        </div>
-                      )}
+                        {latestTriage?.chiefComplaint && (
+                          <div className="bg-slate-50/70 rounded-lg px-4 py-2.5 border border-slate-100 mb-3">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Chief Complaint</p>
+                            <p className="text-sm text-slate-600 font-medium">{latestTriage.chiefComplaint}</p>
+                          </div>
+                        )}
 
-                      {latestVisit?.doctorName && (
-                        <p className="text-xs text-slate-400 mb-3 flex items-center gap-1.5">
-                          <User size={11} className="text-slate-400" />
-                          Referring Doctor: <span className="font-semibold text-slate-600">{latestVisit.doctorName}</span>
-                        </p>
-                      )}
+                        {latestVisit?.doctorName && (
+                          <p className="text-xs text-slate-400 mb-3 flex items-center gap-1.5">
+                            <User size={11} className="text-slate-400" />
+                            Referring Doctor: <span className="font-semibold text-slate-600">{latestVisit.doctorName}</span>
+                          </p>
+                        )}
+
+                        {/* ── Hover hint ───────────────────────────────────── */}
+
+                      </button>
 
                       {/* ── Scheduled Medications ──────────────────────────────── */}
                       {patientMeds.length > 0 && (
@@ -763,7 +820,7 @@ export default function NurseMidwifeDashboard() {
                                     </span>
                                   </div>
                                 </div>
-                                <button onClick={() => removeTreatmentMed(p.id, m.id)}
+                                <button onClick={(e) => { e.stopPropagation(); removeTreatmentMed(p.id, m.id); }}
                                   className="text-slate-300 hover:text-red-400 transition-colors p-1">
                                   <X size={12} />
                                 </button>
@@ -799,11 +856,11 @@ export default function NurseMidwifeDashboard() {
 
                       {/* ── Action Row ─────────────────────────────────────────── */}
                       <div className="flex gap-2">
-                        <button onClick={() => handleCompleteTreatment(p.id)}
+                        <button onClick={(e) => { e.stopPropagation(); handleCompleteTreatment(p.id); }}
                           className="flex-1 flex items-center justify-center gap-2 bg-[#00703C] hover:bg-[#005a2e] text-white font-bold text-xs py-2.5 px-4 rounded-lg transition-colors">
                           <CheckCircle size={14} /> Complete Treatment
                         </button>
-                        <button onClick={() => { const open = medFormPatientId !== p.id; setMedFormPatientId(open ? p.id : null); setMedFormName(""); setMedFormTime(""); }}
+                        <button onClick={(e) => { e.stopPropagation(); const open = medFormPatientId !== p.id; setMedFormPatientId(open ? p.id : null); setMedFormName(""); setMedFormTime(""); }}
                           className={`flex items-center justify-center gap-1.5 text-xs font-bold px-3 py-2.5 rounded-lg border transition-colors ${
                             isMedFormOpen ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:border-[#00703C] hover:text-[#00703C]"
                           }`}>
@@ -824,13 +881,13 @@ export default function NurseMidwifeDashboard() {
             <Card>
               <StickyHeader tabName="ANC Monitoring">
                 <button onClick={fetchAncPatients} disabled={ancLoading}
-                  className="flex items-center gap-1.5 text-xs font-bold text-[#00703C] bg-[#00703C]/10 hover:bg-[#00703C]/20 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
-                  <RefreshCw size={13} className={ancLoading ? "animate-spin" : ""} /> Refresh
+                  className="flex items-center gap-1.5 text-xs font-bold text-[#00703C] bg-[#00703C]/10 hover:bg-[#00703C]/20 px-2 sm:px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                  <RefreshCw size={13} className={ancLoading ? "animate-spin" : ""} /> <span className="hidden sm:inline">Refresh</span>
                 </button>
               </StickyHeader>
-              <div className="p-6">
-                <div className="flex items-center gap-2 mb-5">
-                  <h3 className="text-sm font-bold text-slate-600">Antenatal Patients</h3>
+              <div className="p-3 sm:p-4 md:p-6">
+                <div className="flex items-center gap-2 mb-4 sm:mb-5">
+                  <h3 className="text-xs sm:text-sm font-bold text-slate-600">Antenatal Patients</h3>
                   <span className="bg-[#00703C] text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full">{ancPatients.length}</span>
                 </div>
 
@@ -866,7 +923,7 @@ export default function NurseMidwifeDashboard() {
                 {ancPatients.map((p: any) => {
                   const latest = p.latestAssessment;
                   return (
-                    <div key={p.id} className={`rounded-xl border-l-4 ${p.source === "appointment" ? "border-l-blue-400" : "border-l-emerald-400"} border border-slate-200/80 p-5 mb-3 hover:shadow-md transition-all duration-200 bg-white`}>
+                    <div key={p.id} className={`rounded-xl border-l-4 ${p.source === "appointment" ? "border-l-blue-400" : "border-l-emerald-400"} border border-slate-200/80 p-3 sm:p-5 mb-3 hover:shadow-md transition-all duration-200 bg-white`}>
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-mono text-[11px] font-extrabold text-[#00703C] bg-[#dcfce7] px-2 py-0.5 rounded">{p.patientNumber}</span>
@@ -947,13 +1004,13 @@ export default function NurseMidwifeDashboard() {
           {activeTab === "treatment" && (
             <Card>
               <StickyHeader tabName="Treatment Chart" />
-              <div className="p-6">
+              <div className="p-3 sm:p-4 md:p-6">
                 {/* ── Record Treatment Form Card ── */}
                 <div className="bg-gradient-to-br from-slate-50 to-white rounded-xl border border-slate-200/80 p-5 mb-6 shadow-sm">
                   <h4 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-4">
                     <PlusCircle size={15} /> Record Treatment
                   </h4>
-                  <div className="grid grid-cols-[1fr_2fr_1fr_1fr_1fr_1.5fr_auto] gap-3 items-end">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-[1fr_2fr_1fr_1fr_1fr_1.5fr_auto] gap-3 items-end">
                     {[
                       { label: "Date", key: "date", type: "date" },
                       { label: "Drug / Treatment", key: "drug", type: "text", placeholder: "e.g. Paracetamol" },
@@ -1009,11 +1066,11 @@ export default function NurseMidwifeDashboard() {
                   <>
                     <div className="grid gap-3">
                       {treatmentEntries.map((entry, index) => (
-                        <div key={entry.id} className="flex items-center gap-4 bg-white border border-slate-200/80 rounded-xl p-4 hover:shadow-md transition-all duration-200 group">
-                          <div className="w-9 h-9 rounded-full bg-[#00703C]/10 flex items-center justify-center text-xs font-extrabold text-[#00703C] flex-shrink-0">
+                        <div key={entry.id} className="flex items-start sm:items-center gap-3 sm:gap-4 bg-white border border-slate-200/80 rounded-xl p-3 sm:p-4 hover:shadow-md transition-all duration-200 group">
+                          <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-full bg-[#00703C]/10 flex items-center justify-center text-[10px] sm:text-xs font-extrabold text-[#00703C] flex-shrink-0">
                             {index + 1}
                           </div>
-                          <div className="flex-1 grid grid-cols-6 gap-4 text-xs">
+                          <div className="flex-1 grid grid-cols-2 sm:grid-cols-6 gap-2 sm:gap-4 text-[11px] sm:text-xs">
                             <div>
                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date</p>
                               <p className="font-semibold text-slate-700 mt-0.5">{entry.date}</p>
@@ -1070,13 +1127,13 @@ export default function NurseMidwifeDashboard() {
             <Card>
               <StickyHeader tabName="Appointments">
                 <button onClick={fetchNurseAppointments} disabled={nurseApptLoading}
-                  className="flex items-center gap-1.5 text-xs font-bold text-[#00703C] bg-[#00703C]/10 hover:bg-[#00703C]/20 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
-                  <RefreshCw size={13} className={nurseApptLoading ? "animate-spin" : ""} /> Refresh
+                  className="flex items-center gap-1.5 text-xs font-bold text-[#00703C] bg-[#00703C]/10 hover:bg-[#00703C]/20 px-2 sm:px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                  <RefreshCw size={13} className={nurseApptLoading ? "animate-spin" : ""} /> <span className="hidden sm:inline">Refresh</span>
                 </button>
               </StickyHeader>
-              <div className="p-6">
+              <div className="p-3 sm:p-4 md:p-6">
                 {/* Filters */}
-                <div className="flex flex-wrap items-center gap-3 mb-5">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 mb-4 sm:mb-5">
                   <input type="date" value={nurseApptDate} onChange={e => setNurseApptDate(e.target.value)}
                     className="text-xs px-3 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C] transition-all" />
                   <select value={nurseApptFilter} onChange={e => setNurseApptFilter(e.target.value)}
@@ -1087,7 +1144,7 @@ export default function NurseMidwifeDashboard() {
                     <option value="completed">Completed</option>
                     <option value="cancelled">Cancelled</option>
                   </select>
-                  <span className="text-xs text-slate-400 ml-auto font-medium">{nurseAppts.length} appointment(s)</span>
+                  <span className="text-xs text-slate-400 sm:ml-auto font-medium">{nurseAppts.length} appointment(s)</span>
                 </div>
 
                 {/* Date header */}
@@ -1111,8 +1168,8 @@ export default function NurseMidwifeDashboard() {
                   ) : (
                     <div className="divide-y divide-slate-100">
                       {nurseAppts.map((a: any) => (
-                        <div key={a.id} className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50/60 transition-colors">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
+                        <div key={a.id} className="flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3 sm:py-4 hover:bg-slate-50/60 transition-colors">
+                          <div className={`hidden sm:flex w-10 h-10 rounded-full items-center justify-center text-sm font-bold flex-shrink-0 ${
                             a.status === "CANCELLED" ? "bg-red-100 text-red-500" :
                             a.status === "COMPLETED" ? "bg-green-100 text-green-600" :
                             a.status === "CONFIRMED" ? "bg-blue-100 text-blue-600" :
@@ -1137,13 +1194,13 @@ export default function NurseMidwifeDashboard() {
                             {a.notes && <div className="text-[11px] text-slate-400 mt-1 italic">{a.notes}</div>}
                             {a.Staff && <div className="text-[10px] text-slate-400 mt-0.5">with {a.Staff.fullName}</div>}
                           </div>
-                          <div className="flex gap-1.5 flex-shrink-0">
+                          <div className="flex gap-1.5 flex-shrink-0 mt-1 sm:mt-0 self-start sm:self-auto">
                             {a.status === "PENDING" && (
                               <button onClick={async () => {
                                 await fetch("/api/appointments", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: a.id, status: "CONFIRMED" }) });
                                 setNurseAppts((prev: any[]) => prev.map(x => x.id === a.id ? { ...x, status: "CONFIRMED" } : x));
                               }}
-                                className="text-[10px] px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 font-medium transition-colors">
+                                className="text-[10px] px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 font-medium transition-colors">
                                 Confirm
                               </button>
                             )}
@@ -1152,7 +1209,7 @@ export default function NurseMidwifeDashboard() {
                                 await fetch(`/api/appointments?id=${a.id}`, { method: "DELETE" });
                                 setNurseAppts((prev: any[]) => prev.map(x => x.id === a.id ? { ...x, status: "CANCELLED" } : x));
                               }}
-                                className="text-[10px] px-2.5 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 font-medium transition-colors">
+                                className="text-[10px] px-2 py-1.5 sm:px-2.5 sm:py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 font-medium transition-colors">
                                 Cancel
                               </button>
                             )}
@@ -1172,7 +1229,7 @@ export default function NurseMidwifeDashboard() {
           {activeTab === "reports" && (
             <Card>
               <StickyHeader tabName="Reports & Handover" />
-              <div className="p-6">
+              <div className="p-3 sm:p-4 md:p-6">
                 <div className="bg-white border border-slate-200/80 rounded-xl p-5 shadow-sm">
                   <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
                     <FileText size={14} className="text-[#00703C]" /> Clinical Handover Notes
@@ -1211,33 +1268,33 @@ export default function NurseMidwifeDashboard() {
           `}</style>
           <div className="w-full max-w-[1200px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-8 py-5 flex items-center justify-between text-white">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-lg font-bold">
+            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+                <div className="hidden sm:flex w-12 h-12 rounded-full bg-white/20 items-center justify-center text-lg font-bold flex-shrink-0">
                   {selectedPatient.firstName?.[0]}{selectedPatient.lastName?.[0]}
                 </div>
-                <div>
-                  <h2 className="text-lg font-bold">{selectedPatient.lastName}, {selectedPatient.firstName}</h2>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-white/80">
+                <div className="min-w-0">
+                  <h2 className="text-sm sm:text-lg font-bold truncate">{selectedPatient.lastName}, {selectedPatient.firstName}</h2>
+                  <div className="flex items-center gap-2 sm:gap-3 mt-0.5 sm:mt-1 text-[10px] sm:text-xs text-white/80 flex-wrap">
                     <span className="font-mono">{selectedPatient.patientNumber}</span>
-                    <span className="text-white/40">|</span>
+                    <span className="text-white/40 hidden sm:inline">|</span>
                     <span>{selectedPatient.gender} &middot; {selectedPatient.age} yrs</span>
-                    <span className="text-white/40">|</span>
-                    <span className="flex items-center gap-1"><Clock size={11} />{selectedPatient.createdAt}</span>
+                    <span className="text-white/40 hidden sm:inline">|</span>
+                    <span className="hidden sm:flex items-center gap-1"><Clock size={11} />{selectedPatient.createdAt}</span>
                     {selectedPatient.isEmergency && (
-                      <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded">EMERGENCY</span>
+                      <span className="bg-red-500 text-white text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded">EMERGENCY</span>
                     )}
                   </div>
                 </div>
               </div>
               <button onClick={handleCancelTriage}
-                className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 text-white text-xs font-bold px-3 py-2 rounded-xl transition-colors">
-                <X size={15} /> Close
+                className="flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-colors flex-shrink-0">
+                <X size={13} className="sm:size-[15]" /> <span className="hidden sm:inline">Close</span>
               </button>
             </div>
 
             {/* Modal Body */}
-            <div className="watermarked-form p-8 max-h-[calc(100vh-180px)] overflow-y-auto relative">
+            <div className="watermarked-form p-3 sm:p-6 md:p-8 max-h-[calc(100vh-120px)] sm:max-h-[calc(100vh-180px)] overflow-y-auto relative">
 
               {/* Mode of Arrival */}
               <div className="mb-6">
@@ -1267,7 +1324,7 @@ export default function NurseMidwifeDashboard() {
                 <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
                   <Activity size={15} /> Vital Signs
                 </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3">
                   {[
                     { key: 'temperature', label: 'Temp (°C)', icon: Thermometer, low: 36.1, high: 37.8 },
                     { key: 'heartRate', label: 'Pulse (bpm)', icon: Heart, low: 60, high: 100 },
@@ -1294,7 +1351,7 @@ export default function NurseMidwifeDashboard() {
                     );
                   })}
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
                   {[
                     { key: 'bpSystolic', label: 'BP Systolic (mmHg)', icon: Eye, low: 90, high: 140 },
                     { key: 'bpDiastolic', label: 'BP Diastolic (mmHg)', icon: Eye, low: 60, high: 90 },
@@ -1506,22 +1563,22 @@ export default function NurseMidwifeDashboard() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 pt-5">
+              <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 border-t border-slate-200 pt-4 sm:pt-5">
                 <button onClick={handleCancelTriage} disabled={isSaving}
-                  className="px-5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-bold hover:bg-slate-50 transition-colors">
+                  className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-[10px] sm:text-xs font-bold hover:bg-slate-50 transition-colors">
                   Cancel
                 </button>
                 <button onClick={() => window.print()}
-                  className="px-5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-bold hover:bg-slate-50 transition-colors flex items-center gap-1.5">
-                  <Printer size={14} /> Print
+                  className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-[10px] sm:text-xs font-bold hover:bg-slate-50 transition-colors flex items-center gap-1.5">
+                  <Printer size={13} /> Print
                 </button>
                 <button onClick={() => handleSaveTriage(false)} disabled={isSaving}
-                  className="px-5 py-2.5 rounded-xl border border-[#00703C] bg-white text-[#00703C] text-xs font-bold hover:bg-[#00703C]/5 transition-colors flex items-center gap-1.5">
-                  <Save size={14} /> {isSaving ? "Saving..." : "Save"}
+                  className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl border border-[#00703C] bg-white text-[#00703C] text-[10px] sm:text-xs font-bold hover:bg-[#00703C]/5 transition-colors flex items-center gap-1.5">
+                  <Save size={13} /> {isSaving ? "Saving..." : "Save"}
                 </button>
                 <button onClick={() => handleSaveTriage(true)} disabled={isSaving}
-                  className="px-6 py-2.5 rounded-xl bg-[#00703C] hover:bg-[#005a2e] text-white text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm">
-                  <CheckCircle size={14} /> {isSaving ? "Sending..." : "Complete & Send"}
+                  className="px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl bg-[#00703C] hover:bg-[#005a2e] text-white text-[10px] sm:text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm">
+                  <CheckCircle size={13} /> {isSaving ? "Sending..." : "Complete & Send"}
                 </button>
               </div>
 
@@ -1537,34 +1594,34 @@ export default function NurseMidwifeDashboard() {
         <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
           <div className="w-full max-w-[900px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-8 py-5 flex items-center justify-between text-white">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center text-lg font-bold">
+            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+                <div className="hidden sm:flex w-12 h-12 rounded-full bg-white/20 items-center justify-center text-lg font-bold flex-shrink-0">
                   {ancSelectedPatient.firstName?.[0]}{ancSelectedPatient.lastName?.[0]}
                 </div>
-                <div>
-                  <h2 className="text-lg font-bold">{ancSelectedPatient.lastName}, {ancSelectedPatient.firstName}</h2>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-white/80">
+                <div className="min-w-0">
+                  <h2 className="text-sm sm:text-lg font-bold truncate">{ancSelectedPatient.lastName}, {ancSelectedPatient.firstName}</h2>
+                  <div className="flex items-center gap-2 sm:gap-3 mt-0.5 sm:mt-1 text-[10px] sm:text-xs text-white/80 flex-wrap">
                     <span className="font-mono">{ancSelectedPatient.patientNumber}</span>
-                    <span className="text-white/40">|</span>
+                    <span className="text-white/40 hidden sm:inline">|</span>
                     <span>{ancSelectedPatient.gender} &middot; {ancSelectedPatient.age} yrs</span>
                   </div>
                 </div>
               </div>
               <button onClick={handleCancelAnc}
-                className="flex items-center gap-1.5 bg-white/15 hover:bg-white/25 text-white text-xs font-bold px-3 py-2 rounded-xl transition-colors">
-                <X size={15} /> Close
+                className="flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-colors flex-shrink-0">
+                <X size={13} className="sm:size-[15]" /> <span className="hidden sm:inline">Close</span>
               </button>
             </div>
 
             {/* Modal Body */}
-            <div className="p-8 max-h-[calc(100vh-180px)] overflow-y-auto">
+            <div className="p-3 sm:p-6 md:p-8 max-h-[calc(100vh-120px)] sm:max-h-[calc(100vh-180px)] overflow-y-auto">
               {/* ── Obstetric History ───────────────────────────────────────── */}
               <div className="mb-6">
                 <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
                   <Baby size={15} /> Obstetric History
                 </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 sm:gap-3">
                   {[
                     { key: "gestationalAgeWeeks", label: "Gestational Age (wks)", type: "number", placeholder: "e.g. 28" },
                     { key: "gravida", label: "Gravida", type: "number", placeholder: "e.g. 2" },
@@ -1591,7 +1648,7 @@ export default function NurseMidwifeDashboard() {
                 <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
                   <Heart size={15} /> Fetal Assessment
                 </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 sm:gap-3">
                   {[
                     { key: "fundalHeight", label: "Fundal Height (cm)", type: "number", step: "0.1", placeholder: "e.g. 30" },
                     { key: "fetalHeartRate", label: "Fetal Heart Rate (bpm)", type: "number", placeholder: "e.g. 140" },
@@ -1633,8 +1690,8 @@ export default function NurseMidwifeDashboard() {
                 <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
                   <Activity size={15} /> Maternal Vitals
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="grid grid-cols-2 gap-3 col-span-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
+                  <div className="grid grid-cols-2 gap-2 sm:gap-3 col-span-2">
                     <div>
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">BP Systolic (mmHg)</label>
                       <input type="number" value={ancForm.bpSystolic} onChange={e => setAncField("bpSystolic", e.target.value)}
@@ -1659,7 +1716,7 @@ export default function NurseMidwifeDashboard() {
                 <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
                   <Droplets size={15} /> Urine Dipstick
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
                   {[
                     { key: "urineProtein", label: "Protein" },
                     { key: "urineGlucose", label: "Glucose" },
@@ -1685,7 +1742,7 @@ export default function NurseMidwifeDashboard() {
                 <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
                   <AlertCircle size={15} /> Edema Assessment
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                   <div>
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Edema Severity</label>
                     <select value={ancForm.edema} onChange={e => setAncField("edema", e.target.value)}
@@ -1705,7 +1762,7 @@ export default function NurseMidwifeDashboard() {
               </div>
 
               {/* ── Complaints & Notes ─────────────────────────────────────── */}
-              <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="mb-6 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">Complaints / Symptoms</h4>
                   <textarea value={ancForm.complaints} onChange={e => setAncField("complaints", e.target.value)}
@@ -1745,20 +1802,318 @@ export default function NurseMidwifeDashboard() {
               </div>
 
               {/* ── Action Buttons ─────────────────────────────────────────── */}
-              <div className="flex flex-wrap items-center justify-end gap-3 border-t border-slate-200 pt-5">
+              <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 border-t border-slate-200 pt-4 sm:pt-5">
                 <button onClick={handleCancelAnc} disabled={ancSaving}
-                  className="px-5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-xs font-bold hover:bg-slate-50 transition-colors">
+                  className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-[10px] sm:text-xs font-bold hover:bg-slate-50 transition-colors">
                   Cancel
                 </button>
                 <button onClick={handleSaveAnc} disabled={ancSaving}
-                  className="px-6 py-2.5 rounded-xl bg-[#00703C] hover:bg-[#005a2e] text-white text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm">
-                  <Save size={14} /> {ancSaving ? "Saving..." : "Save Assessment"}
+                  className="px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl bg-[#00703C] hover:bg-[#005a2e] text-white text-[10px] sm:text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm">
+                  <Save size={13} /> {ancSaving ? "Saving..." : "Save Assessment"}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          DOCTOR RECORDS MODAL — shows everything the doctor input
+          ═══════════════════════════════════════════════════════════════════════ */}
+      {showDoctorModal && doctorModalPatient && (
+        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+          <div className="w-full max-w-[1100px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+                <div className="hidden sm:flex w-12 h-12 rounded-full bg-white/20 items-center justify-center text-lg font-bold flex-shrink-0">
+                  {doctorModalPatient.firstName?.[0]}{doctorModalPatient.lastName?.[0]}
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-sm sm:text-lg font-bold truncate">{doctorModalPatient.lastName}, {doctorModalPatient.firstName}</h2>
+                  <div className="flex items-center gap-2 sm:gap-3 mt-0.5 sm:mt-1 text-[10px] sm:text-xs text-white/80 flex-wrap">
+                    <span className="font-mono">{doctorModalPatient.patientNumber}</span>
+                    <span className="text-white/40 hidden sm:inline">|</span>
+                    <span>{doctorModalPatient.gender} &middot; {doctorModalPatient.age} yrs</span>
+                    {doctorModalPatient.isEmergency && (
+                      <span className="bg-red-500 text-white text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded">EMERGENCY</span>
+                    )}
+                    {doctorModalPatient.phoneNumber && (
+                      <>
+                        <span className="text-white/30 hidden sm:inline">|</span>
+                        <span className="flex items-center gap-1"><Phone size={9} className="sm:size-[10]" />{doctorModalPatient.phoneNumber}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setShowDoctorModal(false)}
+                className="flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-colors flex-shrink-0">
+                <X size={13} className="sm:size-[15]" /> <span className="hidden sm:inline">Close</span>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-3 sm:p-6 md:p-8 max-h-[calc(100vh-120px)] sm:max-h-[calc(100vh-180px)] overflow-y-auto">
+              {(() => {
+                const p = doctorModalPatient;
+                const visit = p.Visit?.[0];
+                const triage = p.Triage?.[0];
+                const prescriptions = p.Prescription || [];
+                const labRequests = p.LabRequest || [];
+
+                return (
+                  <div className="space-y-6">
+
+                    {/* ── Doctor Info ─────────────────────────────────────────── */}
+                    {visit?.doctorName && (
+                      <div className="bg-blue-50/60 border border-blue-200 rounded-xl p-3 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
+                        <Stethoscope size={18} className="text-blue-500 hidden sm:block" />
+                        <div className="flex-1">
+                          <p className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">Attending Doctor</p>
+                          <p className="text-sm font-bold text-blue-700">{visit.doctorName}</p>
+                        </div>
+                        {visit.createdAt && (
+                          <div className="sm:text-right self-start sm:self-auto">
+                            <p className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Consultation Date</p>
+                            <p className="text-xs font-semibold text-blue-600">{new Date(visit.createdAt).toLocaleDateString("en-UG", { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ── Diagnosis & Assessment ────────────────────────────── */}
+                    <div>
+                      <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
+                        <FileText size={15} /> Diagnosis & Assessment
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {visit?.symptoms && (
+                          <div className="bg-white border border-slate-200/80 rounded-xl p-4">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Symptoms / Chief Complaint</p>
+                            <p className="text-sm text-slate-700 whitespace-pre-wrap">{visit.symptoms}</p>
+                          </div>
+                        )}
+                        {visit?.diagnosis && (
+                          <div className="bg-white border border-slate-200/80 rounded-xl p-4">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Diagnosis</p>
+                            <p className="text-sm font-bold text-slate-800 whitespace-pre-wrap">{visit.diagnosis}</p>
+                          </div>
+                        )}
+                        {visit?.differentialDiagnosis && (
+                          <div className="bg-white border border-slate-200/80 rounded-xl p-4">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Differential Diagnosis</p>
+                            <p className="text-sm text-slate-700 whitespace-pre-wrap">{visit.differentialDiagnosis}</p>
+                          </div>
+                        )}
+                        {visit?.assessment && (
+                          <div className="bg-white border border-slate-200/80 rounded-xl p-4">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Assessment</p>
+                            <p className="text-sm text-slate-700 whitespace-pre-wrap">{visit.assessment}</p>
+                          </div>
+                        )}
+                        {visit?.treatmentPlan && (
+                          <div className="bg-white border border-slate-200/80 rounded-xl p-4 sm:col-span-2">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Treatment Plan</p>
+                            <p className="text-sm text-slate-700 whitespace-pre-wrap">{visit.treatmentPlan}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* ── History & Examination ─────────────────────────────── */}
+                    {(visit?.historyOfPresentIllness || visit?.pastMedicalHistory || visit?.reviewOfOtherSystems || visit?.physicalExamination) && (
+                      <div>
+                        <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
+                          <ClipboardList size={15} /> History & Examination
+                        </h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {visit?.historyOfPresentIllness && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-4">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">History of Present Illness</p>
+                              <p className="text-sm text-slate-700 whitespace-pre-wrap">{visit.historyOfPresentIllness}</p>
+                            </div>
+                          )}
+                          {visit?.pastMedicalHistory && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-4">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Past Medical History</p>
+                              <p className="text-sm text-slate-700 whitespace-pre-wrap">{visit.pastMedicalHistory}</p>
+                            </div>
+                          )}
+                          {visit?.reviewOfOtherSystems && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-4">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Review of Other Systems</p>
+                              <p className="text-sm text-slate-700 whitespace-pre-wrap">{visit.reviewOfOtherSystems}</p>
+                            </div>
+                          )}
+                          {visit?.physicalExamination && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-4 sm:col-span-2">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Physical Examination</p>
+                              <p className="text-sm text-slate-700 whitespace-pre-wrap">{visit.physicalExamination}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Doctor's Notes ────────────────────────────────────── */}
+                    {visit?.notes && (
+                      <div>
+                        <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
+                          <FileText size={15} /> Doctor's Notes
+                        </h3>
+                        <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-4">
+                          <p className="text-sm text-slate-700 whitespace-pre-wrap">{visit.notes}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Prescriptions ─────────────────────────────────────── */}
+                    {prescriptions.length > 0 && (
+                      <div>
+                        <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
+                          <Pill size={15} /> Prescriptions ({prescriptions.length})
+                        </h3>
+                        <div className="overflow-x-auto rounded-xl border border-slate-200/80">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="bg-slate-50">
+                                <th className="text-left font-bold text-slate-500 uppercase tracking-wider px-3 sm:px-4 py-2 whitespace-nowrap">Medication</th>
+                                <th className="text-left font-bold text-slate-500 uppercase tracking-wider px-3 sm:px-4 py-2 whitespace-nowrap">Dosage</th>
+                                <th className="text-left font-bold text-slate-500 uppercase tracking-wider px-3 sm:px-4 py-2 whitespace-nowrap">Instructions</th>
+                                <th className="text-right font-bold text-slate-500 uppercase tracking-wider px-3 sm:px-4 py-2 whitespace-nowrap">Date</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {prescriptions.map((rx: any) => (
+                                <tr key={rx.id} className="hover:bg-slate-50/60">
+                                  <td className="px-3 sm:px-4 py-2.5 sm:py-3 font-bold text-slate-700 whitespace-nowrap">{rx.medication}</td>
+                                  <td className="px-3 sm:px-4 py-2.5 sm:py-3 text-slate-600 whitespace-nowrap">{rx.dosage || "-"}</td>
+                                  <td className="px-3 sm:px-4 py-2.5 sm:py-3 text-slate-600 min-w-[100px]">{rx.instructions || "-"}</td>
+                                  <td className="px-3 sm:px-4 py-2.5 sm:py-3 text-right text-slate-400 whitespace-nowrap">{new Date(rx.createdAt).toLocaleDateString("en-UG", { day: "numeric", month: "short" })}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Lab Requests ──────────────────────────────────────── */}
+                    {labRequests.length > 0 && (
+                      <div>
+                        <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
+                          <Activity size={15} /> Lab Investigations ({labRequests.length})
+                        </h3>
+                        <div className="overflow-x-auto rounded-xl border border-slate-200/80">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="bg-slate-50">
+                                <th className="text-left font-bold text-slate-500 uppercase tracking-wider px-3 sm:px-4 py-2 whitespace-nowrap">Test</th>
+                                <th className="text-left font-bold text-slate-500 uppercase tracking-wider px-3 sm:px-4 py-2 whitespace-nowrap">Priority</th>
+                                <th className="text-left font-bold text-slate-500 uppercase tracking-wider px-3 sm:px-4 py-2 whitespace-nowrap">Status</th>
+                                <th className="text-right font-bold text-slate-500 uppercase tracking-wider px-3 sm:px-4 py-2 whitespace-nowrap">Date</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {labRequests.map((lr: any) => (
+                                <tr key={lr.id} className="hover:bg-slate-50/60">
+                                  <td className="px-3 sm:px-4 py-2.5 sm:py-3 font-bold text-slate-700 whitespace-nowrap">{lr.testName}</td>
+                                  <td className="px-3 sm:px-4 py-2.5 sm:py-3">
+                                    <span className={`text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full whitespace-nowrap ${
+                                      lr.priority === "STAT" ? "bg-red-100 text-red-700" :
+                                      lr.priority === "URGENT" ? "bg-amber-100 text-amber-700" :
+                                      "bg-blue-100 text-blue-700"
+                                    }`}>{lr.priority || "ROUTINE"}</span>
+                                  </td>
+                                  <td className="px-3 sm:px-4 py-2.5 sm:py-3">
+                                    <StatusBadge status={lr.status || "PENDING"} size="sm" />
+                                  </td>
+                                  <td className="px-3 sm:px-4 py-2.5 sm:py-3 text-right text-slate-400 whitespace-nowrap">{new Date(lr.createdAt).toLocaleDateString("en-UG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Vitals from Triage ────────────────────────────────── */}
+                    {triage && (
+                      <div>
+                        <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
+                          <Heart size={15} /> Triage Vitals
+                        </h3>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                          {triage.temperature != null && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-3">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Temp</p>
+                              <p className="text-sm font-bold text-slate-700">{triage.temperature} &deg;C</p>
+                            </div>
+                          )}
+                          {triage.bpSystolic != null && triage.bpDiastolic != null && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-3">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">BP</p>
+                              <p className="text-sm font-bold text-slate-700">{triage.bpSystolic}/{triage.bpDiastolic}</p>
+                            </div>
+                          )}
+                          {triage.heartRate != null && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-3">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Heart Rate</p>
+                              <p className="text-sm font-bold text-slate-700">{triage.heartRate} bpm</p>
+                            </div>
+                          )}
+                          {triage.respiratoryRate != null && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-3">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Resp. Rate</p>
+                              <p className="text-sm font-bold text-slate-700">{triage.respiratoryRate} br/min</p>
+                            </div>
+                          )}
+                          {triage.spo2 != null && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-3">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">SpO₂</p>
+                              <p className="text-sm font-bold text-slate-700">{triage.spo2}%</p>
+                            </div>
+                          )}
+                          {triage.weight != null && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-3">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Weight</p>
+                              <p className="text-sm font-bold text-slate-700">{triage.weight} kg</p>
+                            </div>
+                          )}
+                          {triage.painLevel != null && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-3">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Pain Level</p>
+                              <p className="text-sm font-bold text-slate-700">{triage.painLevel}/10</p>
+                            </div>
+                          )}
+                          {triage.chiefComplaint && (
+                            <div className="bg-white border border-slate-200/80 rounded-xl p-3 col-span-2 sm:col-span-4">
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Chief Complaint (Triage)</p>
+                              <p className="text-sm text-slate-700 whitespace-pre-wrap">{triage.chiefComplaint}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── No data fallback ──────────────────────────────────── */}
+                    {!visit && !triage && prescriptions.length === 0 && labRequests.length === 0 && (
+                      <div className="flex flex-col items-center justify-center py-16 text-slate-300">
+                        <FileText size={44} className="text-slate-200 mb-4" />
+                        <p className="text-sm font-semibold text-slate-400">No doctor records found</p>
+                        <p className="text-xs text-slate-300 mt-1">This patient has not been seen by a doctor yet</p>
+                      </div>
+                    )}
+
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

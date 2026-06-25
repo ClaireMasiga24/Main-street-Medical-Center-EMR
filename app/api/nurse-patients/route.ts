@@ -31,6 +31,14 @@ export async function GET(request: Request) {
           orderBy: { createdAt: "desc" },
           take: 1,
         },
+        Prescription: {
+          orderBy: { createdAt: "desc" },
+          take: 50,
+        },
+        LabRequest: {
+          orderBy: { createdAt: "desc" },
+          take: 20,
+        },
       },
     });
 
