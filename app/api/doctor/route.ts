@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
 import { PatientStatus, Prisma } from "@prisma/client";
+import { createNotification } from "../../lib/notifications";
 
 const ROUTE_TO_STATUS: Record<string, PatientStatus> = {
-  LAB:        "AWAITING_LAB",
-  SONOGRAPHY: "AWAITING_SONOGRAPHY",
-  RADIOLOGY:  "AWAITING_RADIOLOGY",
-  NURSE:      "AWAITING_TRIAGE",
-  PHARMACY:   "AWAITING_PHARMACY",
-  CASHIER:    "AWAITING_CASHIER",
-  DISCHARGE:  "DISCHARGED",
-  ADMIT:      "ADMITTED",
-  DENTIST:    "AWAITING_DENTIST",
-  TREATMENT:  "ADMITTED",
+  LAB:         "AWAITING_LAB",
+  SONOGRAPHY:  "AWAITING_SONOGRAPHY",
+  RADIOLOGY:   "AWAITING_RADIOLOGY",
+  NURSE:       "AWAITING_TRIAGE",
+  PHARMACY:    "AWAITING_PHARMACY",
+  CASHIER:     "AWAITING_CASHIER",
+  DISCHARGE:   "DISCHARGED",
+  ADMIT:       "ADMITTED",
+  DENTIST:     "AWAITING_DENTIST",
+  TREATMENT:   "ADMITTED",
+  SEND_ORDERS: "IN_CONSULTATION",
 };
 
 // GET — fetch patients waiting for the doctor or already in consultation
@@ -132,6 +134,43 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      // ── Notify relevant departments for SEND_ORDERS ──
+      if (effectiveRoute === "SEND_ORDERS") {
+        const patientInfo = await tx.patient.findUnique({
+          where: { id: patientId },
+          select: { firstName: true, lastName: true, patientNumber: true },
+        });
+        const patName = patientInfo
+          ? `${patientInfo.firstName} ${patientInfo.lastName} (${patientInfo.patientNumber})`
+          : `Patient #${patientId}`;
+
+        // Notify Lab
+        if (labRequests?.length) {
+          await tx.notification.create({
+            data: {
+              department: "LAB",
+              title: "New Lab Orders",
+              message: `Dr. ${performerName} ordered ${labRequests.length} test(s) for ${patName}`,
+              type: "LAB_ORDER",
+              patientId,
+            },
+          });
+        }
+
+        // Notify Pharmacy
+        if (prescriptions?.length) {
+          await tx.notification.create({
+            data: {
+              department: "PHARMACY",
+              title: "New Prescriptions",
+              message: `Dr. ${performerName} prescribed ${prescriptions.length} medication(s) for ${patName}`,
+              type: "RX_ORDER",
+              patientId,
+            },
+          });
+        }
+      }
+
       // ── Determine what status to set ──
       // Admitted patients keep their ADMITTED status unless discharged,
       // so they stay on the doctor's Admitted Patients dashboard.
@@ -158,6 +197,7 @@ export async function POST(req: NextRequest) {
         effectiveRoute === "CASHIER" ? "FINISHED" :
         effectiveRoute === "DISCHARGE" ? "DISCHARGED" :
         effectiveRoute === "TREATMENT" ? "SENT TO TREATMENT ROOM" :
+        effectiveRoute === "SEND_ORDERS" ? "ORDERS_SENT" :
         "REFERRED";
 
       await tx.patientTimeline.create({
@@ -169,8 +209,11 @@ export async function POST(req: NextRequest) {
                           effectiveRoute === "CASHIER" ? "CASHIER" :
                           effectiveRoute === "DISCHARGE" ? "DISCHARGE" :
                           effectiveRoute === "TREATMENT" ? "TREATMENT_ROOM" :
+                          effectiveRoute === "SEND_ORDERS" ? "MULTIPLE" :
                           effectiveRoute === "REFERRAL" && labRequests?.length ? "LAB" : effectiveRoute,
-          description:   `Consultation completed — ${actionLabel}. Diagnosis: ${diagnosis || "gastritis"}`,
+          description:   effectiveRoute === "SEND_ORDERS"
+            ? `Orders sent — ${labRequests?.length || 0} lab test(s), ${prescriptions?.length || 0} prescription(s). Diagnosis: ${diagnosis || "N/A"}`
+            : `Consultation completed — ${actionLabel}. Diagnosis: ${diagnosis || "gastritis"}`,
           metadata:      JSON.stringify({
             visitId:       visit.id,
             diagnosis,

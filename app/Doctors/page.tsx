@@ -6,11 +6,11 @@ import { useRouter } from "next/navigation";
 import NotificationInbox from "../components/NotificationInbox";
 import StaffMessaging from "../components/StaffMessaging";
 import {
-	  Users, Pill, ArrowLeft, ArrowRight, Baby, CheckCircle,
-	  LogOut, AlertTriangle, Stethoscope, DoorOpen, Hospital,
-	  Microscope, Waves, Radio, Home, CreditCard, X, Plus, Loader2, Calendar, ClipboardList, Printer,
-		  Clock, Activity, AlertCircle, FileText, Bell, Search, User, Pencil, Syringe, RefreshCw, Menu,
-} from "lucide-react";
+		  Users, Pill, ArrowLeft, ArrowRight, Baby, CheckCircle,
+		  LogOut, AlertTriangle, Stethoscope, DoorOpen, Hospital,
+		  Microscope, Waves, Radio, Home, CreditCard, X, Plus, Loader2, Calendar, ClipboardList, Printer,
+			  Clock, Activity, AlertCircle, FileText, Bell, Search, User, Pencil, Syringe, RefreshCw, Menu, Send,
+	} from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -70,13 +70,24 @@ interface DashboardData {
 
 const LAB_TESTS = [
   "Full Blood Count",
+  "Blood smear for malaria parasites",
   "Urinalysis",
   "Blood glucose",
   "Malaria RDT",
   "HIV screen",
-  "Typhoid / Widal",
+  "Typhoid IgG",
+  "Typhoid IgM Ab test",
   "Liver Function Test",
   "Renal Function Test",
+  "Random blood sugar (RBS)",
+  "Fasting blood sugar (FBS)",
+  "Solubility test for sickle cell",
+  "MHS sickle cell test",
+  "Urine hCG test",
+  "H.PYLORI stool Ag test",
+  "H.PYLORI ab test",
+  "TPHA",
+  "HepBSAg test",
 ];
 
 const ESI_COLORS: Record<number, string> = {
@@ -674,6 +685,52 @@ function ConsultationPanel({
     }
   };
 
+  const handleSendOrders = async () => {
+    setSaving(true);
+    setSavingAction("SEND_ORDERS");
+    try {
+      const res = await fetch("/api/doctor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: patient.id,
+          staffId,
+          staffName,
+          symptoms,
+          historyOfPresentIllness,
+          pastMedicalHistory,
+          reviewOfOtherSystems,
+          physicalExamination,
+          diagnosis,
+          differentialDiagnosis,
+          assessment,
+          treatmentPlan,
+          notes,
+          doctorSignature,
+          prescriptions: rxDrafts.map((r) => ({
+            medication: r.medication,
+            dosage: r.dosage,
+            instructions: r.instructions,
+          })),
+          labRequests: Array.from(labChecked).map((t) => ({ testName: t })),
+          routeTo: "SEND_ORDERS",
+        }),
+      });
+      if (res.ok) {
+        alert("Orders sent! Lab and Pharmacy have been notified.");
+        onComplete();
+      } else {
+        const err = await res.json();
+        alert(`Error: ${err.error}`);
+      }
+    } catch {
+      alert("Network error sending orders.");
+    } finally {
+      setSaving(false);
+      setSavingAction("");
+    }
+  };
+
   const handleStartConsultation = async () => {
     if (patient.currentStatus !== "IN_CONSULTATION") {
       await fetch("/api/doctor", {
@@ -1263,6 +1320,34 @@ function ConsultationPanel({
                     </label>
                   ))}
                 </div>
+                {/* ── Send to Lab Button ── */}
+                <div className="mt-3">
+                  <button
+                    onClick={() => handleAction("LAB")}
+                    disabled={isBusy || labChecked.size === 0}
+                    className={`py-2 px-4 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      isBusy && savingAction === "LAB"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800"
+                    }`}
+                  >
+                    {isBusy && savingAction === "LAB" ? (
+                      <><Loader2 size={13} className="animate-spin" /> Sending...</>
+                    ) : (
+                      <><Send size={13} /> Send to Lab</>
+                    )}
+                  </button>
+                  {labChecked.size === 0 && (
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Select at least one test above
+                    </p>
+                  )}
+                  {labChecked.size > 0 && (
+                    <p className="text-[10px] text-emerald-600 mt-1 font-medium">
+                      {labChecked.size} test{labChecked.size > 1 ? "s" : ""} — patient goes to Lab
+                    </p>
+                  )}
+                </div>
               </div>
 
               {/* ── Signature ── */}
@@ -1374,6 +1459,45 @@ function ConsultationPanel({
             <><ArrowRight size={16} /> Referral</>
           )}
         </button>
+      </div>
+l
+      {/* ── Send Orders Button ── */}
+      <div className="mt-3">
+        <button
+          onClick={handleSendOrders}
+          disabled={isBusy || (labChecked.size === 0 && rxDrafts.length === 0)}
+          className={`w-full py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+            isBusy && savingAction === "SEND_ORDERS"
+              ? "bg-indigo-100 text-indigo-700"
+              : "bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800"
+          }`}
+        >
+          {isBusy && savingAction === "SEND_ORDERS" ? (
+            <><Loader2 size={16} className="animate-spin" /> Sending orders...</>
+          ) : (
+            <><Send size={16} /> Send Orders (Labs &amp; Prescriptions)</>
+          )}
+        </button>
+        {labChecked.size === 0 && rxDrafts.length === 0 && (
+          <p className="text-[11px] text-slate-400 text-center mt-1">
+            Add lab tests or prescriptions above first
+          </p>
+        )}
+        {labChecked.size > 0 && rxDrafts.length > 0 && (
+          <p className="text-[11px] text-indigo-500 text-center mt-1 font-medium">
+            Sending {labChecked.size} lab test{labChecked.size > 1 ? "s" : ""} to Lab, {rxDrafts.length} prescription{rxDrafts.length > 1 ? "s" : ""} to Pharmacy
+          </p>
+        )}
+        {labChecked.size > 0 && rxDrafts.length === 0 && (
+          <p className="text-[11px] text-indigo-500 text-center mt-1 font-medium">
+            Sending {labChecked.size} lab test{labChecked.size > 1 ? "s" : ""} to Laboratory
+          </p>
+        )}
+        {labChecked.size === 0 && rxDrafts.length > 0 && (
+          <p className="text-[11px] text-indigo-500 text-center mt-1 font-medium">
+            Sending {rxDrafts.length} prescription{rxDrafts.length > 1 ? "s" : ""} to Pharmacy
+          </p>
+        )}
       </div>
 
       {/* ── Referral Department Picker Modal ── */}
