@@ -391,7 +391,51 @@ export async function POST(req: Request) {
           where: department ? { department } : {},
           orderBy: { createdAt: "desc" }, take: 50,
         });
-        return NextResponse.json({ success: true, notifications: deptNotifs });
+
+        // Enrich lab-request notifications with full lab findings
+        const enriched = await Promise.all(
+          deptNotifs.map(async (n) => {
+            if (n.referenceType === "lab_request" && n.referenceId) {
+              const labReq = await prisma.labRequest.findUnique({
+                where: { id: n.referenceId },
+                include: { Patient: { select: { id: true, firstName: true, lastName: true, patientNumber: true } } },
+              });
+              if (labReq) {
+                let attachments: any[] = [];
+                try {
+                  if (labReq.attachments) attachments = JSON.parse(labReq.attachments);
+                } catch {}
+                return {
+                  ...n,
+                  labRequest: {
+                    testName: labReq.testName,
+                    testPanel: labReq.testPanel,
+                    results: labReq.results,
+                    priority: labReq.priority,
+                    clinicalNotes: labReq.clinicalNotes,
+                    criticalNote: labReq.criticalNote,
+                    isCritical: labReq.isCritical,
+                    enteredByName: labReq.enteredByName,
+                    resultEnteredAt: labReq.resultEnteredAt,
+                    validatedByName: labReq.validatedByName,
+                    validatedAt: labReq.validatedAt,
+                    specimenType: labReq.specimenType,
+                    specimenId: labReq.specimenId,
+                    attachments,
+                    analyzerResults: labReq.analyzerResults,
+                    analyzerType: labReq.analyzerType,
+                    analyzerModel: labReq.analyzerModel,
+                    patientName: `${labReq.Patient.firstName} ${labReq.Patient.lastName}`,
+                    patientNumber: labReq.Patient.patientNumber,
+                  },
+                };
+              }
+            }
+            return n;
+          })
+        );
+
+        return NextResponse.json({ success: true, notifications: enriched });
       }
 
       case "MARK_NOTIF_READ": {

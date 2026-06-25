@@ -15,7 +15,7 @@ import {
   ScanBarcode, ScrollText, ListChecks, Layers, Sigma, RadioTower,
   GripHorizontal, Table2, Send, MessageSquare, History, BarChart3,
   Bell, PhoneCall, Stethoscope, Building2, Hash, Timer, Users,
-  FileSpreadsheet, Columns3, Wifi, Cpu, TestTubes, Bone,
+  FileSpreadsheet, Columns3, Wifi, Cpu, TestTubes, Bone, ExternalLink,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -1202,7 +1202,7 @@ function LabRequestDetail({ request, onBack, onRefresh, callLabApi, formatDate, 
   const handleStartProcessing = async () => { setIsSaving(true); try { await callLabApi("SET_PROCESSING", { id: request.id, processingStartedBy: user?.fullName }); onRefresh(); } catch (e: any) { alert(e.message); } finally { setIsSaving(false); } };
   const handleSaveResults = async () => { const ne = resultEntries.filter((r: any) => r.test && r.result); if (!ne.length || !enteredByName) { alert("Fill results and name"); return; } setIsSaving(true); try { await callLabApi("ENTER_RESULTS", { id: request.id, results: JSON.stringify(ne), enteredByName, isCritical, criticalNote: criticalNote || undefined }); onRefresh(); alert("Saved"); } catch (e: any) { alert(e.message); } finally { setIsSaving(false); } };
   const handleValidateResults = async () => { if (!validatedByName) { alert("Enter your name"); return; } if (!confirm("Validate?")) return; setIsSaving(true); try { await callLabApi("VALIDATE_RESULTS", { id: request.id, validatedByName }); onRefresh(); alert("Published"); } catch (e: any) { alert(e.message); } finally { setIsSaving(false); } };
-  const handleFileAttach = async (e: any) => { const f = e.target.files?.[0]; if (!f) return; const a: Attachment = { name: f.name, path: URL.createObjectURL(f), type: f.type, uploadedAt: new Date().toISOString() }; try { await callLabApi("ATTACH_FILE", { id: request.id, attachment: a }); setAttachments([...attachments, a]); } catch (e: any) { alert(e.message); } if (fileInputRef.current) fileInputRef.current.value = ""; };
+  const handleFileAttach = async (e: any) => { const f = e.target.files?.[0]; if (!f) return; try { const fd = new FormData(); fd.append("file", f); const uploadRes = await fetch("/api/laboratory/upload", { method: "POST", body: fd }); const uploadData = await uploadRes.json(); if (!uploadData.success) { alert(uploadData.error || "Upload failed"); return; } const a = uploadData.attachment; await callLabApi("ATTACH_FILE", { id: request.id, attachment: a }); setAttachments([...attachments, a]); } catch (e: any) { alert(e.message); } if (fileInputRef.current) fileInputRef.current.value = ""; };
   const storedResults: TestResultEntry[] = (() => { if (request.results) { try { const p = JSON.parse(request.results); if (Array.isArray(p)) return p; } catch {} } return []; })();
   const canCollect = request.status === "PENDING" || request.status === "REJECTED";
   const canProcess = request.status === "SPECIMEN_COLLECTED";
@@ -1340,7 +1340,7 @@ function LabRequestDetail({ request, onBack, onRefresh, callLabApi, formatDate, 
       {activeWorkTab === "attachments" && (<div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
         <h3 className="text-sm font-bold text-slate-700 mb-4"><Upload size={16} className="text-[#00703C] inline mr-2" />Attachments</h3>
         <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-slate-200 rounded-2xl py-12 text-center hover:border-[#00703C] hover:bg-green-50/30 cursor-pointer"><Upload size={36} className="mx-auto text-slate-300 mb-3" /><p className="font-bold text-slate-500">Click to upload</p><input ref={fileInputRef} type="file" onChange={handleFileAttach} className="hidden" /></div>
-        {attachments.map((a: any, i: number) => (<div key={i} className="flex items-center gap-3 bg-slate-50 rounded-xl px-4 py-3 mt-2 border"><FileText size={18} className="text-slate-400" /><span className="text-sm font-semibold flex-1">{a.name}</span></div>))}
+        {attachments.map((a: any, i: number) => (<a key={i} href={a.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 bg-slate-50 rounded-xl px-4 py-3 mt-2 border hover:bg-blue-50 hover:border-blue-200 transition-colors"><FileText size={18} className="text-slate-400 flex-shrink-0" /><span className="text-sm font-semibold flex-1 truncate">{a.name}</span><ExternalLink size={14} className="text-blue-500 flex-shrink-0" /></a>))}
       </div>)}
     </div>
   );

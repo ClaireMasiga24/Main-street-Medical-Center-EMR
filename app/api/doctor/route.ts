@@ -113,6 +113,7 @@ export async function POST(req: NextRequest) {
             visitId:       visit.id,
             requestedById: staffId,
             testName:      l.testName,
+            referralSource: "Doctor",
             status:        "PENDING",
           })),
         });

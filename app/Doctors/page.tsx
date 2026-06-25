@@ -208,7 +208,7 @@ function Sidebar({
         ))}
 
         <div className="mt-1">
-          <NotificationInbox department="Doctor" onNotificationClick={onNotifClick} />
+          <NotificationInbox sidebar={true} department="Doctor" onNotificationClick={onNotifClick} />
           <div className="mt-1"><StaffMessaging /></div>
         </div>
       </nav>
@@ -285,7 +285,7 @@ function Sidebar({
           ))}
 
           <div className="mt-1">
-            <NotificationInbox department="Doctor" onNotificationClick={onNotifClick} />
+            <NotificationInbox sidebar={true} department="Doctor" onNotificationClick={onNotifClick} />
             <div className="mt-1"><StaffMessaging /></div>
           </div>
         </nav>
