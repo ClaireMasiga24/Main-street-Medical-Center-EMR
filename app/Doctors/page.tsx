@@ -610,7 +610,7 @@ function ConsultationPanel({
   staffId: number;
   staffName: string;
 }) {
-  const [tab, setTab] = useState<"history" | "exam" | "diagnosis" | "rx" | "notes">("history");
+  const [tab, setTab] = useState<"history" | "exam" | "diagnosis" | "rx" | "procedures" | "notes">("history");
   const [symptoms, setSymptoms] = useState(patient.chiefComplaint || "");
   const [historyOfPresentIllness, setHistoryOfPresentIllness] = useState("");
   const [pastMedicalHistory, setPastMedicalHistory] = useState("");
@@ -631,11 +631,72 @@ function ConsultationPanel({
   const [showReferralPicker, setShowReferralPicker] = useState(false);
   const [consultationStarted, setConsultationStarted] = useState(patient.currentStatus === "IN_CONSULTATION");
 
+  // ── Procedures state ──
+  const [procedureName, setProcedureName] = useState("");
+  const [procedureNotes, setProcedureNotes] = useState("");
+  const [procedureTreatment, setProcedureTreatment] = useState("");
+  const [procedurePerformedBy, setProcedurePerformedBy] = useState("");
+  const [savedProcedures, setSavedProcedures] = useState<any[]>([]);
+  const [proceduresLoading, setProceduresLoading] = useState(false);
+  const [savingProcedure, setSavingProcedure] = useState(false);
+  const [showProcedureForm, setShowProcedureForm] = useState(false);
+
   const addRx = () => {
     if (!newRx.medication) return;
     setRxDrafts([...rxDrafts, { ...newRx }]);
     setNewRx({ medication: "", dosage: "", instructions: "" });
     setShowNewRx(false);
+  };
+
+  const fetchProcedures = useCallback(async () => {
+    try {
+      setProceduresLoading(true);
+      const res = await fetch(`/api/doctor/procedures?patientId=${patient.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSavedProcedures(data.procedures ?? []);
+      }
+    } catch { /* ignore */ }
+    finally { setProceduresLoading(false); }
+  }, [patient.id]);
+
+  useEffect(() => {
+    if (tab === "procedures") fetchProcedures();
+  }, [tab, fetchProcedures]);
+
+  const handleSaveProcedure = async () => {
+    if (!procedureName.trim()) { alert("Please enter the procedure name."); return; }
+    if (!procedureNotes.trim()) { alert("Please enter procedure notes."); return; }
+    setSavingProcedure(true);
+    try {
+      const res = await fetch("/api/doctor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "SAVE_PROCEDURE",
+          patientId: patient.id,
+          procedureName: procedureName.trim(),
+          procedureNotes: procedureNotes.trim(),
+          treatmentFollowUp: procedureTreatment.trim(),
+          performedBy: procedurePerformedBy.trim() || staffName,
+        }),
+      });
+      if (res.ok) {
+        setProcedureName("");
+        setProcedureNotes("");
+        setProcedureTreatment("");
+        setProcedurePerformedBy("");
+        setShowProcedureForm(false);
+        fetchProcedures();
+      } else {
+        const err = await res.json();
+        alert(`Error: ${err.error}`);
+      }
+    } catch {
+      alert("Network error saving procedure.");
+    } finally {
+      setSavingProcedure(false);
+    }
   };
 
   const handleAction = async (action: string, referralDept?: string) => {
@@ -787,17 +848,28 @@ function ConsultationPanel({
 		        <title>Main Street Medical Center - Consultation Record</title>
 		        <style>
 		          @page { margin: 15mm; }
-		          body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
-		          .watermark { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: -1; opacity: 0.08; }
-		          .watermark img { width: 50%; height: auto; }
+          body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+          body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: url('/Images/LOGO.jpg');
+            background-size: 55%;
+            background-repeat: no-repeat;
+            background-position: center;
+            opacity: 0.07;
+            pointer-events: none;
+            z-index: -1;
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+          }
 		          table { width: 100%; font-size: 13px; border-collapse: collapse; margin-bottom: 20px; }
 		          td { padding: 4px 8px; }
 		          .sig-line { border-bottom: 1px solid #000; display: inline-block; min-width: 250px; padding: 4px 8px; font-size: 20px; font-family: 'Brush Script MT', 'Segoe Script', cursive, sans-serif; }
 		        </style>
 		      </head>
 		      <body style="position:relative">
-		        <img src="/Images/LOGO.jpg" alt="" style="position:fixed;inset:0;width:50%;margin:auto;opacity:0.08;pointer-events:none;z-index:-1;object-fit:contain">
-		        <div style="padding:40px;max-width:800px;margin:0 auto">
+        <div style="padding:40px;max-width:800px;margin:0 auto">
 		          <div style="text-align:center;margin-bottom:30px;border-bottom:2px solid #0a2e1a;padding-bottom:20px">
 		            <h1 style="font-size:22px;color:#0a2e1a;margin:0;font-weight:bold">MAIN STREET MEDICAL CENTER</h1>
 		            <p style="font-size:13px;color:#555;margin:4px 0 0 0">Consultation Clinical Record</p>
@@ -952,6 +1024,7 @@ function ConsultationPanel({
             { key: "exam" as const, label: "Examination", icon: Stethoscope },
             { key: "diagnosis" as const, label: "Diagnosis & Plan", icon: AlertCircle },
             { key: "rx" as const, label: "Prescriptions", icon: Pill },
+            { key: "procedures" as const, label: "Procedures", icon: Syringe },
             { key: "notes" as const, label: "Notes & Orders", icon: ClipboardList },
           ]).map((t) => (
             <button
@@ -1269,6 +1342,120 @@ function ConsultationPanel({
                   <Plus size={15} /> Add Prescription
                 </button>
               )}
+            </div>
+          )}
+
+          {/* ── Procedures Tab ──────────────────────────────────────── */}
+          {tab === "procedures" && (
+            <div className="space-y-4">
+              {showProcedureForm ? (
+                <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">
+                      Procedure Name
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Wound Dressing, Lumbar Puncture, Incision & Drainage"
+                      className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]"
+                      value={procedureName}
+                      onChange={(e) => setProcedureName(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">
+                      Procedure Notes <span className="text-red-500">*</span>
+                    </label>
+                    <textarea
+                      placeholder="Detailed description of the procedure, findings, technique used, complications (if any)..."
+                      className="w-full p-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[150px]"
+                      value={procedureNotes}
+                      onChange={(e) => setProcedureNotes(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">
+                      Treatment / Follow-Up
+                    </label>
+                    <textarea
+                      placeholder="Post-procedure treatment, wound care instructions, follow-up schedule..."
+                      className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[80px]"
+                      value={procedureTreatment}
+                      onChange={(e) => setProcedureTreatment(e.target.value)}
+                    />
+                    <p className="text-[10px] text-slate-400 mt-0.5">This will be linked to the patient's treatment record</p>
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">
+                      Performed By
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Doctor's name performing the procedure"
+                      className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]"
+                      value={procedurePerformedBy}
+                      onChange={(e) => setProcedurePerformedBy(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={handleSaveProcedure}
+                      disabled={savingProcedure}
+                      className="bg-[#0a2e1a] text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-[#0d3d24] transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {savingProcedure ? <><Loader2 size={14} className="animate-spin" /> Saving...</> : <>Save Procedure</>}
+                    </button>
+                    <button
+                      onClick={() => { setShowProcedureForm(false); setProcedureName(""); setProcedureNotes(""); setProcedureTreatment(""); setProcedurePerformedBy(""); }}
+                      className="text-slate-500 px-4 py-2 text-sm hover:text-slate-700"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowProcedureForm(true)}
+                  className="flex items-center gap-2 text-[#0a2e1a] text-sm font-medium hover:text-[#0d3d24]"
+                >
+                  <Plus size={15} /> Add New Procedure
+                </button>
+              )}
+
+              {/* Saved Procedures List */}
+              <div className="border-t border-slate-100 pt-4">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Procedure History</h4>
+                {proceduresLoading ? (
+                  <div className="text-center py-8 text-sm text-slate-400">
+                    <Loader2 size={14} className="animate-spin inline mr-1" /> Loading procedures...
+                  </div>
+                ) : savedProcedures.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Syringe size={24} className="mx-auto text-slate-200 mb-2" />
+                    <p className="text-sm text-slate-400">No procedures recorded for this patient</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {savedProcedures.map((proc: any, i: number) => (
+                      <div key={proc.id || i} className="bg-white border border-slate-100 rounded-xl p-3 hover:border-slate-200 transition-colors">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <h5 className="text-sm font-semibold text-slate-700">{proc.procedureName}</h5>
+                          <span className="text-[10px] text-slate-400 whitespace-nowrap flex-shrink-0">
+                            {new Date(proc.createdAt).toLocaleDateString("en-UG", { day: "numeric", month: "short", year: "numeric" })}
+                          </span>
+                        </div>
+                        {proc.procedureNotes && (
+                          <p className="text-xs text-slate-600 line-clamp-3 mb-1">{proc.procedureNotes}</p>
+                        )}
+                        <div className="flex items-center gap-3 text-[10px] text-slate-400">
+                          {proc.performedBy && <span>By: <strong className="text-slate-500">{proc.performedBy}</strong></span>}
+                          {proc.treatmentFollowUp && <span className="truncate">Rx: {proc.treatmentFollowUp}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1895,6 +2082,198 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
     }
   };
 
+  const buildDischargeHtml = (): string => {
+    const p = selectedPatient!;
+    const today = new Date().toLocaleDateString("en-UG", { day: "numeric", month: "long", year: "numeric" });
+    const admitDate = new Date(p.admittedAt).toLocaleDateString("en-UG", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <title>Main Street Medical Center - Discharge Form</title>
+  <style>
+    @page { size: A4; margin: 15mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 13px;
+      color: #222;
+      line-height: 1.5;
+      padding: 0;
+      position: relative;
+      min-height: 100vh;
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url('/Images/LOGO.jpg');
+      background-size: 55%;
+      background-repeat: no-repeat;
+      background-position: center;
+      opacity: 0.07;
+      pointer-events: none;
+      z-index: -1;
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
+    }
+    .container { width: 100%; margin: 0 auto; }
+    .header {
+      text-align: center;
+      border-bottom: 2px solid #0a2e1a;
+      padding-bottom: 14px;
+      margin-bottom: 22px;
+    }
+    .header h1 { font-size: 22px; color: #0a2e1a; font-weight: bold; letter-spacing: 1px; }
+    .header p { font-size: 12px; color: #555; margin-top: 2px; }
+    h2.section-title {
+      font-size: 14px;
+      color: #0a2e1a;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 4px;
+      margin: 18px 0 10px 0;
+    }
+    table.info { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
+    table.info td { padding: 3px 6px; vertical-align: top; font-size: 13px; }
+    table.info td.label { font-weight: bold; color: #0a2e1a; width: 160px; }
+    table.info td.sep { width: 20px; color: #aaa; }
+    table.info td.bottom-border { border-bottom: 1px solid #e0e0e0; padding-bottom: 5px; }
+    .field-group { margin-bottom: 12px; }
+    .field-group .field-label { font-weight: bold; color: #0a2e1a; font-size: 12px; margin-bottom: 2px; }
+    .field-group .field-value { font-size: 13px; color: #333; white-space: pre-wrap; }
+    .checkbox-grid { display: flex; flex-wrap: wrap; gap: 16px; margin: 6px 0 8px 0; }
+    .checkbox-item { font-size: 13px; display: flex; align-items: center; gap: 4px; }
+    .checkbox-item input[type=checkbox] { width: 14px; height: 14px; accent-color: #0a2e1a; }
+    .sig-line {
+      border-bottom: 1px solid #000;
+      display: inline-block;
+      min-width: 220px;
+      padding: 3px 8px;
+      font-size: 18px;
+      font-family: 'Brush Script MT', 'Segoe Script', cursive, sans-serif;
+    }
+    .sig-row { display: flex; justify-content: space-between; margin-top: 30px; padding-top: 14px; border-top: 1px solid #ccc; }
+    .sig-block { flex: 1; }
+    .sig-block p { font-size: 12px; font-weight: bold; color: #0a2e1a; margin-bottom: 2px; }
+    .footer-note { text-align: center; font-size: 10px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>MAIN STREET MEDICAL CENTER</h1>
+      <p>0740944150 / 0785586979</p>
+      <p style="font-size:11px;color:#666">Emergency Ambulance: 0394533750 — Open 7 days a week 24HRS</p>
+    </div>
+
+    <h2 class="section-title" style="margin-top:4px">Discharge Summary</h2>
+
+    <!-- Patient Information -->
+    <table class="info">
+      <tr><td class="label">Patient Name:</td><td class="bottom-border" colspan="3"><strong>${p.lastName}, ${p.firstName}</strong></td></tr>
+      <tr><td class="label">Age / Sex:</td><td class="bottom-border">${p.age} yrs / ${p.gender === "MALE" ? "Male" : "Female"}</td><td class="label" style="width:120px">Patient ID:</td><td class="bottom-border">${p.patientNumber}</td></tr>
+      <tr><td class="label">Contact:</td><td class="bottom-border">${p.phoneNumber || "N/A"}</td><td class="label">Address:</td><td class="bottom-border">${(p as any).address || "N/A"}</td></tr>
+      <tr><td class="label">Date of Admission:</td><td class="bottom-border">${admitDate}</td><td class="label">Date of Discharge:</td><td class="bottom-border">${today}</td></tr>
+    </table>
+
+    <!-- Admission Details -->
+    <h2 class="section-title">Admission Details</h2>
+    <div class="field-group">
+      <div class="field-label">Reason for Admission / Chief Complaint</div>
+      <div class="field-value">${p.chiefComplaint || "Not recorded"}</div>
+    </div>
+    <div class="field-group">
+      <div class="field-label">Clinical Summary</div>
+      <div class="field-value">${p.assessment || followUpNotes || "Not documented"}</div>
+    </div>
+
+    <!-- Examination Findings -->
+    <h2 class="section-title">Examination Findings Summary</h2>
+    <div class="field-group">
+      <div class="field-label">At Admission</div>
+      <div class="field-value">${(p as any).examinationAtAdmission || "See clinical notes"}</div>
+    </div>
+    <div class="field-group">
+      <div class="field-label">At Discharge Vitals</div>
+      <div class="field-value">${(p as any).dischargeVitals || "See clinical notes"}</div>
+    </div>
+
+    <!-- Investigations Done -->
+    <h2 class="section-title">Investigations Done</h2>
+    <div class="field-value">${(p as any).investigations || "See lab records"}</div>
+
+    <!-- Diagnosis -->
+    <h2 class="section-title">Diagnosis</h2>
+    <div class="field-value">${p.diagnosis || "Not specified"}</div>
+
+    <!-- Summary of Treatment -->
+    <h2 class="section-title">Summary of Treatment Given During Admission</h2>
+    <div class="field-value">${p.treatmentPlan || "Not documented"}</div>
+
+    <!-- Condition at Discharge -->
+    <h2 class="section-title">Condition at Discharge</h2>
+    <div class="checkbox-grid">
+      <div class="checkbox-item"><input type="checkbox" /> Stable</div>
+      <div class="checkbox-item"><input type="checkbox" /> Improved</div>
+      <div class="checkbox-item"><input type="checkbox" /> Referred / Transferred</div>
+      <div class="checkbox-item"><input type="checkbox" /> Other (specify): ___________</div>
+    </div>
+
+    <!-- Discharge Medication -->
+    <h2 class="section-title">Discharge Medication and Instructions</h2>
+    <div class="field-value">${followUpNotes || "See prescription records"}</div>
+
+    <!-- Follow-Up -->
+    <h2 class="section-title">Follow-Up and Review Plan</h2>
+    <div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px">
+      <span>Review in:</span>
+      <span style="border-bottom:1px solid #000;display:inline-block;min-width:80px">&nbsp;</span>
+      <span>days / weeks / months</span>
+    </div>
+    <div style="margin-top:8px">
+      <div class="field-label">Specific Instructions:</div>
+      <div style="border-bottom:1px solid #e0e0e0;min-height:40px;padding:4px 0">&nbsp;</div>
+    </div>
+
+    <!-- Signatures -->
+    <div class="sig-row">
+      <div class="sig-block">
+        <p>Next of Kin Name:</p>
+        <div style="border-bottom:1px solid #000;min-width:200px;padding:3px 8px;font-size:16px">&nbsp;</div>
+        <div style="font-size:11px;color:#666;margin-top:2px">Signature / Relation</div>
+      </div>
+    </div>
+    <div class="sig-row" style="margin-top:16px">
+      <div class="sig-block">
+        <p>Doctor's Name:</p>
+        <div style="border-bottom:1px solid #000;min-width:220px;padding:3px 8px;font-size:18px;font-family:'Brush Script MT','Segoe Script',cursive,sans-serif">&nbsp;</div>
+        <div style="font-size:11px;color:#666;margin-top:2px">Signature</div>
+      </div>
+      <div class="sig-block" style="text-align:right">
+        <p>Date</p>
+        <div style="font-size:14px;color:#333;padding-top:6px">${today}</div>
+      </div>
+    </div>
+
+    <div class="footer-note">This is a computer-generated discharge summary from Main Street Medical Center EMR</div>
+  </div>
+  <script>window.onload = function() { window.print(); window.close(); };<\/script>
+</body>
+</html>`;
+  };
+
+  const handlePrintDischarge = () => {
+    const html = buildDischargeHtml();
+    const printWin = window.open("", "_blank", "width=800,height=600");
+    if (!printWin) { alert("Please allow pop-ups to print."); return; }
+    printWin.document.write(html);
+    printWin.document.close();
+  };
+
   const filtered = search
     ? patients.filter((p) => {
         const q = search.toLowerCase();
@@ -1956,7 +2335,7 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
           <div className="bg-white rounded-xl border border-slate-100 p-4">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Diagnosis</p>
-            <p className="text-sm text-slate-700">{p.diagnosis || "gastritis"}</p>
+            <p className="text-sm text-slate-700">{p.diagnosis || "Not yet diagnosed"}</p>
           </div>
           <div className="bg-white rounded-xl border border-slate-100 p-4">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Chief Complaint</p>
@@ -2139,31 +2518,39 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
           />
         </div>
 
-        {/* Send to Nurse Button */}
-        <button
-          onClick={handleSendToNurse}
-          disabled={sendingToNurse}
-          className="w-full py-3 rounded-xl font-semibold text-sm bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 transition-all flex items-center justify-center gap-2 mb-3 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {sendingToNurse ? (
-            <><Loader2 size={16} className="animate-spin" /> Sending...</>
-          ) : (
-            <><Activity size={16} /> Send Treatment Plan to Nurse/Midwife</>
-          )}
-        </button>
+        {/* Action Buttons Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+          <button
+            onClick={handleSendToNurse}
+            disabled={sendingToNurse}
+            className="py-2 rounded-xl font-semibold text-xs bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {sendingToNurse ? (
+              <><Loader2 size={13} className="animate-spin" /> Sending...</>
+            ) : (
+              <><Activity size={13} /> Send to Nurse</>
+            )}
+          </button>
 
-        {/* Discharge Button */}
-        <button
-          onClick={handleDischarge}
-          disabled={discharging}
-          className="w-full py-3.5 rounded-xl font-semibold text-sm bg-amber-600 text-white hover:bg-amber-700 active:bg-amber-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {discharging ? (
-            <><Loader2 size={16} className="animate-spin" /> Processing Discharge...</>
-          ) : (
-            <><LogOut size={16} /> Discharge Patient — Transfer for Billing</>
-          )}
-        </button>
+          <button
+            onClick={handlePrintDischarge}
+            className="py-2 rounded-xl font-semibold text-xs bg-slate-100 text-slate-700 hover:bg-slate-200 active:bg-slate-300 transition-all flex items-center justify-center gap-1.5"
+          >
+            <Printer size={13} /> Print Discharge
+          </button>
+
+          <button
+            onClick={handleDischarge}
+            disabled={discharging}
+            className="py-2 rounded-xl font-semibold text-xs bg-amber-600 text-white hover:bg-amber-700 active:bg-amber-800 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {discharging ? (
+              <><Loader2 size={13} className="animate-spin" /> Processing...</>
+            ) : (
+              <><LogOut size={13} /> Discharge</>
+            )}
+          </button>
+        </div>
 
         {/* Success Modal */}
         {showSuccess && (
@@ -2461,7 +2848,7 @@ function DoctorRecordsView({ onBack }: { onBack: () => void }) {
           </div>
           <div className="bg-white rounded-xl border border-slate-100 p-4">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Latest Diagnosis</p>
-            <p className="text-sm text-slate-700">{p.diagnosis || "gastritis"}</p>
+            <p className="text-sm text-slate-700">{p.diagnosis || "Not yet diagnosed"}</p>
           </div>
         </div>
 

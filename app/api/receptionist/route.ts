@@ -74,7 +74,6 @@ export async function POST(req: Request) {
           firstName,
           lastName,
           age,
-          dob,          // may be null for emergency
           gender,
           phone,        // may be null for emergency
           address,      // may be null for emergency
@@ -99,7 +98,6 @@ export async function POST(req: Request) {
             firstName,
             lastName,
             age: parseInt(age, 10),
-            dateOfBirth: dob ? new Date(dob) : null,
             gender,                          // "MALE" | "FEMALE" | "OTHER"
             phoneNumber: phone ?? null,
             address: address ?? null,

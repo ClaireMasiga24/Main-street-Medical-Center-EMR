@@ -1612,7 +1612,7 @@ export default function ReceptionistPage() {
   const [staffId, setStaffId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
-    firstName: "", lastName: "", age: "", dob: "", gender: "",
+    firstName: "", lastName: "", age: "", gender: "",
     phone: "", address: "", chiefComplaint: "",
   });
 
@@ -1648,7 +1648,6 @@ export default function ReceptionistPage() {
     { id: "firstName", label: "First Name", type: "text", required: true, placeholder: "e.g., John" },
     { id: "lastName", label: "Last Name", type: "text", required: true, placeholder: "e.g., Okello" },
     { id: "age", label: "Age", type: "number", required: true, placeholder: "Years" },
-    { id: "dob", label: "Date of Birth", type: "date", required: true, placeholder: "" },
     { id: "gender", label: "Gender", type: "select", required: true, options: ["MALE", "FEMALE", "OTHER"], placeholder: "" },
     { id: "phone", label: "Phone Number", type: "tel", required: true, placeholder: "e.g., 0770000000" },
     { id: "address", label: "Residential Address", type: "textarea", required: true, colSpan: "md:col-span-2", placeholder: "Village, District details..." },
@@ -1683,7 +1682,6 @@ export default function ReceptionistPage() {
             firstName: formData.firstName,
             lastName: formData.lastName,
             age: formData.age,
-            dob: registrationMode === "normal" ? formData.dob : null,
             gender: formData.gender,
             phone: registrationMode === "normal" ? formData.phone : null,
             address: registrationMode === "normal" ? formData.address : null,
@@ -1700,7 +1698,7 @@ export default function ReceptionistPage() {
 
       await fetchActiveRegistry();
       setActiveTab("search");
-      setFormData({ firstName: "", lastName: "", age: "", dob: "", gender: "", phone: "", address: "", chiefComplaint: "" });
+      setFormData({ firstName: "", lastName: "", age: "", gender: "", phone: "", address: "", chiefComplaint: "" });
       setSelectedPatient(null);
     } catch (err: any) {
       console.error(err);

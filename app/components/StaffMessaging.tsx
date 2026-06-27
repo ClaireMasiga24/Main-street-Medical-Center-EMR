@@ -185,7 +185,7 @@ export default function StaffMessaging({
   return (
     <div className="relative">
       {/* Floating trigger button */}
-      <button
+      <button suppressHydrationWarning
         onClick={() => setIsOpen(!isOpen)}
         className="relative flex items-center gap-2 bg-white border border-slate-200 hover:border-[#00703C] text-slate-600 px-3 py-2 rounded-xl text-xs font-semibold shadow-sm transition-all"
       >

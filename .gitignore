@@ -44,3 +44,5 @@ next-env.d.ts
 
 # build output
 /dist
+# Bwat per-workspace permission allowlist
+.bwat/

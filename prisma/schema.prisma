@@ -47,8 +47,9 @@ model Patient {
   DentalRecord          DentalRecord[]
   ImagingRequest        ImagingRequest[]
   LabCommunications     LabCommunication[]
-  LabRequest            LabRequest[]
-  Notification          Notification[]
+	  LabRequest            LabRequest[]
+	  MedicalProcedure      MedicalProcedure[]
+	  Notification          Notification[]
   OdontogramFinding     OdontogramFinding[]
   PatientReview         PatientReview[]
   PatientTimeline       PatientTimeline[]
@@ -606,6 +607,17 @@ model StaffMessage {
   message    String
   targetDept String?
   createdAt  DateTime @default(now())
+}
+
+model MedicalProcedure {
+  id                Int      @id @default(autoincrement())
+  patientId         Int
+  procedureName     String
+  procedureNotes    String
+  treatmentFollowUp String?
+  performedBy       String
+  createdAt         DateTime @default(now())
+  Patient           Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
 }
 
 enum PatientStatus {

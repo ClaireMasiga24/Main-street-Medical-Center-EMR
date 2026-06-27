@@ -50,8 +50,26 @@ export async function POST(req: NextRequest) {
       reviewOfOtherSystems,
       physicalExamination, diagnosis, differentialDiagnosis,
       assessment, treatmentPlan, notes, doctorSignature,
-      prescriptions, labRequests, routeTo,
+      prescriptions, labRequests, routeTo, action,
+      procedureName, procedureNotes, treatmentFollowUp, performedBy,
     } = await req.json();
+
+    // ── SAVE_PROCEDURE action ──
+    if (action === "SAVE_PROCEDURE") {
+      if (!patientId || !procedureName || !procedureNotes) {
+        return NextResponse.json({ error: "Missing required fields: patientId, procedureName, procedureNotes." }, { status: 400 });
+      }
+      const procedure = await prisma.medicalProcedure.create({
+        data: {
+          patientId,
+          procedureName,
+          procedureNotes,
+          treatmentFollowUp: treatmentFollowUp || null,
+          performedBy: performedBy || staffName || "Doctor",
+        },
+      });
+      return NextResponse.json({ success: true, procedure });
+    }
 
     if (!patientId || !routeTo || !(routeTo in ROUTE_TO_STATUS)) {
       return NextResponse.json({ error: "Missing required fields." }, { status: 400 });
@@ -214,7 +232,7 @@ export async function POST(req: NextRequest) {
                           effectiveRoute === "REFERRAL" && labRequests?.length ? "LAB" : effectiveRoute,
           description:   effectiveRoute === "SEND_ORDERS"
             ? `Orders sent — ${labRequests?.length || 0} lab test(s), ${prescriptions?.length || 0} prescription(s). Diagnosis: ${diagnosis || "N/A"}`
-            : `Consultation completed — ${actionLabel}. Diagnosis: ${diagnosis || "gastritis"}`,
+            : `Consultation completed — ${actionLabel}. Diagnosis: ${diagnosis || "Not yet diagnosed"}`,
           metadata:      JSON.stringify({
             visitId:       visit.id,
             diagnosis,

@@ -189,7 +189,7 @@ export default function NotificationInbox({
         }
       `}</style>
       {/* Bell button — sidebar variant vs inline variant */}
-      <button
+      <button suppressHydrationWarning
         onClick={() => { setIsOpen(!isOpen); setSelectedNotif(null); }}
         className={`relative flex items-center gap-2 w-full transition-all duration-150 ${
           sidebar
