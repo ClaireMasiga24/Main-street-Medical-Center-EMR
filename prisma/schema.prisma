@@ -621,6 +621,7 @@ model MedicalProcedure {
 }
 
 enum PatientStatus {
+  REGISTERED
   AWAITING_TRIAGE
   AWAITING_SONOGRAPHY
   AWAITING_RADIOLOGY

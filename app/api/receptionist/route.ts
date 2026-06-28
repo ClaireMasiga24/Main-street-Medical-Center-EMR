@@ -102,7 +102,7 @@ export async function POST(req: Request) {
             phoneNumber: phone ?? null,
             address: address ?? null,
             isEmergency: isEmergency ?? false,
-            currentStatus: "AWAITING_TRIAGE",
+            currentStatus: "REGISTERED",
           },
         });
 

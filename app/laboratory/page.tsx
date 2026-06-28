@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   FlaskConical, Search, RefreshCw, LogOut, User, Phone,
@@ -12,7 +12,7 @@ import {
   Bone, ExternalLink, ChevronLeft, ChevronRight,
   FlaskRound, BadgeCheck, Sigma, Menu, X, Home,
   Archive, Ban, MessageSquareText, Eye, Filter,
-  Share2, Printer,
+  Share2, Printer, Paperclip, Upload,
 } from "lucide-react";
 import StaffMessaging from "../components/StaffMessaging";
 
@@ -455,6 +455,15 @@ interface LabRequestItem {
 
 interface ResultEntry { test: string; unit: string; referenceRange: string; result: string; flag: string; }
 
+interface LabAttachment {
+  name: string;
+  data: string;
+  type: string;
+  size: number;
+  uploadedAt: string;
+  uploadedBy: string;
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────
 export default function LaboratoryPage() {
   const router = useRouter();
@@ -500,6 +509,11 @@ export default function LaboratoryPage() {
   const [critNotifiedPerson, setCritNotifiedPerson] = useState("");
   const [critNotificationMethod, setCritNotificationMethod] = useState("");
   const [savingCritical, setSavingCritical] = useState(false);
+
+  // Attachments
+  const [attachments, setAttachments] = useState<LabAttachment[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Auth ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -618,6 +632,17 @@ export default function LaboratoryPage() {
     setCritNotifiedPerson("");
     setCritNotificationMethod("");
 
+    // Parse existing attachments
+    if (req.attachments) {
+      try {
+        const parsed = JSON.parse(req.attachments);
+        if (Array.isArray(parsed)) setAttachments(parsed);
+        else setAttachments([]);
+      } catch { setAttachments([]); }
+    } else {
+      setAttachments([]);
+    }
+
     if (req.results) {
       try {
         const parsed = JSON.parse(req.results);
@@ -647,6 +672,7 @@ export default function LaboratoryPage() {
     setSelectedDepts([]);
     setCritNotifiedPerson("");
     setCritNotificationMethod("");
+    setAttachments([]);
   };
 
   // ── Default Results ───────────────────────────────────────────────────
@@ -694,6 +720,63 @@ export default function LaboratoryPage() {
       next[index] = { ...next[index], result: value, flag: computeFlag(value, next[index].referenceRange) };
       return next;
     });
+  };
+
+  // ── Attachment helpers ──────────────────────────────────────────────────
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.split(",")[1]); // strip data:...;base64, prefix
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const downloadAttachment = (att: LabAttachment) => {
+    const dataUrl = `data:${att.type || "application/octet-stream"};base64,${att.data}`;
+    const a = document.createElement("a");
+    a.href = dataUrl;
+    a.download = att.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !selectedRequest) return;
+    const file = files[0];
+    const maxSize = 10 * 1024 * 1024; // 10 MB
+    if (file.size > maxSize) { alert("File too large. Maximum size is 10 MB."); return; }
+    setIsUploading(true);
+    try {
+      const data = await fileToBase64(file);
+      const attachment: LabAttachment = {
+        name: file.name,
+        data,
+        type: file.type,
+        size: file.size,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: user?.fullName || "Lab Technician",
+      };
+      await callLabApi("ATTACH_FILE", { id: selectedRequest.id, attachment });
+      setAttachments(prev => [...prev, attachment]);
+      await fetchRequests();
+    } catch (err: any) {
+      alert(err.message || "Failed to upload file");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   const handleSaveResults = async () => {
@@ -1101,6 +1184,86 @@ export default function LaboratoryPage() {
                     </div>
                   </div>
                 )}
+                {/* ── Attachments Section ──────────────────────────────────── */}
+                <div className="mt-6 pt-6 border-t border-gray-200">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                      <Paperclip className="w-4 h-4" style={{ color: BRAND }} />
+                      Attachments ({attachments.length})
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleFileSelect}
+                        className="hidden"
+                        accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+                      />
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+                        style={{ backgroundColor: BRAND }}
+                      >
+                        {isUploading ? (
+                          <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Uploading...</>
+                        ) : (
+                          <><Upload className="w-3.5 h-3.5" /> Upload File</>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {attachments.length === 0 ? (
+                    <p className="text-xs text-gray-400 text-center py-4 border-2 border-dashed border-gray-200 rounded-lg">
+                      No attachments yet. Click "Upload File" to attach documents or images.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {attachments.map((att, idx) => {
+                        const isImage = att.type.startsWith("image/");
+                        return (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50 hover:bg-white transition-colors"
+                          >
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              {isImage ? (
+                                <div className="w-10 h-10 rounded-md overflow-hidden flex-shrink-0 border border-gray-200 bg-white">
+                                  <img
+                                    src={`data:${att.type};base64,${att.data}`}
+                                    alt={att.name}
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-10 h-10 rounded-md flex items-center justify-center flex-shrink-0" style={{ backgroundColor: BRAND_LIGHT }}>
+                                  <FileText className="w-5 h-5" style={{ color: BRAND }} />
+                                </div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-semibold text-gray-700 truncate">{att.name}</p>
+                                <p className="text-[10px] text-gray-400">
+                                  {formatFileSize(att.size)} &middot; {att.uploadedBy}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <button
+                                onClick={() => downloadAttachment(att)}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-all"
+                                title="Download"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 <button
                   onClick={handleSaveResults}
                   disabled={savingResults}
@@ -1158,6 +1321,38 @@ export default function LaboratoryPage() {
                       );
                     } catch { return null; }
                   })()}
+
+                  {/* Attachments summary in Step 3 */}
+                  {attachments.length > 0 && (
+                    <div className="mb-5 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                      <p className="text-xs font-medium text-gray-500 mb-2 flex items-center gap-1.5">
+                        <Paperclip className="w-3.5 h-3.5" />
+                        Attachments ({attachments.length})
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {attachments.map((att, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => downloadAttachment(att)}
+                            className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white hover:bg-gray-100 transition-colors"
+                            title="Download"
+                          >
+                            {att.type.startsWith("image/") ? (
+                              <img
+                                src={`data:${att.type};base64,${att.data}`}
+                                alt={att.name}
+                                className="w-5 h-5 rounded object-cover flex-shrink-0"
+                              />
+                            ) : (
+                              <FileText className="w-3.5 h-3.5 text-gray-400" />
+                            )}
+                            <span className="truncate max-w-[120px]">{att.name}</span>
+                            <Eye className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Role-based recipient grid — 2x2 large tappable cards */}
                   <label className="block text-sm font-medium text-gray-700 mb-3">

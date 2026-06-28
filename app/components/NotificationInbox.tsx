@@ -17,7 +17,7 @@ interface LabRequestData {
   validatedAt: string | null;
   specimenType: string | null;
   specimenId: string | null;
-  attachments: { name: string; url: string; type: string }[];
+  attachments: { name: string; url?: string; data?: string; type: string }[];
   analyzerResults: string | null;
   analyzerType: string | null;
   analyzerModel: string | null;
@@ -411,19 +411,39 @@ export default function NotificationInbox({
                     <div>
                       <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5">Attachments ({selectedNotif.labRequest.attachments.length})</p>
                       <div className="space-y-1.5">
-                        {selectedNotif.labRequest.attachments.map((att: any, i: number) => (
-                          <a
-                            key={i}
-                            href={att.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 hover:bg-blue-50 hover:border-blue-200 transition-colors text-xs"
-                          >
-                            <FileText size={13} className="text-slate-400 flex-shrink-0" />
-                            <span className="flex-1 min-w-0 truncate text-slate-700 font-medium">{att.name || att.url?.split("/").pop() || "Attachment"}</span>
-                            <ExternalLink size={10} className="text-blue-500 flex-shrink-0" />
-                          </a>
-                        ))}
+                        {selectedNotif.labRequest.attachments.map((att: any, i: number) => {
+                          const href = att.url || (att.data ? `data:${att.type || "application/octet-stream"};base64,${att.data}` : "#");
+                          const isImage = att.type?.startsWith("image/") && href.startsWith("data:");
+                          return isImage ? (
+                            <a
+                              key={i}
+                              href={href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 hover:bg-blue-50 hover:border-blue-200 transition-colors text-xs"
+                            >
+                              <img
+                                src={href}
+                                alt={att.name || "Attachment"}
+                                className="w-7 h-7 rounded object-cover flex-shrink-0 border border-slate-100"
+                              />
+                              <span className="flex-1 min-w-0 truncate text-slate-700 font-medium">{att.name || "Attachment"}</span>
+                              <ExternalLink size={10} className="text-blue-500 flex-shrink-0" />
+                            </a>
+                          ) : (
+                            <a
+                              key={i}
+                              href={href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 hover:bg-blue-50 hover:border-blue-200 transition-colors text-xs"
+                            >
+                              <FileText size={13} className="text-slate-400 flex-shrink-0" />
+                              <span className="flex-1 min-w-0 truncate text-slate-700 font-medium">{att.name || "Attachment"}</span>
+                              <ExternalLink size={10} className="text-blue-500 flex-shrink-0" />
+                            </a>
+                          );
+                        })}
                       </div>
                     </div>
                   )}

@@ -126,8 +126,9 @@ const ROUTE_OPTIONS: RouteOption[] = [
   },
 ];
 
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  AWAITING_TRIAGE:     { label: "Awaiting Triage",     color: "text-emerald-700 bg-emerald-50 border-emerald-200" },
+  const STATUS_LABELS: Record<string, { label: string; color: string }> = {
+    REGISTERED:          { label: "Registered — not yet routed", color: "text-slate-700 bg-slate-100 border-slate-300" },
+    AWAITING_TRIAGE:     { label: "Awaiting Triage",     color: "text-emerald-700 bg-emerald-50 border-emerald-200" },
   AWAITING_DOCTOR:     { label: "Awaiting Doctor",      color: "text-indigo-700 bg-indigo-50 border-indigo-200" },
   AWAITING_DENTIST:    { label: "Awaiting Dentist",     color: "text-cyan-700 bg-cyan-50 border-cyan-200" },
   AWAITING_SONOGRAPHY: { label: "Awaiting Sonography",  color: "text-blue-700 bg-blue-50 border-blue-200" },
@@ -1842,7 +1843,7 @@ export default function ReceptionistPage() {
 
         {/* ── SEARCH / TRACKING TAB ─────────────────────────────────────────── */}
         {activeTab === "search" && (
-          <div className="grid gap-6 lg:grid-cols-3">
+          <div className="flex flex-col gap-6 lg:grid lg:grid-cols-3">
 
             {/* Left: registry list */}
             <div className="space-y-6 lg:col-span-2">
@@ -1908,8 +1909,8 @@ export default function ReceptionistPage() {
             </div>
 
             {/* Right: Clinical Workflow Router */}
-            <div className="lg:col-span-1">
-              <div className="sticky top-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+            <div className="flex flex-col gap-6 lg:col-span-1">
+              <div className="lg:sticky lg:top-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <div>
                   <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Clinical Workflow Router</h3>
                   <p className="text-xs text-slate-400 mt-0.5">Route this patient to any department.</p>
@@ -1957,7 +1958,7 @@ export default function ReceptionistPage() {
                             key={opt.status + opt.label}
                             disabled={isRouting || selectedPatient.status === opt.status}
                             onClick={() => handleDispatchPipeline(selectedPatient.id, opt.status, opt.label)}
-                            className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 px-2 text-[10px] font-extrabold uppercase tracking-wide text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed ${opt.color} ${
+                            className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 px-2 min-h-[44px] text-[10px] font-extrabold uppercase tracking-wide text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed ${opt.color} ${
                               selectedPatient.status === opt.status ? "ring-2 ring-offset-1 " + opt.ringColor : ""
                             }`}
                           >
@@ -1981,7 +1982,7 @@ export default function ReceptionistPage() {
               </div>
 
               {/* ── PATIENT RECORDS ──────────────────────────────────────────── */}
-              <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mt-6">
+              <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                 <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <FileText size={15} className="text-[#00703C]" />
