@@ -27,32 +27,25 @@ interface PanelRow { test: string; unit: string; range: string; }
 const PANELS: Record<string, { label: string; rows: PanelRow[] }> = {
   CBC: {
     label: "Complete Blood Count (CBC)",
-    rows: [
-      { test: "White Blood Cell (WBC)", unit: "x10³/µL", range: "4.0-11.0" },
-      { test: "Red Blood Cell (RBC)", unit: "x10⁶/µL", range: "4.5-5.5" },
-      { test: "Hemoglobin (HGB)", unit: "g/dL", range: "12.0-16.0" },
-      { test: "Hematocrit (HCT)", unit: "%", range: "36-46" },
-      { test: "Mean Corpuscular Volume (MCV)", unit: "fL", range: "80-100" },
-      { test: "Mean Corpuscular Hemoglobin (MCH)", unit: "pg", range: "27-32" },
-      { test: "Mean Corpuscular HGB Conc. (MCHC)", unit: "g/dL", range: "32-36" },
-      { test: "Red Cell Distribution Width (RDW)", unit: "%", range: "11.5-14.5" },
-      { test: "Platelet Count (PLT)", unit: "x10³/µL", range: "150-450" },
-      { test: "Neutrophils", unit: "%", range: "40-60" },
-      { test: "Lymphocytes", unit: "%", range: "20-40" },
-      { test: "Monocytes", unit: "%", range: "2-8" },
-      { test: "Eosinophils", unit: "%", range: "1-4" },
-      { test: "Basophils", unit: "%", range: "0-1" },
-      // ── Platelet & RBC indices (analyzer printout, second column) ──
-      { test: "MPV (Mean Platelet Volume)", unit: "fL", range: "7.5-12.0" },
-      { test: "PDW (Platelet Distribution Width)", unit: "%", range: "9.0-17.0" },
-      { test: "PCT (Plateletcrit)", unit: "%", range: "0.108-0.282" },
-      { test: "RDW-SD (Red Cell Distribution Width - SD)", unit: "fL", range: "35.0-56.0" },
-      { test: "P-LCR (Platelet Large Cell Ratio)", unit: "%", range: "11.0-45.0" },
-      // ── Absolute differential counts (analyzer printout) ──
-      { test: "LYM# (Lymphocyte Absolute)", unit: "x10³/µL", range: "1.0-4.0" },
-      { test: "MID# (Mid-range Absolute)", unit: "x10³/µL", range: "0.1-1.5" },
-      { test: "GRAN# (Granulocyte Absolute)", unit: "x10³/µL", range: "2.0-7.5" },
-    ],
+	    rows: [
+	      { test: "White Blood Cell (WBC)", unit: "×10⁹/L", range: "4.0-11.0" },
+	      { test: "Red Blood Cell (RBC)", unit: "×10¹²/L", range: "M: 4.5–5.9; F: 4.1–5.1" },
+	      { test: "Hemoglobin (HGB)", unit: "g/dL", range: "M: 13.5–17.5; F: 12.0–15.5" },
+	      { test: "Hematocrit (HCT)", unit: "%", range: "M: 41–53; F: 36–46" },
+	      { test: "Mean Corpuscular Volume (MCV)", unit: "fL", range: "80–100" },
+	      { test: "Mean Corpuscular Hemoglobin (MCH)", unit: "pg", range: "27–33" },
+	      { test: "Mean Corpuscular HGB Conc. (MCHC)", unit: "g/dL", range: "32–36" },
+	      { test: "RDW-CV (Red Cell Distribution Width)", unit: "%", range: "11.5–14.5" },
+	      { test: "Platelet Count (PLT)", unit: "×10⁹/µL", range: "150–450" },
+	      { test: "MPV (Mean Platelet Volume)", unit: "fL", range: "7.5–12.0" },
+	      // ── WBC Differential (3-part) ──
+	      { test: "LYM% (Lymphocytes)", unit: "%", range: "20–40" },
+	      { test: "MID% (Monocytes + Eosinophils + Basophils)", unit: "%", range: "2–15" },
+	      { test: "GRAN% (Granulocytes)", unit: "%", range: "50–70" },
+	      { test: "LYM#", unit: "×10⁹/µL", range: "1.0–4.0" },
+	      { test: "MID#", unit: "×10⁹/µL", range: "0.1–1.5" },
+	      { test: "GRAN#", unit: "×10⁹/µL", range: "2.0–7.5" },
+	    ],
   },
   URINALYSIS: {
     label: "Urinalysis",
@@ -271,6 +264,7 @@ function generateLabReportHTML(
   const now = new Date().toLocaleString("en-UG", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const cols = specimenCollectedAt ? new Date(specimenCollectedAt).toLocaleDateString("en-UG", { day: "2-digit", month: "short", year: "numeric" }) : "\u2014";
   const colTime = specimenCollectedAt ? new Date(specimenCollectedAt).toLocaleTimeString("en-UG", { hour: "2-digit", minute: "2-digit" }) : "\u2014";
+  const isCBC = /cbc|complete blood/i.test(testName);
 
   const rowsHtml = results.map((r, i) => {
     let flagColor = "";
@@ -279,7 +273,11 @@ function generateLabReportHTML(
     else if (r.flag === "LOW") { flagColor = "color:#d97706;font-weight:700;"; flagBg = "background:#fffbeb;"; }
     else if (r.flag === "NORMAL") { flagColor = "color:#16a34a;"; }
     const flagDisplay = r.result.trim() ? r.flag : "";
-    return `<tr style="${flagBg}border-bottom:1px solid #e5e7eb;">
+    // Insert WBC Differential section header before the first differential row (index 10) for CBC
+    const sectionHeader = isCBC && i === 10
+      ? `<tr style="background:#f3f4f6;"><td colspan="6" style="padding:5px 8px;font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.5px;border-top:2px solid #d1d5db;border-bottom:1px solid #e5e7eb;">&nbsp;&nbsp;WBC DIFFERENTIAL (3-PART)</td></tr>`
+      : "";
+    return `${sectionHeader}<tr style="${flagBg}border-bottom:1px solid #e5e7eb;">
       <td style="padding:6px 8px;font-size:11px;color:#374151;">${i + 1}</td>
       <td style="padding:6px 8px;font-size:11px;color:#111827;font-weight:500;">${r.test}</td>
       <td style="padding:6px 8px;font-size:11px;color:#111827;font-weight:600;text-align:center;">${r.result || "\u2014"}</td>
