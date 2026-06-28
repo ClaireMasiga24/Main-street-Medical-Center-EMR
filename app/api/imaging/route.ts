@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
+import { createNotification } from "../../lib/notifications";
 
 // ─── GET — list imaging requests with powerful filtering ──────────────
 export async function GET(request: Request) {
@@ -148,9 +149,19 @@ export async function PATCH(request: Request) {
       },
     });
 
-    // If the patient's currentStatus is AWAITING_RADIOLOGY/SONOGRAPHY and the report
-    // is being finalized, we could update the patient status here
-    // (keeping it flexible — the requesting workflow controls the status)
+	    // If the patient's currentStatus is AWAITING_RADIOLOGY/SONOGRAPHY and the report
+	    // is being finalized, we could update the patient status here
+	    // (keeping it flexible — the requesting workflow controls the status)
+
+	    // Optional notification to a department (e.g. notify DOCTOR when report finalized)
+	    if (updates.notifyDepartment) {
+	      await createNotification({
+	        department: updates.notifyDepartment,
+	        title: "Imaging Report Ready",
+	        message: updates.notifyMessage || `Imaging report finalized for patient`,
+	        type: "RESULT_READY",
+	      }).catch((e: any) => console.error("[Imaging] notify error", e));
+	    }
 
     return NextResponse.json(updated);
   } catch (err: any) {

@@ -313,13 +313,13 @@ export async function POST(req: Request) {
 
       case "SHARE_RESULT": {
         const { labRequestId, patientId, sharedById, sharedByName, targetUserId, targetDept, includeReport, note } = payload;
-        if (!labRequestId || !patientId || !sharedById || !sharedByName || !targetDept) {
-          return NextResponse.json({ error: "labRequestId, patientId, sharedById, sharedByName, and targetDept are required" }, { status: 400 });
+        if (!labRequestId || !patientId || !sharedByName || !targetDept) {
+          return NextResponse.json({ error: "labRequestId, patientId, sharedByName, and targetDept are required" }, { status: 400 });
         }
         const share = await prisma.resultShare.create({
           data: {
             labRequestId: parseInt(labRequestId), patientId: parseInt(patientId),
-            sharedById: parseInt(sharedById), sharedByName,
+            sharedById: sharedById ? parseInt(sharedById) : null, sharedByName,
             targetUserId: targetUserId ? parseInt(targetUserId) : null, targetDept,
             includeReport: includeReport !== false, note: note || null,
           },

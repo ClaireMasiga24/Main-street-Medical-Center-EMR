@@ -163,6 +163,8 @@ export default function RadiologyDashboard() {
   const [isSaving, setIsSaving] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [measurementValues, setMeasurementValues] = useState<Record<string, string>>({});
+  const [successMessage, setSuccessMessage] = useState("");
 
   // ── Stats ─────────────────────────────────────────────────────────────
   const [stats, setStats] = useState({ total: 0, pending: 0, inProgress: 0, awaitingReport: 0, reported: 0, critical: 0 });
@@ -235,6 +237,13 @@ export default function RadiologyDashboard() {
     return () => { clearInterval(interval); clearInterval(hb); };
   }, [fetchRequests]);
 
+  // Auto-dismiss success toast
+  useEffect(() => {
+    if (!successMessage) return;
+    const t = setTimeout(() => setSuccessMessage(""), 4000);
+    return () => clearTimeout(t);
+  }, [successMessage]);
+
   // ── Select Request ────────────────────────────────────────────────────
   const handleSelectRequest = (req: ImagingRequest) => {
     setSelectedRequest(req);
@@ -243,6 +252,43 @@ export default function RadiologyDashboard() {
     setConclusion(req.conclusion ?? "");
     setRadiologistNotes(req.radiologistNotes ?? "");
     setImageUrls([]);
+    setSuccessMessage("");
+
+    // Pre-fill findings template if empty
+    if (!req.findings) {
+      let template = "";
+      switch (req.studyType) {
+        case "ULTRASOUND":
+          template = "LIVER: Normal size and echogenicity. No focal lesions.\nGALL BLADDER: Normal. No calculi.\nSPLEEN: Normal size.\nPANCREAS: Not clearly visualised.\nKIDNEYS (R/L): Normal size, shape and echotexture. No hydronephrosis.\nBLADDER: Adequately distended. No masses.\nOTHER FINDINGS:";
+          break;
+        case "X_RAY":
+          template = "CHEST PA VIEW:\nHeart size: Normal.\nMediastinum: Normal.\nLungs: Clear lung fields bilaterally. No consolidation, effusion or pneumothorax seen.\nBony structures: Intact.\nSoft tissues: Unremarkable.";
+          break;
+        case "ECHOCARDIOGRAPHY":
+          template = "Left Ventricle: Normal size and function.\nEjection Fraction (EF): ____%\nRight Ventricle: Normal.\nValves: Mitral/Tricuspid/Aortic — no significant regurgitation or stenosis.\nPericardium: No effusion.\nIVC: Normal.";
+          break;
+        default:
+          template = "FINDINGS:\n\nIMPRESSION:\n\nCONCLUSION:";
+          break;
+      }
+      setFindings(template);
+    }
+
+    // Parse saved measurements
+    if (req.measurements) {
+      try {
+        const parsed = JSON.parse(req.measurements);
+        if (typeof parsed === "object" && !Array.isArray(parsed)) {
+          setMeasurementValues(parsed as Record<string, string>);
+        } else {
+          setMeasurementValues({});
+        }
+      } catch {
+        setMeasurementValues({});
+      }
+    } else {
+      setMeasurementValues({});
+    }
   };
 
   // ── Status Updates ────────────────────────────────────────────────────
@@ -293,8 +339,23 @@ export default function RadiologyDashboard() {
 
       setRequests(prev => prev.map(r => r.id === selectedRequest.id ? { ...r, ...updated } : r));
       setSelectedRequest(prev => prev ? { ...prev, ...updated } : null);
-      if (finalize) alert("Report finalized and will be sent to the referring clinician.");
-      else alert("Draft saved.");
+      if (finalize) {
+        // Notify the referring doctor department
+        try {
+          await fetch("/api/imaging", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: selectedRequest.id,
+              notifyDepartment: "DOCTOR",
+              notifyMessage: `Imaging report ready: ${studyTypeLabel(selectedRequest.studyType)} for ${selectedRequest.Patient.firstName} ${selectedRequest.Patient.lastName}`,
+            }),
+          });
+        } catch { /* silent */ }
+        setSuccessMessage("Report finalized and sent to referring clinician");
+      } else {
+        setSuccessMessage("Draft saved.");
+      }
       fetchRequests();
     } catch (err: any) {
       alert(`Error: ${err.message}`);
@@ -323,6 +384,113 @@ export default function RadiologyDashboard() {
     } catch (err: any) {
       alert(`Error: ${err.message}`);
     }
+  };
+
+  // ── Save Measurements ────────────────────────────────────────────────
+  const handleSaveMeasurements = async () => {
+    if (!selectedRequest) return;
+    setIsSaving(true);
+    try {
+      const res = await fetch("/api/imaging", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: selectedRequest.id, measurements: JSON.stringify(measurementValues) }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      setSuccessMessage("Measurements saved.");
+      fetchRequests();
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // ── Generate A4 Print Report ─────────────────────────────────────────
+  const generateImagingReport = () => {
+    if (!selectedRequest) return;
+    const p = selectedRequest.Patient;
+    const today = new Date().toLocaleDateString("en-UG", { day: "numeric", month: "long", year: "numeric" });
+    const studyLbl = studyTypeLabel(selectedRequest.studyType);
+    const referral = referralLabel(selectedRequest.referralSource);
+
+    // Build measurements table HTML if any saved
+    let measurementsHtml = "";
+    if (Object.keys(measurementValues).some(k => measurementValues[k])) {
+      const rows = Object.entries(measurementValues)
+        .filter(([, v]) => v)
+        .map(([k, v]) => `<tr><td style="padding:4px 8px;font-size:11px;border:1px solid #d1d5db">${k.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase())}</td><td style="padding:4px 8px;font-size:11px;border:1px solid #d1d5db;font-weight:600">${v}</td></tr>`)
+        .join("");
+      measurementsHtml = `<h3 style="font-size:12px;color:#00703C;margin:16px 0 6px;text-transform:uppercase;letter-spacing:1px">Measurements</h3><table style="width:100%;border-collapse:collapse;border:1px solid #d1d5db"><tr style="background:#f1f5f9"><th style="padding:4px 8px;font-size:10px;font-weight:700;text-align:left">Parameter</th><th style="padding:4px 8px;font-size:10px;font-weight:700;text-align:left">Value</th></tr>${rows}</table>`;
+    }
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Main Street Medical Center - ${studyLbl} Report</title>
+  <style>
+    @page { size: A4; margin: 15mm; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #222; line-height: 1.5; position: relative; min-height: 100vh; }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url('/Images/LOGO.jpg');
+      background-size: 50%;
+      background-repeat: no-repeat;
+      background-position: center;
+      opacity: 0.07;
+      pointer-events: none;
+      z-index: -1;
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
+    }
+    .container { max-width: 800px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div style="text-align:center;margin-bottom:20px;border-bottom:2px solid #00703C;padding-bottom:14px">
+      <h1 style="font-size:22px;color:#00703C;margin:0;font-weight:bold">MAIN STREET MEDICAL CENTER</h1>
+      <p style="font-size:12px;color:#555;margin:4px 0 0">0740944150 / 0785586979</p>
+    </div>
+    <hr style="border:none;border-top:1px solid #ccc;margin:0 0 16px" />
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+      <tr><td style="font-weight:bold;color:#00703C;width:140px;padding:3px 6px">Patient Name:</td><td style="border-bottom:1px solid #e0e0e0;padding:3px 6px">${p.lastName}, ${p.firstName}</td><td style="font-weight:bold;color:#00703C;width:100px;padding:3px 6px">Patient ID:</td><td style="border-bottom:1px solid #e0e0e0;padding:3px 6px">${p.patientNumber}</td></tr>
+      <tr><td style="font-weight:bold;color:#00703C;padding:3px 6px">Age / Sex:</td><td style="border-bottom:1px solid #e0e0e0;padding:3px 6px">${p.age} yrs / ${p.gender === "MALE" ? "Male" : "Female"}</td><td style="font-weight:bold;color:#00703C;padding:3px 6px">Study Type:</td><td style="border-bottom:1px solid #e0e0e0;padding:3px 6px">${studyLbl}</td></tr>
+      <tr><td style="font-weight:bold;color:#00703C;padding:3px 6px">Date of Exam:</td><td style="border-bottom:1px solid #e0e0e0;padding:3px 6px">${formatDate(selectedRequest.createdAt)}</td><td style="font-weight:bold;color:#00703C;padding:3px 6px">Referred By:</td><td style="border-bottom:1px solid #e0e0e0;padding:3px 6px">${selectedRequest.Staff?.fullName || referral}</td></tr>
+      <tr><td style="font-weight:bold;color:#00703C;padding:3px 6px">Priority:</td><td style="border-bottom:1px solid #e0e0e0;padding:3px 6px" colspan="3">${PRIORITY_BADGE[selectedRequest.priority]?.label || selectedRequest.priority}</td></tr>
+    </table>
+
+    <h3 style="font-size:12px;color:#00703C;margin:16px 0 6px;text-transform:uppercase;letter-spacing:1px">Findings</h3>
+    <p style="font-size:12px;color:#333;white-space:pre-wrap;line-height:1.6;margin-bottom:12px">${findings || "No findings recorded."}</p>
+
+    ${impression ? `<h3 style="font-size:12px;color:#00703C;margin:16px 0 6px;text-transform:uppercase;letter-spacing:1px">Impression</h3><p style="font-size:12px;color:#333;white-space:pre-wrap;line-height:1.6;margin-bottom:12px">${impression}</p>` : ""}
+
+    ${conclusion ? `<h3 style="font-size:12px;color:#00703C;margin:16px 0 6px;text-transform:uppercase;letter-spacing:1px">Conclusion</h3><p style="font-size:12px;color:#333;white-space:pre-wrap;line-height:1.6;margin-bottom:12px">${conclusion}</p>` : ""}
+
+    ${measurementsHtml}
+
+    <div style="margin-top:40px;border-top:1px solid #ccc;padding-top:20px;display:flex;justify-content:space-between">
+      <div>
+        <p style="font-size:12px;color:#00703C;font-weight:bold;margin-bottom:4px">Reported By:</p>
+        <div style="border-bottom:1px solid #000;display:inline-block;min-width:220px;padding:3px 8px">&nbsp;</div>
+      </div>
+      <div style="text-align:right">
+        <p style="font-size:12px;color:#00703C;font-weight:bold;margin-bottom:4px">Date</p>
+        <p style="font-size:13px;color:#333">${today}</p>
+      </div>
+    </div>
+  </div>
+  <script>window.onload = function() { window.print(); window.close(); };<\/script>
+</body>
+</html>`;
+
+    const printWin = window.open("", "_blank", "width=800,height=600");
+    if (!printWin) { alert("Please allow pop-ups to print."); return; }
+    printWin.document.write(html);
+    printWin.document.close();
   };
 
   // ── Voice Recording (placeholder) ─────────────────────────────────────
@@ -711,12 +879,20 @@ export default function RadiologyDashboard() {
                   const priorityInfo = PRIORITY_BADGE[req.priority] ?? PRIORITY_BADGE.ROUTINE;
                   const statusInfo = STATUS_BADGE[req.status] ?? STATUS_BADGE.ORDERED;
                   const isSelected = selectedRequest?.id === req.id;
+                  const borderColor = req.isCritical ? "#dc2626"
+                    : req.status === "REPORTED" ? "#22c55e"
+                    : req.status === "IN_PROGRESS" || req.status === "ACCEPTED" ? "#3b82f6"
+                    : req.status === "AWAITING_INTERPRETATION" ? "#f97316"
+                    : req.status === "ORDERED" ? "#eab308"
+                    : "transparent";
+                  const StudyIcon = STUDY_TYPES.find(s => s.value === req.studyType)?.icon ?? Camera;
+                  const canStart = req.status === "ORDERED" || req.status === "ACCEPTED";
                   return (
                     <div key={req.id} onClick={() => handleSelectRequest(req)}
                       style={{
                         padding: "14px 18px", borderBottom: "1px solid #e2e8f0", cursor: "pointer",
                         backgroundColor: isSelected ? "#dcfce7" : req.isCritical ? "#fef2f2" : "white",
-                        borderLeft: `4px solid ${req.isCritical ? "#dc2626" : req.priority === "STAT" ? "#f97316" : "transparent"}`,
+                        borderLeft: `4px solid ${borderColor}`,
                         transition: "all 0.1s",
                       }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
@@ -735,9 +911,14 @@ export default function RadiologyDashboard() {
                           </span>
                         </div>
                       </div>
-                      <p style={{ margin: "0 0 2px", fontSize: "14px", fontWeight: "bold", color: "#1e293b" }}>
-                        {req.Patient.lastName}, {req.Patient.firstName}
-                      </p>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "2px" }}>
+                        <div style={{ width: "22px", height: "22px", borderRadius: "6px", backgroundColor: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#64748b" }}>
+                          <StudyIcon size={13} />
+                        </div>
+                        <p style={{ margin: 0, fontSize: "14px", fontWeight: "bold", color: "#1e293b" }}>
+                          {req.Patient.lastName}, {req.Patient.firstName}
+                        </p>
+                      </div>
                       <div style={{ display: "flex", gap: "8px", fontSize: "11px", color: "#64748b" }}>
                         <span style={{ fontWeight: "600" }}>{studyTypeLabel(req.studyType)}</span>
                         <span>|</span>
@@ -760,6 +941,12 @@ export default function RadiologyDashboard() {
                           <span style={{ backgroundColor: "#f1f5f9", padding: "1px 6px", borderRadius: "4px" }}>
                             <Image size={10} style={{ verticalAlign: "middle", marginRight: "2px" }} />{req.imageCount}
                           </span>
+                        )}
+                        {canStart && (
+                          <button onClick={(e) => { e.stopPropagation(); updateStatus(req.id, "IN_PROGRESS"); handleSelectRequest(req); }}
+                            style={{ marginLeft: "auto", fontSize: "10px", padding: "3px 10px", borderRadius: "6px", border: "none", backgroundColor: "#00703C", color: "white", cursor: "pointer", fontWeight: "bold" }}>
+                            Start
+                          </button>
                         )}
                       </div>
                     </div>
@@ -807,28 +994,65 @@ export default function RadiologyDashboard() {
                       </div>
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    {selectedRequest.status === "ORDERED" && (
-                      <button onClick={() => updateStatus(selectedRequest.id, "ACCEPTED")}
-                        style={{ padding: "8px 16px", borderRadius: "8px", border: "none", backgroundColor: "#3b82f6", color: "white", cursor: "pointer", fontWeight: "bold", fontSize: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                        <CheckCircle size={14} /> Accept Study
-                      </button>
-                    )}
-                    {(selectedRequest.status === "ACCEPTED" || selectedRequest.status === "ORDERED") && (
-                      <button onClick={() => updateStatus(selectedRequest.id, "IN_PROGRESS")}
-                        style={{ padding: "8px 16px", borderRadius: "8px", border: "none", backgroundColor: "#00703C", color: "white", cursor: "pointer", fontWeight: "bold", fontSize: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                        <Activity size={14} /> Begin Exam
-                      </button>
-                    )}
+                  <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    {/* ── 4-Step Workflow Progress Bar ── */}
+                    {(() => {
+                      const statusOrdinal: Record<string, number> = { ORDERED: 0, ACCEPTED: 1, IN_PROGRESS: 2, AWAITING_INTERPRETATION: 3, REPORTED: 4 };
+                      const currentStep = statusOrdinal[selectedRequest.status] ?? 0;
+                      const steps = [
+                        { label: "Accepted", targetStatus: "ACCEPTED", stepNum: 1, onClick: () => updateStatus(selectedRequest.id, "ACCEPTED") },
+                        { label: "Exam In Progress", targetStatus: "IN_PROGRESS", stepNum: 2, onClick: () => updateStatus(selectedRequest.id, "IN_PROGRESS") },
+                        { label: "Report Written", stepNum: 3, isVisual: true },
+                        { label: "Finalized & Sent", stepNum: 4, onClick: () => saveReport(true) },
+                      ];
+                      return (
+                        <div style={{ display: "flex", alignItems: "center", gap: "0" }}>
+                          {steps.map((s, i) => {
+                            const isCompleted = currentStep > s.stepNum;
+                            const isCurrent = currentStep === s.stepNum;
+                            const isLast = i === steps.length - 1;
+                            const circleBg = isCompleted ? "#00703C" : isCurrent ? "#00703C" : "#e2e8f0";
+                            const circleText = isCompleted ? "white" : isCurrent ? "white" : "#94a3b8";
+                            const labelColor = isCompleted ? "#00703C" : isCurrent ? "#00703C" : "#94a3b8";
+                            const showCheck = isCompleted;
+                            return (
+                              <React.Fragment key={s.stepNum}>
+                                <button onClick={s.isVisual ? undefined : s.onClick} disabled={isSaving || selectedRequest.status === "REPORTED"}
+                                  title={s.isVisual ? "" : `Set status to ${s.targetStatus || ""}`}
+                                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "3px", border: "none", background: "none", cursor: s.isVisual ? "default" : "pointer", padding: "0 2px", minWidth: "70px", opacity: isCurrent || isCompleted ? 1 : 0.5 }}>
+                                  <div style={{ width: "28px", height: "28px", borderRadius: "50%", backgroundColor: circleBg, color: circleText, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: "bold", transition: "all 0.2s" }}>
+                                    {showCheck ? <CheckCircle size={15} /> : s.stepNum}
+                                  </div>
+                                  <span style={{ fontSize: "9px", fontWeight: isCurrent ? "bold" : "600", color: labelColor, textAlign: "center", lineHeight: 1.2, textTransform: "uppercase", letterSpacing: "0.3px" }}>
+                                    {s.label}
+                                  </span>
+                                </button>
+                                {!isLast && (
+                                  <div style={{ width: "24px", height: "2px", backgroundColor: isCompleted ? "#00703C" : "#e2e8f0", margin: "0 2px", marginTop: "-14px", transition: "all 0.2s" }} />
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                    <div style={{ width: "1px", height: "28px", backgroundColor: "#e2e8f0", margin: "0 8px" }} />
                     <button onClick={toggleCritical}
-                      style={{ padding: "8px 16px", borderRadius: "8px", border: `1px solid ${selectedRequest.isCritical ? "#dc2626" : "#d0d5dd"}`, backgroundColor: selectedRequest.isCritical ? "#fef2f2" : "white", color: selectedRequest.isCritical ? "#b91c1c" : "#64748b", cursor: "pointer", fontWeight: "bold", fontSize: "12px", display: "flex", alignItems: "center", gap: "6px" }}>
-                      <ShieldAlert size={14} /> {selectedRequest.isCritical ? "Unmark Critical" : "Mark Critical"}
+                      style={{ padding: "6px 12px", borderRadius: "8px", border: `1px solid ${selectedRequest.isCritical ? "#dc2626" : "#d0d5dd"}`, backgroundColor: selectedRequest.isCritical ? "#fef2f2" : "white", color: selectedRequest.isCritical ? "#b91c1c" : "#64748b", cursor: "pointer", fontWeight: "bold", fontSize: "11px", display: "flex", alignItems: "center", gap: "6px", whiteSpace: "nowrap" }}>
+                      <ShieldAlert size={13} /> {selectedRequest.isCritical ? "Unmark Critical" : "Mark Critical"}
                     </button>
                   </div>
                 </div>
 
                 {/* ── Scrollable Detail Content ──────────────────────────────── */}
                 <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+
+                  {successMessage && (
+                    <div style={{ backgroundColor: "#f0fdf4", border: "1px solid #22c55e", borderRadius: "10px", padding: "12px 16px", marginBottom: "16px", display: "flex", alignItems: "center", gap: "10px", color: "#166534", fontSize: "13px", fontWeight: "600" }}>
+                      <CheckCircle size={18} color="#22c55e" />
+                      <span style={{ flex: 1 }}>{successMessage}</span>
+                    </div>
+                  )}
 
                   {/* Study & Referral Info */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
@@ -942,15 +1166,46 @@ export default function RadiologyDashboard() {
                     )}
                   </div>
 
-                  {/* ── Measurements ────────────────────────────────────────── */}
-                  {selectedRequest.measurements && (
-                    <div style={{ backgroundColor: "white", borderRadius: "12px", padding: "16px", border: "1px solid #e2e8f0", marginBottom: "20px" }}>
-                      <h4 style={{ margin: "0 0 10px", fontSize: "11px", fontWeight: "bold", color: "#64748b", textTransform: "uppercase", display: "flex", alignItems: "center", gap: "6px" }}>
-                        <Ruler size={14} /> Measurements & Annotations
+                  {/* ── Measurements Panel (always visible) ──────────────────── */}
+                  <div style={{ backgroundColor: "white", borderRadius: "12px", padding: "16px", border: "1px solid #e2e8f0", marginBottom: "20px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+                      <h4 style={{ margin: 0, fontSize: "11px", fontWeight: "bold", color: "#64748b", textTransform: "uppercase", display: "flex", alignItems: "center", gap: "6px" }}>
+                        <Ruler size={14} /> Measurements
                       </h4>
-                      <div style={{ fontSize: "12px", whiteSpace: "pre-wrap" }}>{selectedRequest.measurements}</div>
+                      <button onClick={handleSaveMeasurements} disabled={isSaving}
+                        style={{ padding: "6px 14px", borderRadius: "8px", border: "1px solid #00703C", backgroundColor: "white", cursor: "pointer", fontSize: "11px", fontWeight: "bold", color: "#00703C", display: "flex", alignItems: "center", gap: "5px" }}>
+                        <Save size={13} /> Save Measurements
+                      </button>
                     </div>
-                  )}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "8px" }}>
+                      {(selectedRequest.studyType === "ULTRASOUND" ? [
+                        { key: "liverSpan", label: "Liver span (cm)" },
+                        { key: "rightKidney", label: "R kidney length (cm)" },
+                        { key: "leftKidney", label: "L kidney length (cm)" },
+                        { key: "spleenSize", label: "Spleen size (cm)" },
+                        { key: "bladderVolume", label: "Bladder volume (ml)" },
+                        { key: "uterusSize", label: "Uterus size (if relevant)" },
+                        { key: "otherMeasurements", label: "Other measurements", wide: true },
+                      ] : selectedRequest.studyType === "ECHOCARDIOGRAPHY" ? [
+                        { key: "ef", label: "EF (%)" },
+                        { key: "lvEndDiastolic", label: "LV end-diastolic diameter (mm)" },
+                        { key: "ivsThickness", label: "IVS thickness (mm)" },
+                        { key: "lvpwThickness", label: "LVPW thickness (mm)" },
+                        { key: "otherMeasurements", label: "Other measurements", wide: true },
+                      ] : selectedRequest.studyType === "X_RAY" ? [
+                        { key: "cardiothoracicRatio", label: "Cardiothoracic ratio" },
+                        { key: "otherMeasurements", label: "Other measurements", wide: true },
+                      ] : [
+                        { key: "otherMeasurements", label: "Other measurements", wide: true },
+                      ]).map(field => (
+                        <div key={field.key} style={{ gridColumn: (field as any).wide ? "1 / -1" : undefined }}>
+                          <label style={{ display: "block", fontSize: "10px", fontWeight: "bold", color: "#64748b", marginBottom: "2px" }}>{field.label}</label>
+                          <input type="text" value={measurementValues[field.key] ?? ""} onChange={e => setMeasurementValues(prev => ({ ...prev, [field.key]: e.target.value }))}
+                            style={{ width: "100%", padding: "7px 10px", border: "1px solid #d0d5dd", borderRadius: "6px", fontSize: "12px", outline: "none", boxSizing: "border-box" }} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
                   {/* ── Report Editor ────────────────────────────────────────── */}
                   <div style={{ backgroundColor: "white", borderRadius: "12px", padding: "20px", border: "1px solid #e2e8f0", marginBottom: "20px" }}>
@@ -996,9 +1251,9 @@ export default function RadiologyDashboard() {
 
                   {/* ── Action Buttons ────────────────────────────────────────── */}
                   <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", paddingBottom: "20px" }}>
-                    <button onClick={() => window.print()}
+                    <button onClick={generateImagingReport}
                       style={{ padding: "10px 20px", borderRadius: "8px", border: "1px solid #d0d5dd", backgroundColor: "white", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "bold", color: "#475569" }}>
-                      <Printer size={15} /> Print
+                      <Printer size={15} /> Print Report
                     </button>
                     <button onClick={() => saveReport(false)} disabled={isSaving}
                       style={{ padding: "10px 20px", borderRadius: "8px", border: "1px solid #00703C", backgroundColor: "white", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "bold", color: "#00703C" }}>

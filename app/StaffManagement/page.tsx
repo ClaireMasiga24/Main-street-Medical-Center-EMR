@@ -34,6 +34,7 @@ const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> 
   CASHIER: { bg: "bg-gray-100", text: "text-gray-800", border: "border-gray-200" },
   SONOGRAPHER: { bg: "bg-teal-100", text: "text-teal-800", border: "border-teal-200" },
   RADIOLOGIST: { bg: "bg-orange-100", text: "text-orange-800", border: "border-orange-200" },
+  RADIOLOGIST_SONOGRAPHER: { bg: "bg-teal-100", text: "text-teal-800", border: "border-teal-200" },
 };
 
 const ROLE_ICON: Record<string, any> = {
@@ -49,6 +50,7 @@ const ROLE_ICON: Record<string, any> = {
   CASHIER: UserIcon,
   SONOGRAPHER: UserIcon,
   RADIOLOGIST: UserIcon,
+  RADIOLOGIST_SONOGRAPHER: UserIcon,
 };
 
 export default function StaffManagementPage() {
@@ -343,8 +345,8 @@ export default function StaffManagementPage() {
               <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Role *</label>
               <select value={formData.role} onChange={(e) => setFormData({ ...formData, role: e.target.value })}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-medium outline-none bg-white focus:border-[#00703C]">
-                {["ADMINISTRATOR","DOCTOR","DENTIST","NURSE_MIDWIFE","LAB_TECHNICIAN","SONOGRAPHER","RADIOLOGIST","RECEPTIONIST","CASHIER","PHARMACIST"].map(r => (
-                  <option key={r} value={r}>{r.replace(/_/g, " ")}</option>
+                {["ADMINISTRATOR","DOCTOR","DENTIST","NURSE_MIDWIFE","LAB_TECHNICIAN","RADIOLOGIST_SONOGRAPHER","RECEPTIONIST","CASHIER","PHARMACIST"].map(r => (
+                  <option key={r} value={r}>{r === "RADIOLOGIST_SONOGRAPHER" ? "RADIOLOGIST/SONOGRAPHER" : r.replace(/_/g, " ")}</option>
                 ))}
               </select>
             </div>

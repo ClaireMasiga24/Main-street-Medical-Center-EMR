@@ -42,6 +42,16 @@ const PANELS: Record<string, { label: string; rows: PanelRow[] }> = {
       { test: "Monocytes", unit: "%", range: "2-8" },
       { test: "Eosinophils", unit: "%", range: "1-4" },
       { test: "Basophils", unit: "%", range: "0-1" },
+      // ── Platelet & RBC indices (analyzer printout, second column) ──
+      { test: "MPV (Mean Platelet Volume)", unit: "fL", range: "7.5-12.0" },
+      { test: "PDW (Platelet Distribution Width)", unit: "%", range: "9.0-17.0" },
+      { test: "PCT (Plateletcrit)", unit: "%", range: "0.108-0.282" },
+      { test: "RDW-SD (Red Cell Distribution Width - SD)", unit: "fL", range: "35.0-56.0" },
+      { test: "P-LCR (Platelet Large Cell Ratio)", unit: "%", range: "11.0-45.0" },
+      // ── Absolute differential counts (analyzer printout) ──
+      { test: "LYM# (Lymphocyte Absolute)", unit: "x10³/µL", range: "1.0-4.0" },
+      { test: "MID# (Mid-range Absolute)", unit: "x10³/µL", range: "0.1-1.5" },
+      { test: "GRAN# (Granulocyte Absolute)", unit: "x10³/µL", range: "2.0-7.5" },
     ],
   },
   URINALYSIS: {
@@ -817,6 +827,19 @@ export default function LaboratoryPage() {
     if (!selectedRequest || selectedDepts.length === 0) { alert("Select at least one recipient."); return; }
     setSendingResults(true);
     try {
+      // Resolve the logged-in user to their Staff record for sharedById
+      let staffId: number | null = null;
+      try {
+        const staffRes = await fetch("/api/staffcreate");
+        if (staffRes.ok) {
+          const staffData = await staffRes.json();
+          if (staffData.success && Array.isArray(staffData.staff)) {
+            const myStaff = staffData.staff.find((s: any) => s.userId === user?.id);
+            if (myStaff?.id) staffId = myStaff.id;
+          }
+        }
+      } catch { /* staff lookup failed — sharedById will be null */ }
+
       const alreadyCompleted = selectedRequest.status === "COMPLETED";
       if (!alreadyCompleted) {
         await callLabApi("VALIDATE_RESULTS", {
@@ -830,7 +853,7 @@ export default function LaboratoryPage() {
         await callLabApi("SHARE_RESULT", {
           labRequestId: selectedRequest.id,
           patientId: selectedRequest.patientId,
-          sharedById: user?.id || 1,
+          sharedById: staffId,
           sharedByName: user?.fullName || "Lab Technician",
           targetDept: dept,
           includeReport: true,
@@ -1119,7 +1142,7 @@ export default function LaboratoryPage() {
                     </button>
                   </div>
                 )}
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto overflow-y-visible">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b-2" style={{ borderColor: BRAND }}>
@@ -1128,7 +1151,7 @@ export default function LaboratoryPage() {
                         <th className="text-left py-3 px-2 font-semibold text-gray-700">Result</th>
                         <th className="text-left py-3 px-2 font-semibold text-gray-700">Unit</th>
                         <th className="text-left py-3 px-2 font-semibold text-gray-700">Reference Range</th>
-                        <th className="text-center py-3 px-2 font-semibold text-gray-700">Flag</th>
+                        <th className="text-center py-3 px-2 font-semibold text-gray-700 whitespace-nowrap" style={{ minWidth: 52 }}>Flag</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1154,13 +1177,14 @@ export default function LaboratoryPage() {
                                     ? "border-green-300 bg-green-50 focus:ring-green-200"
                                     : "border-gray-200 focus:ring-blue-200"
                                 }`}
+                                style={{ minWidth: 70 }}
                               />
                             </td>
                             <td className="py-2 px-2 text-gray-500 text-xs">{row.unit}</td>
                             <td className="py-2 px-2 text-gray-500 text-xs font-mono">{row.referenceRange}</td>
-                            <td className="py-2 px-2 text-center">
+                            <td className="py-2 px-2 text-center whitespace-nowrap" style={{ minWidth: 52 }}>
                               {row.flag && (
-                                <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded border ${flagColor}`}>
+                                <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded border whitespace-nowrap ${flagColor}`}>
                                   {row.flag}
                                 </span>
                               )}

@@ -531,7 +531,7 @@ model ResultShare {
   id            Int        @id @default(autoincrement())
   labRequestId  Int
   patientId     Int
-  sharedById    Int
+  sharedById    Int?
   sharedByName  String
   targetUserId  Int?
   targetDept    String
@@ -541,7 +541,7 @@ model ResultShare {
   viewedAt      DateTime?
   LabRequest    LabRequest @relation(fields: [labRequestId], references: [id], onDelete: Cascade)
   Patient       Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  Staff         Staff      @relation(fields: [sharedById], references: [id])
+  Staff         Staff?     @relation(fields: [sharedById], references: [id])
 }
 
 model Prescription {
