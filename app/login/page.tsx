@@ -159,6 +159,7 @@ export default function LoginPage() {
                 <option value="ADMINISTRATOR">Administrator</option>
                 <option value="NURSE_MIDWIFE">Nurse/Midwife</option>
                 <option value="DOCTOR">Doctor</option>
+                <option value="CLEANER">Cleaner</option>
                 <option value="LAB_TECHNICIAN">Lab Technician</option>
                 <option value="RADIOLOGIST_SONOGRAPHER">Radiologist/Sonographer</option>
                 <option value="DENTIST">Dentist</option>
