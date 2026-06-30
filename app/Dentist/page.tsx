@@ -1682,7 +1682,27 @@ export default function DentistPage() {
             ) : (
               <ul className="divide-y divide-slate-50">
                 {appointments.map((a: any) => (
-                  <li key={a.id} className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-colors">
+                  <li key={a.id} onClick={() => {
+                      if (!a.Patient) return;
+                      openPatient({
+                        id: a.Patient.id,
+                        patientNumber: a.Patient.patientNumber ?? "",
+                        firstName: a.Patient.firstName ?? "",
+                        lastName: a.Patient.lastName ?? "",
+                        gender: a.Patient.gender ?? "OTHER",
+                        age: a.Patient.age ?? 0,
+                        dateOfBirth: null,
+                        phoneNumber: a.Patient.phoneNumber ?? null,
+                        address: null,
+                        isEmergency: false,
+                        currentStatus: "AWAITING_DENTIST",
+                        updatedAt: new Date().toISOString(),
+                        Visit: [],
+                        DentalRecord: [],
+                      });
+                    }}
+                    className="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-colors cursor-pointer"
+                  >
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0 ${
                       a.status === "CANCELLED" ? "bg-red-100 text-red-500" :
                       a.status === "COMPLETED" ? "bg-green-100 text-green-600" :
@@ -1705,11 +1725,24 @@ export default function DentistPage() {
                           {a.status}
                         </span>
                       </div>
-                      <div className="text-xs text-slate-400 mt-0.5">
-                        {a.Patient?.patientNumber} · {new Date(a.appointmentDate).toLocaleTimeString("en-UG", { hour: "2-digit", minute: "2-digit" })}
-                        {a.Patient?.phoneNumber && ` · ${a.Patient.phoneNumber}`}
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-0.5">
+                        {a.Patient?.patientNumber}
+                        {a.Patient?.phoneNumber && <><span className="text-slate-300">·</span> {a.Patient.phoneNumber}</>}
                       </div>
-                      {a.reason && <div className="text-xs text-slate-500 mt-1">{a.reason}</div>}
+                      {/* Appointment time — prominent */}
+                      <div className="flex items-center gap-1.5 mt-1.5 text-sm font-bold text-[#00703C] bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200 w-fit">
+                        <Clock size={14} />
+                        <span>{new Date(a.appointmentDate).toLocaleTimeString("en-UG", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}</span>
+                        <span className="text-xs font-normal text-slate-500 ml-1">
+                          — {new Date(a.appointmentDate).toLocaleDateString("en-UG", {
+                            weekday: "short", day: "numeric", month: "short"
+                          })}
+                        </span>
+                      </div>
+                      {a.reason && <div className="text-xs text-slate-600 mt-1.5 font-medium">{a.reason}</div>}
                       {a.notes && <div className="text-[11px] text-slate-400 mt-0.5 italic">{a.notes}</div>}
                       {a.Staff && <div className="text-[10px] text-slate-400 mt-0.5">with {a.Staff.fullName}</div>}
                     </div>

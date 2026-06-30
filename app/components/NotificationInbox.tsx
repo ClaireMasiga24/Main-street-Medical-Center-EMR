@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Bell, XCircle, CheckCircle, MessageSquare, FlaskConical, Send, AlertTriangle, RefreshCw, FileText, ExternalLink } from "lucide-react";
+import { Bell, XCircle, CheckCircle, MessageSquare, FlaskConical, Send, AlertTriangle, RefreshCw, FileText, ExternalLink, Stethoscope } from "lucide-react";
 
 interface LabRequestData {
   testName: string;
@@ -159,6 +159,14 @@ export default function NotificationInbox({
 
   const handleViewPatient = (e: React.MouseEvent, patientId: number) => {
     e.stopPropagation();
+    if (onNotificationClick) {
+      const notif = notifications.find((n) => n.patientId === patientId) || selectedNotif;
+      if (notif) {
+        setIsOpen(false);
+        onNotificationClick(notif);
+        return;
+      }
+    }
     window.open(`/receptionist?patientId=${patientId}`, "_blank");
   };
 
@@ -472,15 +480,29 @@ export default function NotificationInbox({
                     )}
                   </div>
 
-                  {/* Open patient button */}
-                  {selectedNotif.patientId && (
-                    <button
-                      onClick={(e) => handleViewPatient(e, selectedNotif.patientId!)}
-                      className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-[#00803F]/10 text-[#00803F] text-xs font-bold hover:bg-[#00803F]/20 transition-colors"
-                    >
-                      <ExternalLink size={12} /> Open Patient Record
-                    </button>
-                  )}
+                  {/* Action buttons */}
+                  <div className="flex flex-col gap-2">
+                    {onNotificationClick && selectedNotif.patientId && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsOpen(false);
+                          onNotificationClick(selectedNotif);
+                        }}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-[#00803F] text-white text-xs font-bold hover:bg-emerald-700 transition-colors"
+                      >
+                        <Stethoscope size={14} /> Open in Consultation & Treat Patient
+                      </button>
+                    )}
+                    {selectedNotif.patientId && (
+                      <button
+                        onClick={(e) => handleViewPatient(e, selectedNotif.patientId!)}
+                        className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-[#00803F]/10 text-[#00803F] text-xs font-bold hover:bg-[#00803F]/20 transition-colors"
+                      >
+                        <ExternalLink size={12} /> Open Patient Record
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (

@@ -54,8 +54,18 @@ export async function GET(req: NextRequest) {
         waitingMinutes < 60 ? `${waitingMinutes}m` :
         `${Math.floor(waitingMinutes / 60)}h ${waitingMinutes % 60}m`;
 
+      const DEPT_SOURCE_MAP: Record<string, string> = {
+        "Lab": "Lab Referral",
+        "Radiology": "Radiology Referral",
+        "Sonography": "Sonography Referral",
+        "Dentist": "Dentist Referral",
+        "Nurse": "Nurse Referral",
+      };
+
       let source = "Triage";
-      if (p.isEmergency) source = "Emergency";
+      if (p.lastSharedFromDept) {
+        source = DEPT_SOURCE_MAP[p.lastSharedFromDept] || `${p.lastSharedFromDept} Referral`;
+      } else if (p.isEmergency) source = "Emergency";
       else if (p.Appointment?.length > 0) source = "Appointment";
       else if (p.LabRequest?.length > 0) source = "Lab Referral";
       else if (p.ImagingRequest?.length > 0) source = "Radiology Referral";
@@ -70,6 +80,7 @@ export async function GET(req: NextRequest) {
         phoneNumber: p.phoneNumber ?? null,
         isEmergency: p.isEmergency,
         currentStatus: p.currentStatus,
+        lastSharedFromDept: p.lastSharedFromDept ?? null,
         updatedAt: p.updatedAt.toISOString(),
         waitingMinutes,
         waitingDisplay,
@@ -80,6 +91,7 @@ export async function GET(req: NextRequest) {
         pendingLabs: p.LabRequest?.length ?? 0,
         pendingImaging: p.ImagingRequest?.length ?? 0,
         hasAppointment: (p.Appointment?.length ?? 0) > 0,
+        appointmentTime: p.Appointment?.[0]?.appointmentDate?.toISOString() ?? null,
       };
     });
 

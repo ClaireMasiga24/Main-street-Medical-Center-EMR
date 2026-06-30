@@ -34,6 +34,7 @@ body {
     visibility: visible;
   }
   .print-area {
+    display: block !important;
     position: fixed;
     inset: 0;
     padding: 40px;

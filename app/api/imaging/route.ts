@@ -153,17 +153,43 @@ export async function PATCH(request: Request) {
 	    // is being finalized, we could update the patient status here
 	    // (keeping it flexible — the requesting workflow controls the status)
 
-	    // Optional notification to a department (e.g. notify DOCTOR when report finalized)
-	    if (updates.notifyDepartment) {
-	      await createNotification({
-	        department: updates.notifyDepartment,
-	        title: "Imaging Report Ready",
-	        message: updates.notifyMessage || `Imaging report finalized for patient`,
-	        type: "RESULT_READY",
-	      }).catch((e: any) => console.error("[Imaging] notify error", e));
-	    }
+		    // Optional notification to a department (e.g. notify DOCTOR when report finalized)
+		    if (updates.notifyDepartment) {
+		      await createNotification({
+		        department: updates.notifyDepartment,
+		        title: "Imaging Report Ready",
+		        message: updates.notifyMessage || `Imaging report finalized for patient`,
+		        type: "RESULT_READY",
+		      }).catch((e: any) => console.error("[Imaging] notify error", e));
+		    }
 
-    return NextResponse.json(updated);
+		    // Route patient back to doctor and record which department shared
+		    if (updates.routeToDoctor && updated.patientId) {
+		      const dept = updated.studyType?.toUpperCase().includes("ULTRASOUND") ? "Sonography" : "Radiology";
+		      await prisma.patient.update({
+		        where: { id: updated.patientId },
+		        data: { currentStatus: "AWAITING_DOCTOR", lastSharedFromDept: dept },
+		      });
+		      await createNotification({
+		        department: "Doctor",
+		        title: `${dept} Report Ready — Patient Returned`,
+		        message: updates.notifyMessage || `Imaging report finalized. Patient routed back to Doctor.`,
+		        type: "RESULT_READY",
+		        patientId: updated.patientId,
+		      }).catch((e: any) => console.error("[Imaging] routeToDoctor notify error", e));
+		      await prisma.patientTimeline.create({
+		        data: {
+		          patientId: updated.patientId,
+		          action: "TRANSFER",
+		          fromDepartment: dept,
+		          toDepartment: "Doctor",
+		          description: `${dept} report completed. Patient routed back to Doctor.`,
+		          performedBy: updates.reportedById ? "Imaging Staff" : "System",
+		        },
+		      }).catch((e: any) => console.error("[Imaging] routeToDoctor timeline error", e));
+		    }
+
+	    return NextResponse.json(updated);
   } catch (err: any) {
     console.error("[Imaging PATCH]", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

@@ -64,9 +64,15 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true, appointment });
-  } catch (err) {
+  } catch (err: any) {
     console.error("[appointments POST]", err);
-    return NextResponse.json({ error: "Failed to create appointment." }, { status: 500 });
+    const details = process.env.NODE_ENV === "development"
+      ? { message: err?.message || "Unknown error", code: err?.code || "" }
+      : undefined;
+    return NextResponse.json({
+      error: "Failed to create appointment.",
+      ...(details && { details }),
+    }, { status: 500 });
   }
 }
 

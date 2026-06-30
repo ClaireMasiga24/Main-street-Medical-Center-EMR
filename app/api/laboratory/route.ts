@@ -354,6 +354,50 @@ export async function POST(req: Request) {
         return NextResponse.json(share, { status: 201 });
       }
 
+      case "SHARE_RESULT_AND_ROUTE_TO_DOCTOR": {
+        const { labRequestId, patientId, sharedById, sharedByName, targetUserId, targetDept, includeReport, note } = payload;
+        if (!labRequestId || !patientId || !sharedByName || !targetDept) {
+          return NextResponse.json({ error: "labRequestId, patientId, sharedByName, and targetDept are required" }, { status: 400 });
+        }
+        // 1. Create ResultShare record
+        const shareResult = await prisma.resultShare.create({
+          data: {
+            labRequestId: parseInt(labRequestId), patientId: parseInt(patientId),
+            sharedById: sharedById ? parseInt(sharedById) : null, sharedByName,
+            targetUserId: targetUserId ? parseInt(targetUserId) : null, targetDept,
+            includeReport: includeReport !== false, note: note || null,
+          },
+        });
+        // 2. Route patient back to doctor and record which department shared
+        await prisma.patient.update({
+          where: { id: parseInt(patientId) },
+          data: { currentStatus: "AWAITING_DOCTOR", lastSharedFromDept: "Lab" },
+        });
+        // 3. Notify the doctor
+        await createNotification({
+          department: "Doctor",
+          title: "Lab Results Shared — Patient Returned",
+          message: `${sharedByName} shared lab results and sent patient back to doctor${note ? `: ${note}` : ""}`,
+          type: "RESULT_SHARED", referenceId: parseInt(labRequestId), referenceType: "lab_request", patientId: parseInt(patientId),
+        });
+        // 4. Log to timeline
+        const labReqInfo = await prisma.labRequest.findUnique({
+          where: { id: parseInt(labRequestId) },
+          select: { testName: true },
+        });
+        await prisma.patientTimeline.create({
+          data: {
+            patientId: parseInt(patientId),
+            action: "TRANSFER",
+            fromDepartment: "Laboratory",
+            toDepartment: "Doctor",
+            description: `Lab results shared for ${labReqInfo?.testName || "test"}. Patient routed back to Doctor.`,
+            performedBy: sharedByName,
+          },
+        });
+        return NextResponse.json(shareResult, { status: 201 });
+      }
+
       case "SEND_COMMUNICATION": {
         const { labRequestId, patientId, messageType, message, senderId, senderName, senderDept, recipientDept } = payload;
         if (!message || !senderId || !senderName) return NextResponse.json({ error: "message, senderId, and senderName are required" }, { status: 400 });

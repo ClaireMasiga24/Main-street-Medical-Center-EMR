@@ -726,6 +726,7 @@ function AppointmentsPanel({ staffId, patients }: { staffId: string | null; pati
         body: JSON.stringify({
           patientId: formPatientId,
           staffId: formStaffId,
+          createdById: staffId ? parseInt(staffId) : null,
           department: formDepartment,
           appointmentDate: new Date(formDateTime).toISOString(),
           reason: formReason || null,
@@ -983,7 +984,7 @@ function AppointmentsPanel({ staffId, patients }: { staffId: string | null; pati
 
 // ─── CashierPOS ───────────────────────────────────────────────────────────────
 
-function CashierPOS({ patients }: { patients: Patient[] }) {
+function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; directBillPatient?: Patient | null }) {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [patientSearch, setPatientSearch] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
@@ -1037,6 +1038,15 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
 
   const canConfirm = !!selectedPatient && billLines.length > 0;
   const canPay = invoiceConfirmed && (paymentMethod !== "CASH" || tendered >= total);
+
+  // ── Auto-select patient for direct billing ──────────────────────────────
+  useEffect(() => {
+    if (directBillPatient) {
+      setSelectedPatient(directBillPatient);
+      setPatientSearch("");
+      setInvoiceConfirmed(false);
+    }
+  }, [directBillPatient]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -1127,6 +1137,135 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // ── Build standalone receipt HTML (used by both print & download) ───────
+  const buildReceiptHtml = (forPrint: boolean) => {
+    if (!selectedPatient) return "";
+    const now = new Date();
+    const dateStr = now.toLocaleDateString("en-UG", { day: "2-digit", month: "short", year: "numeric" });
+    const timeStr = now.toLocaleTimeString("en-UG", { hour: "2-digit", minute: "2-digit" });
+    const itemsHtml = billLines
+      .map(
+        (l) =>
+          `<tr>
+            <td style="padding:3px 4px;font-size:10px;line-height:1.4">${l.description}</td>
+            <td style="padding:3px 4px;font-size:10px;text-align:center">${l.qty}</td>
+            <td style="padding:3px 4px;font-size:10px;text-align:right">${formatUGX(l.unitPrice)}</td>
+            <td style="padding:3px 4px;font-size:10px;text-align:right;font-weight:600">${formatUGX(l.subtotal)}</td>
+          </tr>`
+      )
+      .join("");
+
+    let paymentExtraHtml = "";
+    if (paymentMethod === "CASH") {
+      paymentExtraHtml = `
+        <tr><td style="color:#64748b;padding:2px 4px;font-size:10px">Tendered</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:600">${formatUGX(tendered)}</td></tr>
+        <tr><td style="color:#64748b;padding:2px 4px;font-size:10px">Change</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:700;color:#059669">${formatUGX(change)}</td></tr>`;
+    }
+    if ((paymentMethod === "MOBILE_MONEY" || paymentMethod === "CARD") && paymentReference) {
+      paymentExtraHtml += `<tr><td colspan="2" style="padding:2px 4px;font-size:9px;color:#64748b">Ref: ${paymentReference}</td></tr>`;
+    }
+    if (paymentMethod === "INSURANCE" && insuranceProvider) {
+      paymentExtraHtml += `<tr><td colspan="2" style="padding:2px 4px;font-size:9px;color:#64748b">Provider: ${insuranceProvider}${insurancePolicyNumber ? ` &middot; Policy: ${insurancePolicyNumber}` : ""}</td></tr>`;
+    }
+
+    const autoPrintScript = forPrint
+      ? '<script>window.onload=function(){window.setTimeout(function(){window.print();window.close()},400)};<\/script>'
+      : "";
+
+    return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Receipt - ${savedInvoiceNumber}</title>
+	<style>
+	  @page { margin: 12mm; }
+	  body { margin:0; padding:0; font-family:'Courier New',monospace; color:#1e293b; print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+	  .watermark { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:-1; opacity:0.1; }
+	  .watermark img { width:50%; height:auto; max-width:400px; }
+	  .header { text-align:center; margin-bottom:16px; padding-bottom:12px; border-bottom:2px dashed #cbd5e1; }
+  .header h1 { font-size:16px; font-weight:800; margin:0; text-transform:uppercase; letter-spacing:1px; }
+  .header p { font-size:9px; color:#64748b; margin:2px 0 0 0; }
+  .title { text-align:center; margin-bottom:12px; }
+  .title h2 { font-size:14px; font-weight:800; margin:0; text-transform:uppercase; letter-spacing:1.5px; color:#00703C; }
+  table.info { width:100%; font-size:10px; margin-bottom:8px; border-collapse:collapse; }
+  table.info td { padding:2px 4px; }
+  table.info td:first-child { color:#94a3b8; white-space:nowrap; }
+  table.info td:last-child { font-weight:700; text-align:right; }
+  .items-header { border-top:1px solid #e2e8f0; border-bottom:2px solid #1e293b; margin:8px 0; padding:4px 0; }
+  .items-header table { width:100%; border-collapse:collapse; }
+  .items-header th { font-size:9px; color:#64748b; text-transform:uppercase; padding:4px; }
+  table.items { width:100%; border-collapse:collapse; }
+  table.items td { border-bottom:1px dotted #e2e8f0; }
+  table.totals { width:100%; font-size:11px; margin-top:4px; border-collapse:collapse; }
+  table.totals td { padding:3px 4px; }
+  .footer { border-top:2px dashed #cbd5e1; margin-top:16px; padding-top:8px; text-align:center; font-size:8px; color:#94a3b8; }
+  .footer p { margin:2px 0; }
+</style></head>
+<body>
+  <div class="watermark"><img src="/Images/LOGO.jpg" alt="" /></div>
+  <div class="header">
+    <h1>Main Street Medical Center</h1>
+    <p>Commitment to Good Health</p>
+    <p>P.O. Box &mdash; Kampala, Uganda</p>
+  </div>
+  <div class="title"><h2>Payment Receipt</h2></div>
+  <table class="info">
+    <tr><td>Invoice:</td><td>${savedInvoiceNumber}</td></tr>
+    <tr><td>Patient:</td><td>${selectedPatient.lastName}, ${selectedPatient.firstName}</td></tr>
+    <tr><td>ID:</td><td style="color:#00703C">${selectedPatient.patientNumber}</td></tr>
+    <tr><td>Date:</td><td>${dateStr}</td></tr>
+    <tr><td>Time:</td><td>${timeStr}</td></tr>
+    <tr><td>Method:</td><td>${paymentMethod.replace("_", " ")}</td></tr>
+  </table>
+  <div class="items-header">
+    <table><tr>
+      <th style="text-align:left;width:45%">Item</th>
+      <th style="text-align:center;width:12%">Qty</th>
+      <th style="text-align:right;width:20%">Price</th>
+      <th style="text-align:right;width:23%">Total</th>
+    </tr></table>
+  </div>
+  <table class="items">${itemsHtml}</table>
+  <table class="totals">
+    <tr><td style="font-weight:800;text-transform:uppercase;font-size:13px">Total Due</td><td style="font-weight:800;text-align:right;font-size:13px;color:#00703C">${formatUGX(total)}</td></tr>
+    ${paymentExtraHtml}
+  </table>
+  <div class="footer">
+    <p>Thank you for choosing Main Street Medical Center</p>
+    <p>This is a computer-generated receipt</p>
+  </div>
+  ${autoPrintScript}
+</body></html>`;
+  };
+
+	  // ── Print receipt using a hidden iframe (no popup, no save-to-PC) ──────
+	  const iframeRef = useRef<HTMLIFrameElement>(null);
+	  const handlePrintReceipt = () => {
+	    const html = buildReceiptHtml(false);
+	    if (!html) return;
+	    const iframe = iframeRef.current;
+	    if (!iframe) return;
+	    iframe.srcdoc = html;
+	    iframe.onload = () => {
+	      setTimeout(() => {
+	        try { iframe.contentWindow?.print(); } catch { alert("Print failed. Try using Download instead."); }
+	      }, 300);
+	    };
+	  };
+
+  // ── Download receipt as an HTML file ────────────────────────────────────
+  const handleDownloadReceipt = () => {
+    const html = buildReceiptHtml(false);
+    if (!html) return;
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Receipt-${savedInvoiceNumber || "receipt"}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const handleNewBill = () => {
@@ -1559,10 +1698,14 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
                 <span className="text-slate-500">Method</span>
                 <span className="font-bold">{paymentMethod.replace("_", " ")}</span>
               </div>
-              <div className="border-t border-dashed border-slate-200 pt-3 space-y-1">
-                <div className="flex justify-between text-[10px] text-slate-400">
-                  <span>Medical Services (itemized bill internal)</span>
-                </div>
+              <div className="border-t border-dashed border-slate-200 pt-3 space-y-1.5">
+                <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Items</div>
+                {billLines.map((line) => (
+                  <div key={line.id} className="flex justify-between text-[10px]">
+                    <span className="truncate text-slate-600">{line.description}</span>
+                    <span className="font-bold text-slate-700 flex-shrink-0 ml-2">{formatUGX(line.subtotal)}</span>
+                  </div>
+                ))}
               </div>
               <div className="border-t border-slate-200 pt-2 flex justify-between font-extrabold text-lg">
                 <span>TOTAL BILL</span><span className="text-[#00703C]">{formatUGX(total)}</span>
@@ -1580,9 +1723,13 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
               )}
             </div>
             <div className="flex gap-2 px-6 pb-5">
-              <button onClick={() => window.print()}
+              <button onClick={handlePrintReceipt}
                 className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50 transition">
                 <Printer size={12} /> Print Receipt
+              </button>
+              <button onClick={handleDownloadReceipt}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-3 text-[10px] font-extrabold uppercase tracking-wider text-[#00703C] hover:bg-emerald-50 transition">
+                <FileText size={12} /> Download
               </button>
               <button onClick={handleNewBill}
                 className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#00703C] py-3 text-[10px] font-extrabold uppercase tracking-wider text-white hover:bg-emerald-800 transition">
@@ -1591,11 +1738,16 @@ function CashierPOS({ patients }: { patients: Patient[] }) {
             </div>
           </div>
         </div>
-	      )}
-	    </div>
-	  </div>
-	  );
-}
+		      )}
+
+
+			      {/* ── Hidden iframe for seamless receipt printing ── */}
+			      <iframe ref={iframeRef} style={{ position: "absolute", width: 0, height: 0, border: "none" }} title="print-frame" />
+
+			    </div>
+			  </div>
+			  );
+		}
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
@@ -1609,6 +1761,8 @@ export default function ReceptionistPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [isRouting, setIsRouting] = useState(false);
+  const [billPatient, setBillPatient] = useState<Patient | null>(null);
+  const [directBillKey, setDirectBillKey] = useState(0);
 
   const [staffId, setStaffId] = useState<string | null>(null);
 
@@ -1760,6 +1914,13 @@ export default function ReceptionistPage() {
     } finally {
       setIsRouting(false);
     }
+  };
+
+  // ── Direct Billing — switch to cashier tab with patient pre-selected ──────
+  const handleDirectBill = (patient: Patient) => {
+    setBillPatient(patient);
+    setDirectBillKey((k) => k + 1);
+    setActiveTab("cashier");
   };
 
   const filteredPatients = patients.filter((p) =>
@@ -1968,6 +2129,17 @@ export default function ReceptionistPage() {
                         ))}
                       </div>
 
+                      {/* Direct Billing — separate action below route grid */}
+                      <div className="border-t border-slate-100 pt-3 mt-3">
+                        <button
+                          onClick={() => handleDirectBill(selectedPatient)}
+                          className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 py-3 text-[10px] font-extrabold uppercase tracking-wide text-white hover:bg-amber-600 transition-all"
+                        >
+                          <Receipt size={14} />
+                          Direct Billing
+                        </button>
+                      </div>
+
                       {/* Current status indicator */}
                       <p className="text-[9px] text-slate-400 text-center pt-1">
                         Highlighted button = current station · Greyed = already there
@@ -2108,7 +2280,7 @@ export default function ReceptionistPage() {
         )}
 
         {/* ── CASHIER TAB ───────────────────────────────────────────────────── */}
-        {activeTab === "cashier" && <CashierPOS patients={patients} />}
+        {activeTab === "cashier" && <CashierPOS key={directBillKey} patients={patients} directBillPatient={billPatient} />}
 
         {/* ── STAFF ATTENDANCE TAB ──────────────────────────────────────────── */}
         {activeTab === "attendance" && <StaffAttendancePanel />}

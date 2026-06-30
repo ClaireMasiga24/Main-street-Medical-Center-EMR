@@ -175,6 +175,7 @@ export async function POST(req: NextRequest) {
         where: { id: patientId },
         data: {
           currentStatus: newStatus,
+          lastSharedFromDept: routeTo === "DOCTOR" || routeTo === "SPECIALIST" ? "Dentist" : undefined,
           updatedAt: new Date(),
         },
       });

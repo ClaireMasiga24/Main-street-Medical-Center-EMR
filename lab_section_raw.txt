@@ -1,0 +1,30 @@
+﻿                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Lab Orders</label>
+
+
+                    <div className="flex flex-wrap gap-1.5">
+
+
+                      {["FBC", "Urinalysis", "Blood glucose", "Malaria RDT", "HIV", "LFTs", "RFTs"].map((t) => (
+
+
+                        <label key={t} className={`text-[10px] px-2 py-1 rounded-full border cursor-pointer transition-colors ${reviewForm.labOrders.includes(t) ? "bg-[#0a2e1a] text-white border-[#0a2e1a]" : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"}`}>
+
+
+                          <input type="checkbox" className="hidden" checked={reviewForm.labOrders.includes(t)} onChange={() => {
+    toggleLabOrder(t);
+  }} />
+
+
+                          {t}
+
+
+                        </label>
+
+
+                      ))}
+
+
+                    </div>
+
+
+                  </div>

@@ -36,6 +36,7 @@ model Patient {
   address               String?
   isEmergency           Boolean                @default(false)
   currentStatus         PatientStatus          @default(AWAITING_TRIAGE)
+  lastSharedFromDept    String?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   sentToTreatmentRoom   Boolean                @default(false)
