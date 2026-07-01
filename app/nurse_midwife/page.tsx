@@ -3,12 +3,13 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import NotificationInbox from "../components/NotificationInbox";
 import StaffMessaging from "../components/StaffMessaging";
 import {
-	  Activity, Baby, FileText, LogOut, Pill, Printer, PlusCircle, Trash2,
-	  RefreshCw, Phone, User, Clock, AlertTriangle, X, Thermometer,
-	  Droplets, Heart, Wind, Scale, Ruler, Eye, AlertCircle, Stethoscope,
-	  ArrowRight, CheckCircle, Save, ClipboardList, Calendar, Loader2,
-	  Syringe, ChevronRight, Circle
-} from "lucide-react";
+		  Activity, Baby, FileText, LogOut, Pill, Printer, PlusCircle, Trash2,
+		  RefreshCw, Phone, User, Clock, AlertTriangle, X, Thermometer,
+		  Droplets, Heart, Wind, Scale, Ruler, Eye, AlertCircle, Stethoscope,
+		  ArrowRight, CheckCircle, Save, ClipboardList, Calendar, Loader2,
+		  Syringe, ChevronRight, Circle, Search, Filter, Package, Edit3,
+		  DollarSign, Archive, ChevronLeft, Plus, MinusCircle
+		} from "lucide-react";
 import { useRouter } from "next/navigation";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -163,6 +164,12 @@ export default function NurseMidwifeDashboard() {
   const [medFormTime, setMedFormTime] = useState("");
   // ── Mobile sidebar state ─────────────────────────────────────────────
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // ── Share Patient state ─────────────────────────────────────────────────
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [sharePatient, setSharePatient] = useState<any>(null);
+  const [shareTargetDept, setShareTargetDept] = useState("doctor");
+  const [shareNotes, setShareNotes] = useState("");
+  const [shareSaving, setShareSaving] = useState(false);
   // ── Doctor Records Modal state ──────────────────────────────────────────
   const [showDoctorModal, setShowDoctorModal] = useState(false);
   const [doctorModalPatient, setDoctorModalPatient] = useState<any>(null);
@@ -189,6 +196,43 @@ export default function NurseMidwifeDashboard() {
   const setAncField = (field: string, value: any) => {
     setAncForm((prev: any) => ({ ...prev, [field]: value }));
   };
+
+  // ── Pharmacy state ─────────────────────────────────────────────────────────
+  const [pharmacyPatients, setPharmacyPatients] = useState<any[]>([]);
+  const [pharmacyLoading, setPharmacyLoading] = useState(false);
+  const [pharmacyError, setPharmacyError] = useState<string | null>(null);
+  const [showPharmacyModal, setShowPharmacyModal] = useState(false);
+  const [pharmacySelectedPatient, setPharmacySelectedPatient] = useState<any>(null);
+  const [pharmacySaving, setPharmacySaving] = useState(false);
+
+  // ── Pharmacy Inventory state ─────────────────────────────────────────────────
+  const [pharmacySubTab, setPharmacySubTab] = useState<"inventory" | "prescriptions">("inventory");
+  const [drugs, setDrugs] = useState<any[]>([]);
+  const [drugsLoading, setDrugsLoading] = useState(false);
+  const [drugsError, setDrugsError] = useState<string | null>(null);
+  const [drugSearch, setDrugSearch] = useState("");
+  const [drugCategoryFilter, setDrugCategoryFilter] = useState("all");
+  const [drugPage, setDrugPage] = useState(1);
+  const [drugTotal, setDrugTotal] = useState(0);
+  const [drugTotalPages, setDrugTotalPages] = useState(1);
+  const [uncountedCount, setUncountedCount] = useState(0);
+  const [dispenseLog, setDispenseLog] = useState<any[]>([]);
+  const [dispenseLogLoading, setDispenseLogLoading] = useState(false);
+  // Modal states
+  const [showAddDrugModal, setShowAddDrugModal] = useState(false);
+  const [showEditDrugModal, setShowEditDrugModal] = useState(false);
+  const [showRestockModal, setShowRestockModal] = useState(false);
+  const [showDispenseModal, setShowDispenseModal] = useState(false);
+  const [showCustomPriceModal, setShowCustomPriceModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [selectedDrug, setSelectedDrug] = useState<any>(null);
+  // Drug modal form fields
+  const [drugForm, setDrugForm] = useState({
+    name: "", category: "Drug", costCentre: "Pharmacy",
+    buyingCost: "", sellingPrice: "", stockQuantity: "", reorderLevel: "10",
+    customPrice: "", quantity: "", dispensedTo: "", notes: "", nurseName: ""
+  });
+  const [drugSaving, setDrugSaving] = useState(false);
 
   // Auto-calc EDD from LMP (280 days / 40 weeks)
   useEffect(() => {
@@ -224,6 +268,27 @@ export default function NurseMidwifeDashboard() {
     return () => clearInterval(i);
   }, [fetchAncPatients]);
 
+  // ── Pharmacy fetch ─────────────────────────────────────────────────────────
+  const fetchPharmacyPatients = useCallback(async () => {
+    setPharmacyLoading(true); setPharmacyError(null);
+    try {
+      const res = await fetch("/api/pharmacy");
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Server error (${res.status})`);
+      }
+      const data = await res.json();
+      setPharmacyPatients(data.patients ?? []);
+    } catch (err: any) { setPharmacyError(err.message || "Could not reach server"); }
+    finally { setPharmacyLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    fetchPharmacyPatients();
+    const i = setInterval(fetchPharmacyPatients, 30_000);
+    return () => clearInterval(i);
+  }, [fetchPharmacyPatients]);
+
   const handleBeginAnc = (patient: any) => {
     setAncSelectedPatient(patient);
     setAncForm(emptyAncForm());
@@ -253,6 +318,253 @@ export default function NurseMidwifeDashboard() {
       fetchAncPatients();
     } catch (err: any) { alert(`Network error: ${err.message}`); }
     finally { setAncSaving(false); }
+  };
+
+  // ── Pharmacy modal handlers ────────────────────────────────────────────────
+  const handleBeginDispense = (patient: any) => {
+    setPharmacySelectedPatient(patient);
+    setShowPharmacyModal(true);
+  };
+  const handleCancelDispense = () => { setShowPharmacyModal(false); setPharmacySelectedPatient(null); };
+
+  const handleMarkDispensed = async (prescriptionId: number) => {
+    setPharmacySaving(true);
+    try {
+      const res = await fetch("/api/pharmacy", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prescriptionId }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(`Failed to dispense: ${err.error}`); return; }
+      // Update both lists
+      setPharmacyPatients((prev: any[]) => prev.map((p: any) => ({
+        ...p,
+        Prescription: (p.Prescription || []).map((rx: any) =>
+          rx.id === prescriptionId ? { ...rx, status: "DISPENSED" } : rx
+        ),
+      })));
+      setPharmacySelectedPatient((prev: any) => prev ? {
+        ...prev,
+        Prescription: (prev.Prescription || []).map((rx: any) =>
+          rx.id === prescriptionId ? { ...rx, status: "DISPENSED" } : rx
+        ),
+      } : null);
+    } catch (err: any) { alert(`Network error: ${err.message}`); }
+    finally { setPharmacySaving(false); }
+  };
+
+  const handleMarkAllDispensed = async () => {
+    if (!pharmacySelectedPatient) return;
+    const pending = (pharmacySelectedPatient.Prescription || []).filter((rx: any) => rx.status === "PENDING");
+    if (pending.length === 0) return;
+    setPharmacySaving(true);
+    try {
+      for (const rx of pending) {
+        const res = await fetch("/api/pharmacy", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prescriptionId: rx.id }),
+        });
+        if (!res.ok) { const err = await res.json(); alert(`Failed to dispense: ${err.error}`); break; }
+      }
+      fetchPharmacyPatients();
+      setShowPharmacyModal(false);
+      setPharmacySelectedPatient(null);
+    } catch (err: any) { alert(`Network error: ${err.message}`); }
+    finally { setPharmacySaving(false); }
+  };
+
+  // ── Pharmacy Inventory fetch ─────────────────────────────────────────────────
+  const fetchDrugs = useCallback(async (pageNum?: number) => {
+    setDrugsLoading(true); setDrugsError(null);
+    try {
+      const p = pageNum || drugPage;
+      const params = new URLSearchParams({
+        search: drugSearch,
+        category: drugCategoryFilter,
+        page: String(p),
+        limit: "50",
+      });
+      const res = await fetch(`/api/pharmacy/drugs?${params}`);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Server error (${res.status})`);
+      }
+      const data = await res.json();
+      setDrugs(data.drugs ?? []);
+      setDrugTotal(data.total ?? 0);
+      setDrugTotalPages(data.totalPages ?? 1);
+      setUncountedCount(data.uncountedCount ?? 0);
+    } catch (err: any) { setDrugsError(err.message || "Could not reach server"); }
+    finally { setDrugsLoading(false); }
+  }, [drugSearch, drugCategoryFilter, drugPage]);
+
+  const fetchDispenseLog = useCallback(async () => {
+    setDispenseLogLoading(true);
+    try {
+      const res = await fetch("/api/pharmacy/drugs/dispense-log?limit=20");
+      const data = await res.json();
+      setDispenseLog(data.logs ?? []);
+    } catch { setDispenseLog([]); }
+    finally { setDispenseLogLoading(false); }
+  }, []);
+
+  // Fetch drugs on mount and when search/filter/page changes
+  useEffect(() => {
+    fetchDrugs();
+  }, [fetchDrugs]);
+
+  useEffect(() => {
+    fetchDispenseLog();
+    const i = setInterval(fetchDispenseLog, 30_000);
+    return () => clearInterval(i);
+  }, [fetchDispenseLog]);
+
+  // ── Drug modal handlers ─────────────────────────────────────────────────────
+  const openAddDrugModal = () => {
+    setDrugForm({ name: "", category: "Drug", costCentre: "Pharmacy", buyingCost: "", sellingPrice: "", stockQuantity: "", reorderLevel: "10", customPrice: "", quantity: "", dispensedTo: "", notes: "", nurseName });
+    setShowAddDrugModal(true);
+  };
+
+  const openEditDrugModal = (drug: any) => {
+    setSelectedDrug(drug);
+    setDrugForm({
+      name: drug.name, category: drug.category, costCentre: drug.costCentre,
+      buyingCost: String(drug.buyingCost), sellingPrice: String(drug.sellingPrice),
+      stockQuantity: String(drug.stockQuantity), reorderLevel: String(drug.reorderLevel),
+      customPrice: drug.customPrice ? String(drug.customPrice) : "", quantity: "", dispensedTo: "", notes: "", nurseName
+    });
+    setShowEditDrugModal(true);
+  };
+
+  const openRestockModal = (drug: any) => {
+    setSelectedDrug(drug);
+    setDrugForm({ ...drugForm, quantity: "", notes: "", nurseName });
+    setShowRestockModal(true);
+  };
+
+  const openDispenseModal = (drug: any) => {
+    setSelectedDrug(drug);
+    setDrugForm({ ...drugForm, quantity: "", dispensedTo: "", notes: "", nurseName });
+    setShowDispenseModal(true);
+  };
+
+  const openCustomPriceModal = (drug: any) => {
+    setSelectedDrug(drug);
+    setDrugForm({ ...drugForm, customPrice: drug.customPrice ? String(drug.customPrice) : "", nurseName });
+    setShowCustomPriceModal(true);
+  };
+
+  const openDeleteConfirm = (drug: any) => {
+    setSelectedDrug(drug);
+    setShowDeleteConfirm(true);
+  };
+
+  const closeAllModals = () => {
+    setShowAddDrugModal(false); setShowEditDrugModal(false);
+    setShowRestockModal(false); setShowDispenseModal(false);
+    setShowCustomPriceModal(false); setShowDeleteConfirm(false);
+    setSelectedDrug(null); setDrugSaving(false);
+  };
+
+  const handleAddDrug = async () => {
+    setDrugSaving(true);
+    try {
+      const res = await fetch("/api/pharmacy/drugs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...drugForm, nurseName }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(`Failed to add: ${err.error}`); return; }
+      closeAllModals();
+      fetchDrugs(1);
+    } catch (err: any) { alert(`Network error: ${err.message}`); }
+    finally { setDrugSaving(false); }
+  };
+
+  const handleEditDrug = async () => {
+    if (!selectedDrug) return;
+    setDrugSaving(true);
+    try {
+      const res = await fetch(`/api/pharmacy/drugs?id=${selectedDrug.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: drugForm.name, category: drugForm.category,
+          buyingCost: drugForm.buyingCost, sellingPrice: drugForm.sellingPrice,
+          reorderLevel: drugForm.reorderLevel, nurseName,
+        }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(`Failed to update: ${err.error}`); return; }
+      closeAllModals();
+      fetchDrugs(drugPage);
+    } catch (err: any) { alert(`Network error: ${err.message}`); }
+    finally { setDrugSaving(false); }
+  };
+
+  const handleRestock = async () => {
+    if (!selectedDrug || !drugForm.quantity) return;
+    setDrugSaving(true);
+    try {
+      const res = await fetch("/api/pharmacy/drugs/restock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ drugId: selectedDrug.id, quantity: parseInt(drugForm.quantity), note: drugForm.notes, nurseName }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(`Failed to restock: ${err.error}`); return; }
+      closeAllModals();
+      fetchDrugs(drugPage);
+      fetchDispenseLog();
+    } catch (err: any) { alert(`Network error: ${err.message}`); }
+    finally { setDrugSaving(false); }
+  };
+
+  const handleDispense = async () => {
+    if (!selectedDrug || !drugForm.quantity) return;
+    setDrugSaving(true);
+    try {
+      const res = await fetch("/api/pharmacy/drugs/dispense", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          drugId: selectedDrug.id, quantity: parseInt(drugForm.quantity),
+          dispensedTo: drugForm.dispensedTo, notes: drugForm.notes, nurseName,
+        }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(`Failed to dispense: ${err.error}`); return; }
+      closeAllModals();
+      fetchDrugs(drugPage);
+      fetchDispenseLog();
+    } catch (err: any) { alert(`Network error: ${err.message}`); }
+    finally { setDrugSaving(false); }
+  };
+
+  const handleSetCustomPrice = async () => {
+    if (!selectedDrug) return;
+    setDrugSaving(true);
+    try {
+      const res = await fetch(`/api/pharmacy/drugs?id=${selectedDrug.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customPrice: drugForm.customPrice || null, nurseName }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(`Failed to set price: ${err.error}`); return; }
+      closeAllModals();
+      fetchDrugs(drugPage);
+    } catch (err: any) { alert(`Network error: ${err.message}`); }
+    finally { setDrugSaving(false); }
+  };
+
+  const handleDeleteDrug = async () => {
+    if (!selectedDrug) return;
+    setDrugSaving(true);
+    try {
+      const res = await fetch(`/api/pharmacy/drugs?id=${selectedDrug.id}`, { method: "DELETE" });
+      if (!res.ok) { const err = await res.json(); alert(`Failed to remove: ${err.error}`); return; }
+      closeAllModals();
+      fetchDrugs(1);
+    } catch (err: any) { alert(`Network error: ${err.message}`); }
+    finally { setDrugSaving(false); }
   };
 
   // ── Live clock ────────────────────────────────────────────────────────────
@@ -388,6 +700,39 @@ export default function NurseMidwifeDashboard() {
     if (!treatmentForm.drug || !treatmentForm.dose) return;
     setTreatmentEntries([...treatmentEntries, { ...treatmentForm, id: Date.now() }]);
     setTreatmentForm({ date: new Date().toISOString().split("T")[0], drug: "", route: "PO", dose: "", time: "", signature: "" });
+  };
+
+  // ── Share Patient ────────────────────────────────────────────────────────
+  const openShareModal = (patient: any) => {
+    setSharePatient(patient);
+    setShareTargetDept("doctor");
+    setShareNotes("");
+    setShowShareModal(true);
+  };
+
+  const handleSharePatient = async () => {
+    if (!sharePatient) return;
+    setShareSaving(true);
+    try {
+      const res = await fetch("/api/nurse-share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: sharePatient.id,
+          patientName: `${sharePatient.lastName || ""}, ${sharePatient.firstName || ""}`,
+          patientNumber: sharePatient.patientNumber || sharePatient.patientNumber,
+          targetDept: shareTargetDept,
+          notes: shareNotes,
+          nurseName,
+          source: "Nurse/Midwife",
+        }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(`Share failed: ${err.error}`); return; }
+      alert(`Patient shared with ${shareTargetDept} successfully.`);
+      setShowShareModal(false);
+      setSharePatient(null);
+    } catch (err: any) { alert(`Network error: ${err.message}`); }
+    finally { setShareSaving(false); }
   };
 
   const fetchTriagePatients = useCallback(async () => {
@@ -526,6 +871,7 @@ export default function NurseMidwifeDashboard() {
               tab.id === "triage" ? patients.length :
               tab.id === "treatment-room" ? treatmentRoomPatients.length :
               tab.id === "antenatal" ? ancPatients.length :
+              tab.id === "pharmacy" ? (pharmacySubTab === "inventory" ? uncountedCount : pharmacyPatients.length) :
               tab.id === "appointments" ? nurseAppts.length :
               null;
             return (
@@ -671,9 +1017,13 @@ export default function NurseMidwifeDashboard() {
                         className="flex-1 flex items-center justify-center gap-2 bg-[#00703C] hover:bg-[#005a2e] text-white font-bold text-xs py-2.5 px-4 rounded-lg transition-colors">
                         <Activity size={14} /> Begin Triage
                       </button>
+                      <button onClick={() => openShareModal(p)}
+                        className="flex items-center justify-center gap-1.5 border border-[#00703C] text-[#00703C] hover:bg-[#00703C]/5 font-bold text-xs py-2.5 px-3 rounded-lg transition-colors">
+                        <ArrowRight size={14} /> Share
+                      </button>
                       <button onClick={() => handleBeginTriage(p)}
-                        className="flex items-center justify-center gap-1 border border-[#00703C] text-[#00703C] hover:bg-[#00703C]/5 font-bold text-xs py-2.5 px-4 rounded-lg transition-colors">
-                        View Details
+                        className="flex items-center justify-center gap-1 border border-slate-200 text-slate-500 hover:bg-slate-50 font-bold text-xs py-2.5 px-3 rounded-lg transition-colors">
+                        View
                       </button>
                     </div>
                   </div>
@@ -860,6 +1210,10 @@ export default function NurseMidwifeDashboard() {
                           className="flex-1 flex items-center justify-center gap-2 bg-[#00703C] hover:bg-[#005a2e] text-white font-bold text-xs py-2.5 px-4 rounded-lg transition-colors">
                           <CheckCircle size={14} /> Complete Treatment
                         </button>
+                        <button onClick={(e) => { e.stopPropagation(); openShareModal(p); }}
+                          className="flex items-center justify-center gap-1 border border-[#00703C] text-[#00703C] hover:bg-[#00703C]/5 font-bold text-xs py-2.5 px-3 rounded-lg transition-colors">
+                          <ArrowRight size={14} /> Share
+                        </button>
                         <button onClick={(e) => { e.stopPropagation(); const open = medFormPatientId !== p.id; setMedFormPatientId(open ? p.id : null); setMedFormName(""); setMedFormTime(""); }}
                           className={`flex items-center justify-center gap-1.5 text-xs font-bold px-3 py-2.5 rounded-lg border transition-colors ${
                             isMedFormOpen ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:border-[#00703C] hover:text-[#00703C]"
@@ -987,10 +1341,16 @@ export default function NurseMidwifeDashboard() {
                         {p.referringDoctorName && <><span className="text-slate-300">|</span> Dr. {p.referringDoctorName}</>}
                       </p>
 
-                      <button onClick={() => handleBeginAnc(p)}
-                        className="flex items-center justify-center gap-2 w-full bg-[#00703C] hover:bg-[#005a2e] text-white font-bold text-xs py-2.5 px-4 rounded-lg transition-colors">
-                        <Baby size={14} /> Begin ANC Assessment
-                      </button>
+                      <div className="flex gap-2">
+                        <button onClick={() => handleBeginAnc(p)}
+                          className="flex-1 flex items-center justify-center gap-2 bg-[#00703C] hover:bg-[#005a2e] text-white font-bold text-xs py-2.5 px-4 rounded-lg transition-colors">
+                          <Baby size={14} /> Begin ANC Assessment
+                        </button>
+                        <button onClick={() => openShareModal(p)}
+                          className="flex items-center justify-center gap-1.5 border border-[#00703C] text-[#00703C] hover:bg-[#00703C]/5 font-bold text-xs py-2.5 px-3 rounded-lg transition-colors">
+                          <ArrowRight size={14} /> Share
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1114,6 +1474,317 @@ export default function NurseMidwifeDashboard() {
                         <Trash2 size={14} /> Clear All
                       </button>
                     </div>
+                  </>
+                )}
+              </div>
+            </Card>
+          )}
+
+          {/* ────────────────────────────────────────────────────────────────
+              PHARMACY TAB — Inventory + Prescriptions
+              ──────────────────────────────────────────────────────────────── */}
+          {activeTab === "pharmacy" && (
+            <Card>
+              <StickyHeader tabName="Pharmacy">
+                <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
+                  <button onClick={() => { setPharmacySubTab("inventory"); setDrugPage(1); }}
+                    className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors ${pharmacySubTab === "inventory" ? "bg-white text-[#00703C] shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                    <Package size={13} className="inline mr-1" /> Inventory
+                  </button>
+                  <button onClick={() => setPharmacySubTab("prescriptions")}
+                    className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors ${pharmacySubTab === "prescriptions" ? "bg-white text-[#00703C] shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                    <Pill size={13} className="inline mr-1" /> Prescriptions
+                  </button>
+                </div>
+                <button onClick={pharmacySubTab === "inventory" ? () => fetchDrugs(drugPage) : fetchPharmacyPatients} disabled={drugsLoading || pharmacyLoading}
+                  className="flex items-center gap-1.5 text-xs font-bold text-[#00703C] bg-[#00703C]/10 hover:bg-[#00703C]/20 px-2 sm:px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                  <RefreshCw size={13} className={(drugsLoading || pharmacyLoading) ? "animate-spin" : ""} /> <span className="hidden sm:inline">Refresh</span>
+                </button>
+              </StickyHeader>
+              <div className="p-3 sm:p-4 md:p-6">
+
+                {pharmacySubTab === "inventory" ? (
+                  /* ══════════════════════════════════════════════════════════
+                     INVENTORY SUB-TAB — Drug Catalogue
+                     ══════════════════════════════════════════════════════════ */
+                  <>
+                    {/* Search, Filter, Add */}
+                    <div className="flex flex-col sm:flex-row gap-2 mb-4">
+                      <div className="relative flex-1">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input type="text" value={drugSearch} onChange={e => { setDrugSearch(e.target.value); setDrugPage(1); }}
+                          placeholder="Search by name or item code..."
+                          className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C] transition-all" />
+                      </div>
+                      <select value={drugCategoryFilter} onChange={e => { setDrugCategoryFilter(e.target.value); setDrugPage(1); }}
+                        className="text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20">
+                        <option value="all">All Categories</option>
+                        <option value="Drug">Drug</option>
+                        <option value="Sundry">Sundry</option>
+                        <option value="Lab Test">Lab Test</option>
+                        <option value="Radiology">Radiology</option>
+                        <option value="Dental">Dental</option>
+                        <option value="Theatre">Theatre</option>
+                        <option value="General">General</option>
+                      </select>
+                      <button onClick={openAddDrugModal}
+                        className="flex items-center gap-1.5 text-xs font-bold bg-[#00703C] hover:bg-[#005a2e] text-white px-4 py-2 rounded-xl transition-colors">
+                        <Plus size={14} /> Add Drug
+                      </button>
+                    </div>
+
+                    {/* Summary */}
+                    <div className="flex items-center gap-3 mb-3 text-[11px] text-slate-500">
+                      <span className="font-semibold">Total Drugs: <span className="text-[#00703C]">{drugTotal}</span></span>
+                      <span className="text-slate-300">|</span>
+                      <span className="font-semibold">Not Counted: <span className="text-amber-600">{uncountedCount >= 0 ? uncountedCount : "..."}</span></span>
+                      {drugTotalPages > 1 && <><span className="text-slate-300">|</span><span>Page {drugPage} of {drugTotalPages}</span></>}
+                    </div>
+
+                    {/* Error */}
+                    {drugsError && (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-5 flex items-center gap-3">
+                        <AlertCircle size={16} className="text-red-500 flex-shrink-0" />
+                        <span className="text-xs font-medium text-red-700 flex-1">{drugsError}</span>
+                        <button onClick={() => fetchDrugs(drugPage)} className="text-[10px] font-bold bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-lg transition-colors">Retry</button>
+                      </div>
+                    )}
+
+                    {/* Loading */}
+                    {drugsLoading && drugs.length === 0 && (
+                      <div className="flex flex-col items-center justify-center py-16 text-slate-300">
+                        <RefreshCw size={28} className="animate-spin mb-3 text-[#00703C]/40" />
+                        <p className="text-sm font-semibold text-slate-400">Loading drugs...</p>
+                      </div>
+                    )}
+
+                    {/* Empty */}
+                    {!drugsLoading && drugs.length === 0 && !drugsError && (
+                      <div className="flex flex-col items-center justify-center py-20 text-slate-300">
+                        <Package size={44} className="text-slate-200 mb-4" />
+                        <p className="text-sm font-semibold text-slate-400">{drugSearch ? "No drugs match your search" : "No drugs in inventory"}</p>
+                        <p className="text-xs text-slate-300 mt-1">{drugSearch ? "Try a different search term" : "Import drugs using the seed script"}</p>
+                      </div>
+                    )}
+
+                    {/* Drug Cards */}
+                    {drugs.map((drug: any) => {
+                      const isUncounted = drug.stockQuantity === 0;
+                      const isLowStock = drug.stockQuantity > 0 && drug.stockQuantity <= drug.reorderLevel;
+                      const isInStock = drug.stockQuantity > drug.reorderLevel;
+                      return (
+                        <div key={drug.id} className={`rounded-xl border-l-4 ${isUncounted ? "border-l-slate-300" : isLowStock ? "border-l-amber-400" : "border-l-[#00703C]"} border border-slate-200/80 p-3 sm:p-5 mb-3 bg-white hover:shadow-md transition-all duration-200`}>
+                          {/* Row 1: ItemCode + Stock status */}
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono text-[11px] font-extrabold text-[#00703C] bg-[#dcfce7] px-2 py-0.5 rounded">{drug.itemCode}</span>
+                              {isUncounted && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full border border-slate-200">
+                                  <MinusCircle size={10} /> Not yet counted
+                                </span>
+                              )}
+                              {isLowStock && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200 pulse-due">
+                                  <AlertTriangle size={10} /> Low stock
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 text-[10px] text-slate-400">
+                              <Badge color="blue">{drug.category}</Badge>
+                            </div>
+                          </div>
+
+                          {/* Row 2: Name */}
+                          <h4 className="text-sm font-bold text-slate-800 mb-2">{drug.name}</h4>
+
+                          {/* Row 3: Cost info */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                            <div className="bg-slate-50/70 rounded-lg px-3 py-2 border border-slate-100">
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Buying Cost</p>
+                              <p className="text-xs font-bold text-slate-700">{drug.buyingCost ? `UGX ${Number(drug.buyingCost).toLocaleString()}` : "—"}</p>
+                            </div>
+                            <div className="bg-slate-50/70 rounded-lg px-3 py-2 border border-slate-100">
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Selling Price</p>
+                              <p className="text-xs font-bold text-slate-700">{drug.sellingPrice ? `UGX ${Number(drug.sellingPrice).toLocaleString()}` : "—"}</p>
+                            </div>
+                            {drug.customPrice && (
+                              <div className="bg-purple-50 rounded-lg px-3 py-2 border border-purple-100">
+                                <p className="text-[9px] font-bold text-purple-500 uppercase tracking-wider">Custom Price</p>
+                                <p className="text-xs font-bold text-purple-700">UGX {Number(drug.customPrice).toLocaleString()}</p>
+                              </div>
+                            )}
+                            <div className={`rounded-lg px-3 py-2 border ${isUncounted ? "bg-slate-50/70 border-slate-100" : isLowStock ? "bg-amber-50 border-amber-100" : "bg-green-50 border-green-100"}`}>
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Stock</p>
+                              <p className={`text-xs font-bold ${isUncounted ? "text-slate-400" : isLowStock ? "text-amber-700" : "text-green-700"}`}>
+                                {isUncounted ? "Not counted" : `${drug.stockQuantity} units`}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Row 4: Last edited */}
+                          {drug.lastEditedBy && (
+                            <p className="text-[10px] text-slate-400 mb-3">
+                              Last edited by <span className="font-semibold text-slate-500">{drug.lastEditedBy}</span> on {new Date(drug.lastEditedOn).toLocaleDateString("en-UG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                            </p>
+                          )}
+
+                          {/* Row 5: Action buttons */}
+                          <div className="flex flex-wrap gap-1.5">
+                            <button onClick={() => openRestockModal(drug)}
+                              className="flex items-center gap-1 text-[10px] font-bold bg-[#00703C] hover:bg-[#005a2e] text-white px-3 py-1.5 rounded-lg transition-colors">
+                              <PlusCircle size={11} /> Restock
+                            </button>
+                            <button onClick={() => openDispenseModal(drug)} disabled={isUncounted}
+                              className="flex items-center gap-1 text-[10px] font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40">
+                              <Pill size={11} /> Dispense
+                            </button>
+                            <button onClick={() => openEditDrugModal(drug)}
+                              className="flex items-center gap-1 text-[10px] font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-1.5 rounded-lg transition-colors">
+                              <Edit3 size={11} /> Edit
+                            </button>
+                            <button onClick={() => openCustomPriceModal(drug)}
+                              className="flex items-center gap-1 text-[10px] font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-1.5 rounded-lg transition-colors">
+                              <DollarSign size={11} /> Custom Price
+                            </button>
+                            <button onClick={() => openDeleteConfirm(drug)}
+                              className="flex items-center gap-1 text-[10px] font-bold border border-red-200 text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors">
+                              <Trash2 size={11} /> Remove
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    {/* Pagination */}
+                    {drugTotalPages > 1 && (
+                      <div className="flex items-center justify-center gap-3 mt-4">
+                        <button onClick={() => { setDrugPage(p => Math.max(1, p - 1)); }} disabled={drugPage <= 1}
+                          className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-colors">
+                          <ChevronLeft size={13} /> Prev
+                        </button>
+                        <span className="text-xs text-slate-500">Page {drugPage} of {drugTotalPages}</span>
+                        <button onClick={() => { setDrugPage(p => Math.min(drugTotalPages, p + 1)); }} disabled={drugPage >= drugTotalPages}
+                          className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-colors">
+                          Next <ChevronRight size={13} />
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Recent Dispenses */}
+                    <div className="mt-6">
+                      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 flex items-center gap-2">
+                        <Archive size={14} /> Recent Dispenses
+                      </h3>
+                      {dispenseLogLoading ? (
+                        <div className="py-8 flex items-center justify-center text-slate-400 text-xs">
+                          <Loader2 size={14} className="animate-spin mr-2" /> Loading...
+                        </div>
+                      ) : dispenseLog.length === 0 ? (
+                        <div className="bg-slate-50/70 rounded-xl border border-slate-200/80 p-6 text-center">
+                          <Archive size={24} className="mx-auto text-slate-300 mb-2" />
+                          <p className="text-xs text-slate-400 font-medium">No dispensing history yet</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {dispenseLog.map((log: any) => (
+                            <div key={log.id} className="bg-slate-50/70 rounded-lg border border-slate-200/80 px-4 py-2.5 flex items-center justify-between">
+                              <div className="flex-1 min-w-0">
+                                <span className="text-xs font-semibold text-slate-700">{log.drugName}</span>
+                                <span className="text-xs font-bold text-[#00703C] ml-2">x{log.quantity}</span>
+                                {log.dispensedTo && <span className="text-[10px] text-slate-400 ml-2">to {log.dispensedTo}</span>}
+                                {log.notes && <span className="text-[10px] text-slate-400 ml-2 italic">— {log.notes}</span>}
+                              </div>
+                              <div className="text-right flex-shrink-0 ml-3">
+                                <p className="text-[10px] text-slate-500">{log.dispensedBy}</p>
+                                <p className="text-[9px] text-slate-300">{new Date(log.dispensedAt).toLocaleDateString("en-UG", { day: "numeric", month: "short" })}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  /* ══════════════════════════════════════════════════════════
+                     PRESCRIPTIONS SUB-TAB — Existing Pending Prescriptions
+                     ══════════════════════════════════════════════════════════ */
+                  <>
+                    <div className="flex items-center gap-2 mb-4 sm:mb-5">
+                      <h3 className="text-xs sm:text-sm font-bold text-slate-600">Pending Prescriptions</h3>
+                      <span className="bg-[#00703C] text-white text-[11px] font-bold px-2.5 py-0.5 rounded-full">{pharmacyPatients.length}</span>
+                    </div>
+
+                    {pharmacyError && (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-5 flex items-center gap-3">
+                        <AlertCircle size={16} className="text-red-500 flex-shrink-0" />
+                        <span className="text-xs font-medium text-red-700 flex-1">{pharmacyError}</span>
+                        <button onClick={fetchPharmacyPatients} className="text-[10px] font-bold bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-lg transition-colors">Retry</button>
+                      </div>
+                    )}
+
+                    {pharmacyLoading && pharmacyPatients.length === 0 && (
+                      <div className="flex flex-col items-center justify-center py-16 text-slate-300">
+                        <RefreshCw size={28} className="animate-spin mb-3 text-[#00703C]/40" />
+                        <p className="text-sm font-semibold text-slate-400">Loading prescriptions...</p>
+                      </div>
+                    )}
+
+                    {!pharmacyLoading && pharmacyPatients.length === 0 && (
+                      <div className="flex flex-col items-center justify-center py-20 text-slate-300">
+                        <Pill size={44} className="text-slate-200 mb-4" />
+                        <p className="text-sm font-semibold text-slate-400">No pending prescriptions</p>
+                        <p className="text-xs text-slate-300 mt-1">Prescriptions written by doctors will appear here for dispensing</p>
+                      </div>
+                    )}
+
+                    {pharmacyPatients.map((p: any) => {
+                      const pendingRx = (p.Prescription || []).filter((rx: any) => rx.status === "PENDING");
+                      if (pendingRx.length === 0) return null;
+                      return (
+                        <div key={p.id} className="rounded-xl border-l-4 border-l-[#00703C] border border-slate-200/80 p-3 sm:p-5 mb-3 hover:shadow-md transition-all duration-200 bg-white">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono text-[11px] font-extrabold text-[#00703C] bg-[#dcfce7] px-2 py-0.5 rounded">{p.patientNumber}</span>
+                              <Badge color="amber">{pendingRx.length} pending</Badge>
+                            </div>
+                            <div className="text-right text-[11px] text-slate-400">
+                              <div className="font-semibold text-slate-500">{p.gender} &middot; {p.age} yrs</div>
+                              {p.phoneNumber && <div className="flex items-center gap-1 mt-0.5 justify-end"><Phone size={9} />{p.phoneNumber}</div>}
+                            </div>
+                          </div>
+
+                          <h4 className="text-base font-bold text-slate-800 mb-3">{p.lastName}, {p.firstName}</h4>
+
+                          <div className="space-y-2 mb-4">
+                            {pendingRx.map((rx: any) => (
+                              <div key={rx.id} className="bg-slate-50/70 rounded-xl border border-slate-200/80 p-3 flex items-start justify-between gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-sm font-bold text-slate-800">{rx.medication}</span>
+                                    {rx.dosage && (
+                                      <span className="text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">{rx.dosage}</span>
+                                    )}
+                                  </div>
+                                  {rx.instructions && (<p className="text-xs text-slate-500 mt-1">{rx.instructions}</p>)}
+                                  <p className="text-[10px] text-slate-400 mt-1.5">
+                                    Prescribed {new Date(rx.createdAt).toLocaleDateString("en-UG", { day: "numeric", month: "short", year: "numeric" })}
+                                  </p>
+                                </div>
+                                <button onClick={() => handleMarkDispensed(rx.id)} disabled={pharmacySaving}
+                                  className="flex-shrink-0 flex items-center gap-1 text-[10px] font-bold bg-[#00703C] hover:bg-[#005a2e] text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40">
+                                  <CheckCircle size={12} /> Dispense
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+
+                          <button onClick={() => handleBeginDispense(p)}
+                            className="flex items-center justify-center gap-2 w-full bg-[#00703C] hover:bg-[#005a2e] text-white font-bold text-xs py-2.5 px-4 rounded-lg transition-colors">
+                            <Pill size={14} /> Dispense All
+                          </button>
+                        </div>
+                      );
+                    })}
                   </>
                 )}
               </div>
@@ -1818,8 +2489,442 @@ export default function NurseMidwifeDashboard() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════════════
-          DOCTOR RECORDS MODAL — shows everything the doctor input
+          PHARMACY DISPENSING MODAL
           ═══════════════════════════════════════════════════════════════════════ */}
+      {showPharmacyModal && pharmacySelectedPatient && (
+        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+          <div className="w-full max-w-[800px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
+              <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+                <div className="hidden sm:flex w-12 h-12 rounded-full bg-white/20 items-center justify-center text-lg font-bold flex-shrink-0">
+                  {pharmacySelectedPatient.firstName?.[0]}{pharmacySelectedPatient.lastName?.[0]}
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-sm sm:text-lg font-bold truncate">{pharmacySelectedPatient.lastName}, {pharmacySelectedPatient.firstName}</h2>
+                  <div className="flex items-center gap-2 sm:gap-3 mt-0.5 sm:mt-1 text-[10px] sm:text-xs text-white/80 flex-wrap">
+                    <span className="font-mono">{pharmacySelectedPatient.patientNumber}</span>
+                    <span className="text-white/40 hidden sm:inline">|</span>
+                    <span>{pharmacySelectedPatient.gender} &middot; {pharmacySelectedPatient.age} yrs</span>
+                    {pharmacySelectedPatient.phoneNumber && (
+                      <>
+                        <span className="text-white/30 hidden sm:inline">|</span>
+                        <span className="flex items-center gap-1"><Phone size={9} className="sm:size-[10]" />{pharmacySelectedPatient.phoneNumber}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button onClick={handleCancelDispense}
+                className="flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-colors flex-shrink-0">
+                <X size={13} className="sm:size-[15]" /> <span className="hidden sm:inline">Close</span>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-3 sm:p-6 md:p-8 max-h-[calc(100vh-120px)] sm:max-h-[calc(100vh-180px)] overflow-y-auto">
+              {/* Latest Visit Context */}
+              {(() => {
+                const visit = pharmacySelectedPatient.Visit?.[0];
+                const triage = pharmacySelectedPatient.Triage?.[0];
+                const pendingRx = (pharmacySelectedPatient.Prescription || []).filter((rx: any) => rx.status === "PENDING");
+                const dispensedRx = (pharmacySelectedPatient.Prescription || []).filter((rx: any) => rx.status === "DISPENSED");
+
+                return (
+                  <div className="space-y-6">
+                    {/* Visit context */}
+                    {visit?.diagnosis && (
+                      <div className="bg-blue-50/60 border border-blue-200 rounded-xl p-3 sm:p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Stethoscope size={14} className="text-blue-500" />
+                          <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">Diagnosis</span>
+                        </div>
+                        <p className="text-sm font-semibold text-blue-700">{visit.diagnosis}</p>
+                        {visit.doctorName && (
+                          <p className="text-[11px] text-blue-500/70 mt-1.5">Dr. {visit.doctorName}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {triage?.chiefComplaint && (
+                      <div className="bg-slate-50/70 rounded-xl border border-slate-200/80 p-3 sm:p-4">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Chief Complaint</p>
+                        <p className="text-sm text-slate-700 font-medium">{triage.chiefComplaint}</p>
+                      </div>
+                    )}
+
+                    {/* Pending Prescriptions */}
+                    <div>
+                      <h3 className="text-xs font-bold text-[#00703C] uppercase tracking-wider flex items-center gap-2 mb-3">
+                        <Pill size={15} /> Prescriptions to Dispense ({pendingRx.length})
+                      </h3>
+                      {pendingRx.length === 0 ? (
+                        <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
+                          <CheckCircle size={24} className="mx-auto text-green-500 mb-2" />
+                          <p className="text-sm font-semibold text-green-700">All prescriptions dispensed</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {pendingRx.map((rx: any) => (
+                            <div key={rx.id} className="bg-white border border-slate-200/80 rounded-xl p-3 sm:p-4 flex items-start justify-between gap-3 hover:shadow-sm transition-shadow">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-sm font-bold text-slate-800">{rx.medication}</span>
+                                  {rx.dosage && (
+                                    <span className="text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">{rx.dosage}</span>
+                                  )}
+                                  <span className="text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full uppercase">Pending</span>
+                                </div>
+                                {rx.instructions && (
+                                  <p className="text-xs text-slate-500 mt-1.5 flex items-center gap-1.5">
+                                    <FileText size={11} className="text-slate-400" />
+                                    {rx.instructions}
+                                  </p>
+                                )}
+                                <p className="text-[10px] text-slate-400 mt-1.5">
+                                  Prescribed {new Date(rx.createdAt).toLocaleDateString("en-UG", { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                </p>
+                              </div>
+                              <button onClick={() => handleMarkDispensed(rx.id)} disabled={pharmacySaving}
+                                className="flex-shrink-0 flex items-center gap-1.5 text-[10px] font-bold bg-[#00703C] hover:bg-[#005a2e] text-white px-3 py-2 rounded-lg transition-colors disabled:opacity-40">
+                                <CheckCircle size={12} /> {pharmacySaving ? "..." : "Dispense"}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Already Dispensed */}
+                    {dispensedRx.length > 0 && (
+                      <div>
+                        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2 mb-3">
+                          <CheckCircle size={14} className="text-green-500" /> Already Dispensed ({dispensedRx.length})
+                        </h3>
+                        <div className="space-y-1.5">
+                          {dispensedRx.map((rx: any) => (
+                            <div key={rx.id} className="bg-green-50/50 border border-green-200/60 rounded-xl px-3 sm:px-4 py-2.5 flex items-center gap-3">
+                              <CheckCircle size={14} className="text-green-500 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <span className="text-sm font-semibold text-slate-700">{rx.medication}</span>
+                                {rx.dosage && <span className="text-[11px] text-slate-500 ml-2">{rx.dosage}</span>}
+                              </div>
+                              <span className="text-[9px] font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded-full">DISPENSED</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    {pendingRx.length > 0 && (
+                      <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 border-t border-slate-200 pt-4 sm:pt-5">
+                        <button onClick={handleCancelDispense} disabled={pharmacySaving}
+                          className="px-3 sm:px-5 py-2 sm:py-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 text-[10px] sm:text-xs font-bold hover:bg-slate-50 transition-colors">
+                          Cancel
+                        </button>
+                        <button onClick={handleMarkAllDispensed} disabled={pharmacySaving || pendingRx.length === 0}
+                          className="px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl bg-[#00703C] hover:bg-[#005a2e] text-white text-[10px] sm:text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm">
+                          <CheckCircle size={13} /> {pharmacySaving ? "Dispensing..." : `Dispense All (${pendingRx.length})`}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+	      )}
+
+	      {/* ═══════════════════════════════════════════════════════════════════════
+	          PHARMACY INVENTORY MODALS — Add / Edit / Restock / Dispense / CustomPrice / Delete
+	          ═══════════════════════════════════════════════════════════════════════ */}
+
+	      {/* Add Drug Modal */}
+	      {showAddDrugModal && (
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	          <div className="w-full max-w-[550px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
+	            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
+	              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-2"><Plus size={16} /> Add New Drug</h2>
+	              <button onClick={closeAllModals} className="flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-colors">
+	                <X size={13} /> <span className="hidden sm:inline">Close</span>
+	              </button>
+	            </div>
+	            <div className="p-3 sm:p-6 md:p-8 max-h-[calc(100vh-120px)] sm:max-h-[calc(100vh-180px)] overflow-y-auto">
+	              <div className="space-y-4">
+	                <div>
+	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Drug Name *</label>
+	                  <input type="text" value={drugForm.name} onChange={e => setDrugForm(f => ({ ...f, name: e.target.value }))}
+	                    placeholder="e.g. Paracetamol tablets 500mg" maxLength={200}
+	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                </div>
+	                <div className="grid grid-cols-2 gap-3">
+	                  <div>
+	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Category</label>
+	                    <input type="text" value={drugForm.category} onChange={e => setDrugForm(f => ({ ...f, category: e.target.value }))}
+	                      list="category-options"
+	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                    <datalist id="category-options">
+	                      <option value="Drug" /><option value="Sundry" /><option value="Lab Test" /><option value="Radiology" /><option value="Dental" /><option value="Theatre" /><option value="General" />
+	                    </datalist>
+	                  </div>
+	                  <div>
+	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Cost Centre</label>
+	                    <input type="text" value={drugForm.costCentre} onChange={e => setDrugForm(f => ({ ...f, costCentre: e.target.value }))}
+	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                  </div>
+	                </div>
+	                <div className="grid grid-cols-2 gap-3">
+	                  <div>
+	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Buying Cost</label>
+	                    <input type="number" value={drugForm.buyingCost} onChange={e => setDrugForm(f => ({ ...f, buyingCost: e.target.value }))}
+	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                  </div>
+	                  <div>
+	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Selling Price</label>
+	                    <input type="number" value={drugForm.sellingPrice} onChange={e => setDrugForm(f => ({ ...f, sellingPrice: e.target.value }))}
+	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                  </div>
+	                </div>
+	                <div className="grid grid-cols-2 gap-3">
+	                  <div>
+	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Initial Stock</label>
+	                    <input type="number" value={drugForm.stockQuantity} onChange={e => setDrugForm(f => ({ ...f, stockQuantity: e.target.value }))}
+	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                  </div>
+	                  <div>
+	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Reorder Level</label>
+	                    <input type="number" value={drugForm.reorderLevel} onChange={e => setDrugForm(f => ({ ...f, reorderLevel: e.target.value }))}
+	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                  </div>
+	                </div>
+	              </div>
+	              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 mt-5">
+	                <button onClick={closeAllModals} disabled={drugSaving}
+	                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-[10px] font-bold hover:bg-slate-50 transition-colors">Cancel</button>
+	                <button onClick={handleAddDrug} disabled={drugSaving || !drugForm.name}
+	                  className="px-4 py-2 rounded-xl bg-[#00703C] hover:bg-[#005a2e] text-white text-[10px] font-bold transition-colors flex items-center gap-1.5 disabled:opacity-40">
+	                  <Save size={13} /> {drugSaving ? "Adding..." : "Add Drug"}
+	                </button>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      )}
+
+	      {/* Edit Drug Modal */}
+	      {showEditDrugModal && selectedDrug && (
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	          <div className="w-full max-w-[550px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
+	            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
+	              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-2"><Edit3 size={16} /> Edit Drug</h2>
+	              <button onClick={closeAllModals} className="flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-colors">
+	                <X size={13} /> <span className="hidden sm:inline">Close</span>
+	              </button>
+	            </div>
+	            <div className="p-3 sm:p-6 md:p-8 max-h-[calc(100vh-120px)] sm:max-h-[calc(100vh-180px)] overflow-y-auto">
+	              <div className="space-y-4">
+	                <p className="text-[10px] text-slate-400 font-mono">{selectedDrug.itemCode}</p>
+	                <div>
+	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Drug Name *</label>
+	                  <input type="text" value={drugForm.name} onChange={e => setDrugForm(f => ({ ...f, name: e.target.value }))}
+	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                </div>
+	                <div className="grid grid-cols-2 gap-3">
+	                  <div>
+	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Category</label>
+	                    <input type="text" value={drugForm.category} onChange={e => setDrugForm(f => ({ ...f, category: e.target.value }))}
+	                      list="edit-category-options"
+	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                    <datalist id="edit-category-options">
+	                      <option value="Drug" /><option value="Sundry" /><option value="Lab Test" /><option value="Radiology" /><option value="Dental" /><option value="Theatre" />
+	                    </datalist>
+	                  </div>
+	                  <div>
+	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Buying Cost</label>
+	                    <input type="number" value={drugForm.buyingCost} onChange={e => setDrugForm(f => ({ ...f, buyingCost: e.target.value }))}
+	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                  </div>
+	                </div>
+	                <div className="grid grid-cols-2 gap-3">
+	                  <div>
+	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Selling Price</label>
+	                    <input type="number" value={drugForm.sellingPrice} onChange={e => setDrugForm(f => ({ ...f, sellingPrice: e.target.value }))}
+	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                  </div>
+	                  <div>
+	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Reorder Level</label>
+	                    <input type="number" value={drugForm.reorderLevel} onChange={e => setDrugForm(f => ({ ...f, reorderLevel: e.target.value }))}
+	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                  </div>
+	                </div>
+	              </div>
+	              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 mt-5">
+	                <button onClick={closeAllModals} disabled={drugSaving}
+	                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-[10px] font-bold hover:bg-slate-50 transition-colors">Cancel</button>
+	                <button onClick={handleEditDrug} disabled={drugSaving || !drugForm.name}
+	                  className="px-4 py-2 rounded-xl bg-[#00703C] hover:bg-[#005a2e] text-white text-[10px] font-bold transition-colors flex items-center gap-1.5 disabled:opacity-40">
+	                  <Save size={13} /> {drugSaving ? "Saving..." : "Save Changes"}
+	                </button>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      )}
+
+	      {/* Restock Modal */}
+	      {showRestockModal && selectedDrug && (
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	          <div className="w-full max-w-[450px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
+	            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
+	              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-2"><PlusCircle size={16} /> Restock</h2>
+	              <button onClick={closeAllModals} className="flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-colors">
+	                <X size={13} /> <span className="hidden sm:inline">Close</span>
+	              </button>
+	            </div>
+	            <div className="p-3 sm:p-6 md:p-8">
+	              <p className="text-sm font-bold text-slate-800 mb-1">{selectedDrug.name}</p>
+	              <p className="text-[10px] text-slate-400 mb-4">Current stock: <span className="font-bold text-slate-600">{selectedDrug.stockQuantity} units</span></p>
+	              <div className="space-y-3">
+	                <div>
+	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Quantity to Add *</label>
+	                  <input type="number" value={drugForm.quantity} onChange={e => setDrugForm(f => ({ ...f, quantity: e.target.value }))}
+	                    placeholder="e.g. 50" min="1"
+	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                </div>
+	                <div>
+	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Note (optional)</label>
+	                  <input type="text" value={drugForm.notes} onChange={e => setDrugForm(f => ({ ...f, notes: e.target.value }))}
+	                    placeholder="e.g. New shipment from supplier"
+	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                </div>
+	              </div>
+	              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 mt-4">
+	                <button onClick={closeAllModals} disabled={drugSaving}
+	                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-[10px] font-bold hover:bg-slate-50 transition-colors">Cancel</button>
+	                <button onClick={handleRestock} disabled={drugSaving || !drugForm.quantity || parseInt(drugForm.quantity) < 1}
+	                  className="px-4 py-2 rounded-xl bg-[#00703C] hover:bg-[#005a2e] text-white text-[10px] font-bold transition-colors flex items-center gap-1.5 disabled:opacity-40">
+	                  <Save size={13} /> {drugSaving ? "Restocking..." : "Add to Stock"}
+	                </button>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      )}
+
+	      {/* Dispense Modal */}
+	      {showDispenseModal && selectedDrug && (
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	          <div className="w-full max-w-[450px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
+	            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
+	              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-2"><Pill size={16} /> Dispense Drug</h2>
+	              <button onClick={closeAllModals} className="flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-colors">
+	                <X size={13} /> <span className="hidden sm:inline">Close</span>
+	              </button>
+	            </div>
+	            <div className="p-3 sm:p-6 md:p-8">
+	              <p className="text-sm font-bold text-slate-800 mb-1">{selectedDrug.name}</p>
+	              <p className="text-[10px] text-slate-500 mb-4">Available stock: <span className={`font-bold ${selectedDrug.stockQuantity <= selectedDrug.reorderLevel ? "text-amber-600" : "text-green-600"}`}>{selectedDrug.stockQuantity} units</span></p>
+	              <div className="space-y-3">
+	                <div>
+	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Quantity *</label>
+	                  <input type="number" value={drugForm.quantity} onChange={e => setDrugForm(f => ({ ...f, quantity: e.target.value }))}
+	                    placeholder="How many units?" min="1" max={selectedDrug.stockQuantity}
+	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                </div>
+	                <div>
+	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Dispensed To (optional)</label>
+	                  <input type="text" value={drugForm.dispensedTo} onChange={e => setDrugForm(f => ({ ...f, dispensedTo: e.target.value }))}
+	                    placeholder="Patient name / Ward / Dept"
+	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                </div>
+	                <div>
+	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Notes (optional)</label>
+	                  <input type="text" value={drugForm.notes} onChange={e => setDrugForm(f => ({ ...f, notes: e.target.value }))}
+	                    placeholder="Reason or instructions"
+	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                </div>
+	              </div>
+	              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 mt-4">
+	                <button onClick={closeAllModals} disabled={drugSaving}
+	                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-[10px] font-bold hover:bg-slate-50 transition-colors">Cancel</button>
+	                <button onClick={handleDispense} disabled={drugSaving || !drugForm.quantity || parseInt(drugForm.quantity) < 1 || parseInt(drugForm.quantity) > selectedDrug.stockQuantity}
+	                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold transition-colors flex items-center gap-1.5 disabled:opacity-40">
+	                  <CheckCircle size={13} /> {drugSaving ? "Dispensing..." : "Dispense"}
+	                </button>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      )}
+
+	      {/* Set Custom Price Modal */}
+	      {showCustomPriceModal && selectedDrug && (
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	          <div className="w-full max-w-[400px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
+	            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
+	              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-2"><DollarSign size={16} /> Custom Price</h2>
+	              <button onClick={closeAllModals} className="flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-colors">
+	                <X size={13} /> <span className="hidden sm:inline">Close</span>
+	              </button>
+	            </div>
+	            <div className="p-3 sm:p-6 md:p-8">
+	              <p className="text-sm font-bold text-slate-800 mb-1">{selectedDrug.name}</p>
+	              <p className="text-[10px] text-slate-400 mb-4">Standard price: <span className="font-bold text-slate-600">UGX {Number(selectedDrug.sellingPrice).toLocaleString()}</span></p>
+	              <div className="space-y-3">
+	                <div>
+	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Custom Price (leave empty to clear)</label>
+	                  <input type="number" value={drugForm.customPrice} onChange={e => setDrugForm(f => ({ ...f, customPrice: e.target.value }))}
+	                    placeholder="Insurance / negotiated price"
+	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                </div>
+	              </div>
+	              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 mt-4">
+	                <button onClick={closeAllModals} disabled={drugSaving}
+	                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-[10px] font-bold hover:bg-slate-50 transition-colors">Cancel</button>
+	                <button onClick={handleSetCustomPrice} disabled={drugSaving}
+	                  className="px-4 py-2 rounded-xl bg-[#00703C] hover:bg-[#005a2e] text-white text-[10px] font-bold transition-colors flex items-center gap-1.5 disabled:opacity-40">
+	                  <Save size={13} /> {drugSaving ? "Saving..." : "Set Price"}
+	                </button>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      )}
+
+	      {/* Delete Confirmation */}
+	      {showDeleteConfirm && selectedDrug && (
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	          <div className="w-full max-w-[400px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
+	            <div className="bg-gradient-to-r from-red-600 to-red-700 px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
+	              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-2"><Trash2 size={16} /> Remove Drug</h2>
+	              <button onClick={closeAllModals} className="flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-colors">
+	                <X size={13} /> <span className="hidden sm:inline">Close</span>
+	              </button>
+	            </div>
+	            <div className="p-3 sm:p-6 md:p-8">
+	              <div className="text-center py-4">
+	                <AlertTriangle size={36} className="mx-auto text-red-400 mb-3" />
+	                <p className="text-sm font-bold text-slate-800 mb-2">Remove {selectedDrug.name}?</p>
+	                <p className="text-xs text-slate-500">This will soft-delete the drug from inventory. Dispensing history will be preserved.</p>
+	              </div>
+	              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 mt-2">
+	                <button onClick={closeAllModals} disabled={drugSaving}
+	                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-[10px] font-bold hover:bg-slate-50 transition-colors">Cancel</button>
+	                <button onClick={handleDeleteDrug} disabled={drugSaving}
+	                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold transition-colors flex items-center gap-1.5 disabled:opacity-40">
+	                  <Trash2 size={13} /> {drugSaving ? "Removing..." : "Yes, Remove"}
+	                </button>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      )}
+
+	      {/* ═══════════════════════════════════════════════════════════════════════
+	          DOCTOR RECORDS MODAL — shows everything the doctor input
+	          ═══════════════════════════════════════════════════════════════════════ */}
       {showDoctorModal && doctorModalPatient && (
         <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
           <div className="w-full max-w-[1100px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
@@ -2112,8 +3217,74 @@ export default function NurseMidwifeDashboard() {
             </div>
           </div>
         </div>
-      )}
+	      )}
 
-    </div>
-  );
-}
+	      {/* ═══════════════════════════════════════════════════════════════════════
+	          SHARE PATIENT MODAL
+	          ═══════════════════════════════════════════════════════════════════════ */}
+	      {showShareModal && sharePatient && (
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	          <div className="w-full max-w-[480px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
+	            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
+	              <div className="flex items-center gap-3 min-w-0">
+	                <div className="hidden sm:flex w-10 h-10 rounded-full bg-white/20 items-center justify-center text-base font-bold flex-shrink-0">
+	                  {sharePatient.firstName?.[0]}{sharePatient.lastName?.[0]}
+	                </div>
+	                <div className="min-w-0">
+	                  <h2 className="text-sm sm:text-base font-bold truncate">Share Patient</h2>
+	                  <p className="text-[10px] text-white/80 truncate">{sharePatient.lastName}, {sharePatient.firstName}</p>
+	                </div>
+	              </div>
+	              <button onClick={() => { setShowShareModal(false); setSharePatient(null); }}
+	                className="flex items-center gap-1 bg-white/15 hover:bg-white/25 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl transition-colors flex-shrink-0">
+	                <X size={13} /> <span className="hidden sm:inline">Close</span>
+	              </button>
+	            </div>
+	            <div className="p-3 sm:p-6 md:p-8">
+	              <div className="space-y-4">
+	                <div className="bg-slate-50/70 rounded-lg px-4 py-3 border border-slate-100">
+	                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Patient</p>
+	                  <p className="text-sm font-bold text-slate-800">{sharePatient.lastName}, {sharePatient.firstName}</p>
+	                  <p className="text-[11px] text-slate-500 font-mono mt-0.5">{sharePatient.patientNumber}</p>
+	                </div>
+
+	                <div>
+	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Send to Department *</label>
+	                  <select value={shareTargetDept} onChange={e => setShareTargetDept(e.target.value)}
+	                    className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]">
+	                    <option value="doctor">Doctor</option>
+	                    <option value="lab">Laboratory</option>
+	                    <option value="radiology">Radiology / Sonography</option>
+	                    <option value="pharmacy">Pharmacy</option>
+	                    <option value="cashier">Cashier</option>
+	                    <option value="reception">Reception</option>
+	                    <option value="dental">Dentist</option>
+	                    <option value="nurse">Nurse/Midwife (other)</option>
+	                  </select>
+	                </div>
+
+	                <div>
+	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Notes (optional)</label>
+	                  <textarea value={shareNotes} onChange={e => setShareNotes(e.target.value)}
+	                    placeholder="Add a message for the receiving department..."
+	                    rows={3}
+	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C] resize-none" />
+	                </div>
+	              </div>
+
+	              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 mt-4">
+	                <button onClick={() => { setShowShareModal(false); setSharePatient(null); }} disabled={shareSaving}
+	                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-[10px] font-bold hover:bg-slate-50 transition-colors">Cancel</button>
+	                <button onClick={handleSharePatient} disabled={shareSaving || !shareTargetDept}
+	                  className="px-5 py-2 rounded-xl bg-[#00703C] hover:bg-[#005a2e] text-white text-[10px] font-bold transition-colors flex items-center gap-1.5 disabled:opacity-40 shadow-sm">
+	                  <ArrowRight size={13} /> {shareSaving ? "Sharing..." : `Share with ${shareTargetDept.charAt(0).toUpperCase() + shareTargetDept.slice(1)}`}
+	                </button>
+	              </div>
+	            </div>
+	          </div>
+	        </div>
+	      )}
+
+	    </div>
+	  );
+	}

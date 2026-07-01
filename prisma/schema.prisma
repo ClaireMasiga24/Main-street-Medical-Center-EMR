@@ -560,6 +560,39 @@ model Prescription {
   Visit        Visit?             @relation(fields: [visitId], references: [id])
 }
 
+model Drug {
+  id              Int          @id @default(autoincrement())
+  itemCode        String       @unique
+  name            String
+  category        String       @default("Drug")
+  costCentre      String       @default("Pharmacy")
+  buyingCost      Float        @default(0)
+  sellingPrice    Float        @default(0)
+  customPrice     Float?
+  stockQuantity   Int          @default(0)
+  reorderLevel    Int          @default(10)
+  lastEditedBy    String       @default("")
+  lastEditedOn    DateTime     @default(now())
+  registeredOn    DateTime     @default(now())
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  DispenseLog     DispenseLog[]
+}
+
+model DispenseLog {
+  id            Int      @id @default(autoincrement())
+  drugId        Int
+  drugName      String
+  quantity      Int
+  dispensedBy   String
+  dispensedTo   String?
+  notes         String?
+  dispensedAt   DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  Drug          Drug      @relation(fields: [drugId], references: [id], onDelete: Cascade)
+}
+
 model Billing {
   id          Int           @id @default(autoincrement())
   patientId   Int

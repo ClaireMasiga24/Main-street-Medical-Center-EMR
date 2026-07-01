@@ -126,6 +126,25 @@ export async function POST(request: Request) {
     return NextResponse.json(triage, { status: 201 });
   } catch (err: any) {
     console.error("[Triage POST]", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const msg = err.message?.includes("prisma") || err.message?.includes("Prisma")
+      ? "An error occurred while saving triage. The patient may have been removed or the database is unavailable."
+      : err.message;
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json();
+    const { id, ...data } = body;
+    if (!id) return NextResponse.json({ error: "Triage ID is required" }, { status: 400 });
+    const updated = await prisma.triage.update({ where: { id: parseInt(id) }, data });
+    return NextResponse.json(updated);
+  } catch (err: any) {
+    console.error("[Triage PATCH]", err);
+    const msg = err.message?.includes("prisma") || err.message?.includes("Prisma")
+      ? "Database error. Please try again."
+      : err.message;
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
