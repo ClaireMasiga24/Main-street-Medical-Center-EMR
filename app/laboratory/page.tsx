@@ -13,143 +13,31 @@ import {
   FlaskRound, BadgeCheck, Sigma, Menu, X, Home,
   Archive, Ban, MessageSquareText, Eye, Filter,
   Share2, Printer, Paperclip, Upload,
+  Clock, ChevronDown, ChevronUp,
 } from "lucide-react";
 import StaffMessaging from "../components/StaffMessaging";
+import {
+  getTestDefinition,
+  getFlatFields,
+  getSectionFieldBounds,
+  computeFlag,
+  getFlagColor,
+  computeInterpretation,
+  type TestDefinition,
+  type TestFieldConfig,
+  type PrintLayoutConfig,
+  type ResultEntry,
+} from "../lib/lab-config";
+import {
+  ResultEntryForm,
+  generateLabReportHTML,
+  type LabAttachment,
+} from "../components/lis";
 
 // ─── Colors ──────────────────────────────────────────────────────────────
 const BRAND = "#00703C";
 const BRAND_LIGHT = "#e8f5e9";
 const BRAND_DARK = "#004d2b";
-
-// ─── Test Panels ─────────────────────────────────────────────────────────
-interface PanelRow { test: string; unit: string; range: string; }
-
-const PANELS: Record<string, { label: string; rows: PanelRow[] }> = {
-  CBC: {
-    label: "Complete Blood Count (CBC)",
-	    rows: [
-	      { test: "White Blood Cell (WBC)", unit: "×10⁹/L", range: "4.0-11.0" },
-	      { test: "Red Blood Cell (RBC)", unit: "×10¹²/L", range: "M: 4.5–5.9; F: 4.1–5.1" },
-	      { test: "Hemoglobin (HGB)", unit: "g/dL", range: "M: 13.5–17.5; F: 12.0–15.5" },
-	      { test: "Hematocrit (HCT)", unit: "%", range: "M: 41–53; F: 36–46" },
-	      { test: "Mean Corpuscular Volume (MCV)", unit: "fL", range: "80–100" },
-	      { test: "Mean Corpuscular Hemoglobin (MCH)", unit: "pg", range: "27–33" },
-	      { test: "Mean Corpuscular HGB Conc. (MCHC)", unit: "g/dL", range: "32–36" },
-	      { test: "RDW-CV (Red Cell Distribution Width)", unit: "%", range: "11.5–14.5" },
-	      { test: "Platelet Count (PLT)", unit: "×10⁹/µL", range: "150–450" },
-	      { test: "MPV (Mean Platelet Volume)", unit: "fL", range: "7.5–12.0" },
-	      // ── WBC Differential (3-part) ──
-	      { test: "LYM% (Lymphocytes)", unit: "%", range: "20–40" },
-	      { test: "MID% (Monocytes + Eosinophils + Basophils)", unit: "%", range: "2–15" },
-	      { test: "GRAN% (Granulocytes)", unit: "%", range: "50–70" },
-	      { test: "LYM#", unit: "×10⁹/µL", range: "1.0–4.0" },
-	      { test: "MID#", unit: "×10⁹/µL", range: "0.1–1.5" },
-	      { test: "GRAN#", unit: "×10⁹/µL", range: "2.0–7.5" },
-	    ],
-  },
-  URINALYSIS: {
-    label: "Urinalysis",
-    rows: [
-      { test: "Color", unit: "", range: "Yellow" },
-      { test: "Appearance", unit: "", range: "Clear" },
-      { test: "Specific Gravity", unit: "", range: "1.005-1.030" },
-      { test: "pH", unit: "", range: "4.5-8.0" },
-      { test: "Glucose", unit: "mg/dL", range: "Negative" },
-      { test: "Protein", unit: "mg/dL", range: "Negative" },
-      { test: "Blood", unit: "", range: "Negative" },
-      { test: "Ketones", unit: "mg/dL", range: "Negative" },
-      { test: "Bilirubin", unit: "", range: "Negative" },
-      { test: "Urobilinogen", unit: "mg/dL", range: "0.1-1.0" },
-      { test: "Nitrite", unit: "", range: "Negative" },
-      { test: "Leukocytes", unit: "", range: "Negative" },
-    ],
-  },
-  URINALYSIS_MICROSCOPY: {
-    label: "Urinalysis - Microscopy",
-    rows: [
-      { test: "Red Blood Cells", unit: "/HPF", range: "0-2" },
-      { test: "White Blood Cells", unit: "/HPF", range: "0-5" },
-      { test: "Epithelial Cells", unit: "/HPF", range: "Few" },
-      { test: "Casts", unit: "/LPF", range: "0-0" },
-      { test: "Crystals", unit: "", range: "None" },
-      { test: "Bacteria", unit: "", range: "None" },
-      { test: "Yeast Cells", unit: "", range: "None" },
-      { test: "Trichomonas", unit: "", range: "None" },
-    ],
-  },
-  LFT: {
-    label: "Liver Function Test (LFT)",
-    rows: [
-      { test: "Total Protein", unit: "g/dL", range: "6.0-8.3" },
-      { test: "Albumin", unit: "g/dL", range: "3.5-5.0" },
-      { test: "Total Bilirubin", unit: "mg/dL", range: "0.1-1.2" },
-      { test: "Direct Bilirubin", unit: "mg/dL", range: "0.0-0.3" },
-      { test: "Indirect Bilirubin", unit: "mg/dL", range: "0.1-0.9" },
-      { test: "ALT (SGPT)", unit: "U/L", range: "7-56" },
-      { test: "AST (SGOT)", unit: "U/L", range: "5-40" },
-      { test: "Alkaline Phosphatase (ALP)", unit: "U/L", range: "44-147" },
-      { test: "Gamma-GT (GGT)", unit: "U/L", range: "9-48" },
-    ],
-  },
-  RFT: {
-    label: "Renal Function Test (RFT)",
-    rows: [
-      { test: "Creatinine", unit: "mg/dL", range: "0.6-1.2" },
-      { test: "Blood Urea Nitrogen (BUN)", unit: "mg/dL", range: "7-20" },
-      { test: "Urea", unit: "mg/dL", range: "15-43" },
-      { test: "Sodium (Na)", unit: "mEq/L", range: "136-145" },
-      { test: "Potassium (K)", unit: "mEq/L", range: "3.5-5.1" },
-      { test: "Chloride (Cl)", unit: "mEq/L", range: "98-106" },
-      { test: "Bicarbonate (HCO3)", unit: "mEq/L", range: "22-29" },
-      { test: "Calcium (Ca)", unit: "mg/dL", range: "8.5-10.5" },
-    ],
-  },
-  LIPID: {
-    label: "Lipid Profile",
-    rows: [
-      { test: "Total Cholesterol", unit: "mg/dL", range: "<200" },
-      { test: "LDL Cholesterol", unit: "mg/dL", range: "<100" },
-      { test: "HDL Cholesterol", unit: "mg/dL", range: "40-60" },
-      { test: "Triglycerides", unit: "mg/dL", range: "<150" },
-      { test: "VLDL", unit: "mg/dL", range: "5-40" },
-    ],
-  },
-  GLUCOSE: {
-    label: "Blood Glucose",
-    rows: [
-      { test: "Glucose (Fasting)", unit: "mg/dL", range: "70-110" },
-      { test: "Glucose (Random)", unit: "mg/dL", range: "<140" },
-      { test: "HbA1c", unit: "%", range: "4.0-5.6" },
-    ],
-  },
-  COAGULATION: {
-    label: "Coagulation Profile",
-    rows: [
-      { test: "Prothrombin Time (PT)", unit: "sec", range: "11-13.5" },
-      { test: "INR", unit: "", range: "0.8-1.2" },
-      { test: "APTT", unit: "sec", range: "25-35" },
-      { test: "Fibrinogen", unit: "mg/dL", range: "200-400" },
-    ],
-  },
-  ELECTROLYTES: {
-    label: "Electrolytes Panel",
-    rows: [
-      { test: "Sodium (Na)", unit: "mEq/L", range: "136-145" },
-      { test: "Potassium (K)", unit: "mEq/L", range: "3.5-5.1" },
-      { test: "Chloride (Cl)", unit: "mEq/L", range: "98-106" },
-      { test: "Bicarbonate (HCO3)", unit: "mEq/L", range: "22-29" },
-      { test: "Anion Gap", unit: "mEq/L", range: "8-12" },
-    ],
-  },
-  MALARIA: {
-    label: "Malaria",
-    rows: [
-      { test: "Malaria RDT", unit: "", range: "Negative" },
-      { test: "Plasmodium Species", unit: "", range: "None seen" },
-      { test: "Parasite Density", unit: "/µL", range: "Negative" },
-    ],
-  },
-};
 
 const SPECIMEN_TYPES = ["BLOOD", "URINE", "STOOL", "CSF", "SWAB", "SPUTUM", "TISSUE", "SERUM", "PLASMA", "OTHER"];
 const NOTIFICATION_METHODS = ["Phone", "In Person", "Email"];
@@ -163,61 +51,6 @@ const SHARE_TARGETS = [
   { role: "RECEPTIONIST", dept: "Reception", label: "Receptionist", icon: Users, desc: "Send results to Reception" },
   { role: "RADIOLOGIST_SONOGRAPHER", dept: "Radiology", label: "Radiologist / Sonographer", icon: Bone, desc: "Send results to Radiology" },
 ] as const;
-
-function detectPanel(testName: string): string {
-  const n = testName.toLowerCase();
-  if (n.includes("cbc") || n.includes("complete blood")) return "CBC";
-  if (n.includes("urinalysis") || n.includes("urine") || n.includes("ua")) return "URINALYSIS";
-  if (n.includes("liver") || n.includes("lft")) return "LFT";
-  if (n.includes("renal") || n.includes("rft") || n.includes("kidney")) return "RFT";
-  if (n.includes("lipid") || n.includes("cholesterol")) return "LIPID";
-  if (n.includes("glucose") || n.includes("hba1c") || n.includes("sugar")) return "GLUCOSE";
-  if (n.includes("coagulation") || n.includes("inr") || n.includes("pt/")) return "COAGULATION";
-  if (n.includes("electrolyte") || n.includes("lytes")) return "ELECTROLYTES";
-  if (n.includes("malaria") || n.includes("rdt") || n.includes("blood film")) return "MALARIA";
-  return "CBC";
-}
-
-function computeFlag(value: string, range: string): "" | "HIGH" | "LOW" | "NORMAL" {
-  if (!value || !value.trim()) return "";
-  const v = parseFloat(value);
-  if (isNaN(v)) return "NORMAL";
-  const ltMatch = range.match(/^<(\d+\.?\d*)$/);
-  if (ltMatch) {
-    const max = parseFloat(ltMatch[1]);
-    if (v > max) return "HIGH";
-    return "NORMAL";
-  }
-  const gtMatch = range.match(/^>(\d+\.?\d*)$/);
-  if (gtMatch) {
-    const min = parseFloat(gtMatch[1]);
-    if (v < min) return "LOW";
-    return "NORMAL";
-  }
-  const rangeMatch = range.match(/^(\d+\.?\d*)\s*[–-]\s*(\d+\.?\d*)$/);
-  if (rangeMatch) {
-    const low = parseFloat(rangeMatch[1]);
-    const high = parseFloat(rangeMatch[2]);
-    if (v < low) return "LOW";
-    if (v > high) return "HIGH";
-    return "NORMAL";
-  }
-  const lowValues = ["negative", "none", "nil", "absent", "few"];
-  const entered = value.trim().toLowerCase();
-  if (lowValues.includes(entered) || lowValues.includes(range.toLowerCase())) {
-    return !lowValues.includes(entered) ? "HIGH" : "NORMAL";
-  }
-  return "NORMAL";
-}
-
-function getFlagColor(flag: string): string {
-  switch (flag) {
-    case "HIGH": return "text-red-600 bg-red-50 border-red-200";
-    case "LOW": return "text-amber-600 bg-amber-50 border-amber-200";
-    case "NORMAL": return "text-green-700 bg-green-50 border-green-200";
-    default: return "text-gray-400";
-  }
-}
 
 const formatDate = (iso: string) => {
   if (!iso) return "\u2014";
@@ -246,198 +79,7 @@ const timeElapsed = (iso: string) => {
   } catch { return ""; }
 };
 
-// ─── Print Report HTML Generator ───────────────────────────────────────
-function generateLabReportHTML(
-  patientName: string,
-  patientNumber: string,
-  gender: string,
-  age: number,
-  testName: string,
-  specimenType: string | null,
-  specimenId: string | null,
-  specimenCollectedAt: string | null,
-  requestedBy: string,
-  results: ResultEntry[],
-  enteredByName: string | null,
-  validatedByName: string | null,
-) {
-  const now = new Date().toLocaleString("en-UG", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-  const cols = specimenCollectedAt ? new Date(specimenCollectedAt).toLocaleDateString("en-UG", { day: "2-digit", month: "short", year: "numeric" }) : "\u2014";
-  const colTime = specimenCollectedAt ? new Date(specimenCollectedAt).toLocaleTimeString("en-UG", { hour: "2-digit", minute: "2-digit" }) : "\u2014";
-  const isCBC = /cbc|complete blood/i.test(testName);
-
-  const rowsHtml = results.map((r, i) => {
-    let flagColor = "";
-    let flagBg = "";
-    if (r.flag === "HIGH") { flagColor = "color:#dc2626;font-weight:700;"; flagBg = "background:#fef2f2;"; }
-    else if (r.flag === "LOW") { flagColor = "color:#d97706;font-weight:700;"; flagBg = "background:#fffbeb;"; }
-    else if (r.flag === "NORMAL") { flagColor = "color:#16a34a;"; }
-    const flagDisplay = r.result.trim() ? r.flag : "";
-    // Insert WBC Differential section header before the first differential row (index 10) for CBC
-    const sectionHeader = isCBC && i === 10
-      ? `<tr style="background:#f3f4f6;"><td colspan="6" style="padding:5px 8px;font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:0.5px;border-top:2px solid #d1d5db;border-bottom:1px solid #e5e7eb;">&nbsp;&nbsp;WBC DIFFERENTIAL (3-PART)</td></tr>`
-      : "";
-    return `${sectionHeader}<tr style="${flagBg}border-bottom:1px solid #e5e7eb;">
-      <td style="padding:6px 8px;font-size:11px;color:#374151;">${i + 1}</td>
-      <td style="padding:6px 8px;font-size:11px;color:#111827;font-weight:500;">${r.test}</td>
-      <td style="padding:6px 8px;font-size:11px;color:#111827;font-weight:600;text-align:center;">${r.result || "\u2014"}</td>
-      <td style="padding:6px 8px;font-size:10px;color:#6b7280;text-align:center;">${r.unit}</td>
-      <td style="padding:6px 8px;font-size:10px;color:#6b7280;font-family:monospace;text-align:center;">${r.referenceRange}</td>
-      <td style="padding:6px 8px;font-size:11px;text-align:center;${flagColor}">${flagDisplay}</td>
-    </tr>`;
-  }).join("");
-
-  // Find flagged rows for interpretation
-  const flagged = results.filter(r => r.flag === "HIGH" || r.flag === "LOW");
-  const interpretationHtml = flagged.length > 0
-    ? `<div style="margin-top:16px;">
-        <p style="font-size:11px;font-weight:700;color:#111827;margin:0 0 4px 0;">Remarks / Interpretation:</p>
-        <p style="font-size:11px;color:#374151;margin:0;line-height:1.5;">
-          Abnormal results detected: ${flagged.map(r => `${r.test} (${r.result}, ${r.flag})`).join("; ")}.
-          Clinical correlation advised.
-        </p>
-       </div>`
-    : `<div style="margin-top:16px;">
-        <p style="font-size:11px;font-weight:700;color:#111827;margin:0 0 4px 0;">Remarks / Interpretation:</p>
-        <p style="font-size:11px;color:#6b7280;margin:0;font-style:italic;">No remarks.</p>
-       </div>`;
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Lab Report - ${patientName}</title>
-<style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: 'Segoe UI', Arial, Helvetica, sans-serif; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    background: url('/Images/LOGO.jpg') center / 50% no-repeat;
-    opacity: 0.07;
-    pointer-events: none;
-    z-index: -1;
-  }
-  .watermark-fixed {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%,-50%);
-    width: 60%;
-    opacity: 0.07;
-    z-index: -1;
-    pointer-events: none;
-  }
-  @page { size: A4; margin: 15mm; }
-  @media print {
-    body { margin:0; padding:0; }
-    .screen-only { display:none !important; }
-    .report-content { display:block !important; }
-  }
-  @media screen {
-    .report-content { display:none; }
-  }
-</style>
-</head>
-<body>
-  <img src="/Images/LOGO.jpg" alt="" class="watermark-fixed" />
-  <div class="screen-only" style="text-align:center;padding:40px 20px;">
-    <button onclick="window.print()" style="background:#00703C;color:#fff;border:none;padding:12px 32px;font-size:16px;font-weight:600;border-radius:8px;cursor:pointer;">Click here to print</button>
-    <p style="margin-top:12px;font-size:13px;color:#6b7280;">If the print dialog does not open automatically, click the button above.</p>
-  </div>
-  <div class="report-content">
-    <!-- Facility header -->
-    <div style="text-align:center;margin-bottom:20px;">
-      <h1 style="font-size:20px;font-weight:800;color:#00703C;letter-spacing:1px;margin:0;">MAIN STREET MEDICAL CENTER</h1>
-      <p style="font-size:11px;color:#4b5563;margin:2px 0 0 0;">P.O BOX 154293, Seeta, Uganda</p>
-      <p style="font-size:10px;color:#9ca3af;margin:2px 0 0 0;">Laboratory Report</p>
-    </div>
-    <hr style="border:none;border-top:2px solid #00703C;margin-bottom:16px;" />
-    <!-- Patient details -->
-    <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
-      <tr>
-        <td style="width:50%;padding:3px 8px;font-size:11px;vertical-align:top;">
-          <span style="color:#6b7280;font-weight:600;">Patient Name:</span><br/>
-          <span style="color:#111827;font-weight:500;">${patientName}</span>
-        </td>
-        <td style="width:50%;padding:3px 8px;font-size:11px;vertical-align:top;">
-          <span style="color:#6b7280;font-weight:600;">Lab ID:</span><br/>
-          <span style="color:#111827;font-weight:500;">${specimenId || "\u2014"}</span>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:3px 8px;font-size:11px;vertical-align:top;">
-          <span style="color:#6b7280;font-weight:600;">Gender / Age:</span><br/>
-          <span style="color:#111827;font-weight:500;">${gender} / ${age} years</span>
-        </td>
-        <td style="padding:3px 8px;font-size:11px;vertical-align:top;">
-          <span style="color:#6b7280;font-weight:600;">Specimen Type:</span><br/>
-          <span style="color:#111827;font-weight:500;">${specimenType || "\u2014"}</span>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:3px 8px;font-size:11px;vertical-align:top;">
-          <span style="color:#6b7280;font-weight:600;">Date of Collection:</span><br/>
-          <span style="color:#111827;font-weight:500;">${cols}</span>
-        </td>
-        <td style="padding:3px 8px;font-size:11px;vertical-align:top;">
-          <span style="color:#6b7280;font-weight:600;">Time:</span><br/>
-          <span style="color:#111827;font-weight:500;">${colTime}</span>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:3px 8px;font-size:11px;vertical-align:top;">
-          <span style="color:#6b7280;font-weight:600;">Requested By:</span><br/>
-          <span style="color:#111827;font-weight:500;">${requestedBy}</span>
-        </td>
-        <td style="padding:3px 8px;font-size:11px;vertical-align:top;">
-          <span style="color:#6b7280;font-weight:600;">Test:</span><br/>
-          <span style="color:#111827;font-weight:500;">${testName}</span>
-        </td>
-      </tr>
-    </table>
-    <!-- Results table -->
-    <table style="width:100%;border-collapse:collapse;border:1px solid #d1d5db;">
-      <thead>
-        <tr style="background:#00703C;color:#fff;">
-          <th style="padding:7px 8px;font-size:10px;font-weight:700;text-align:left;letter-spacing:0.5px;">#</th>
-          <th style="padding:7px 8px;font-size:10px;font-weight:700;text-align:left;letter-spacing:0.5px;">Parameter</th>
-          <th style="padding:7px 8px;font-size:10px;font-weight:700;text-align:center;letter-spacing:0.5px;">Result</th>
-          <th style="padding:7px 8px;font-size:10px;font-weight:700;text-align:center;letter-spacing:0.5px;">Units</th>
-          <th style="padding:7px 8px;font-size:10px;font-weight:700;text-align:center;letter-spacing:0.5px;">Reference Range</th>
-          <th style="padding:7px 8px;font-size:10px;font-weight:700;text-align:center;letter-spacing:0.5px;">Flag</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rowsHtml}
-      </tbody>
-    </table>
-    ${interpretationHtml}
-    <hr style="border:none;border-top:1px solid #d1d5db;margin:24px 0 16px 0;" />
-    <!-- Signature lines -->
-    <table style="width:100%;border-collapse:collapse;">
-      <tr>
-        <td style="width:50%;padding:4px 8px;vertical-align:top;">
-          <p style="font-size:11px;color:#6b7280;font-weight:600;margin:0 0 2px 0;">Lab Technician</p>
-          <p style="font-size:11px;color:#111827;font-weight:500;margin:0;border-bottom:1px solid #374151;display:inline-block;min-width:180px;padding-bottom:4px;">${enteredByName || "\u2014"}</p>
-          <p style="font-size:9px;color:#9ca3af;margin:2px 0 0 0;">Signature</p>
-        </td>
-        <td style="width:50%;padding:4px 8px;vertical-align:top;">
-          <p style="font-size:11px;color:#6b7280;font-weight:600;margin:0 0 2px 0;">Authorized By</p>
-          <p style="font-size:11px;color:#111827;font-weight:500;margin:0;border-bottom:1px solid #374151;display:inline-block;min-width:180px;padding-bottom:4px;">${validatedByName || "\u2014"}</p>
-          <p style="font-size:9px;color:#9ca3af;margin:2px 0 0 0;">Signature</p>
-        </td>
-      </tr>
-    </table>
-    <p style="font-size:8px;color:#9ca3af;text-align:center;margin-top:16px;">Printed: ${now} &bull; Main Street Medical Center Laboratory</p>
-  </div>
-  <script>
-    (function(){ try { setTimeout(function(){ window.print(); }, 500); } catch(e) {} })();
-  </script>
-</body>
-</html>`;
-}
+// ─── Note: generateLabReportHTML moved to app/components/lis/PrintReport.ts ─
 
 // ─── Types ───────────────────────────────────────────────────────────────
 interface LabRequestItem {
@@ -461,16 +103,7 @@ interface LabRequestItem {
   status: string; createdAt: string; updatedAt: string;
 }
 
-interface ResultEntry { test: string; unit: string; referenceRange: string; result: string; flag: string; }
-
-interface LabAttachment {
-  name: string;
-  data: string;
-  type: string;
-  size: number;
-  uploadedAt: string;
-  uploadedBy: string;
-}
+	// ─── Note: LabAttachment type moved to app/components/lis/types.ts ─
 
 // ─── Main Component ──────────────────────────────────────────────────────
 export default function LaboratoryPage() {
@@ -504,7 +137,7 @@ export default function LaboratoryPage() {
 
   // Step 2: Results
   const [results, setResults] = useState<ResultEntry[]>([]);
-  const [urinalysisTab, setUrinalysisTab] = useState<"dipstick" | "microscopy">("dipstick");
+  const [activeSection, setActiveSection] = useState(0);
   const [savingResults, setSavingResults] = useState(false);
   const [resultsSaved, setResultsSaved] = useState(false);
 
@@ -522,6 +155,11 @@ export default function LaboratoryPage() {
   const [attachments, setAttachments] = useState<LabAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Patient history (cross-department)
+  const [patientHistoryData, setPatientHistoryData] = useState<any>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(true);
 
   // ── Auth ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -562,6 +200,21 @@ export default function LaboratoryPage() {
     if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Request failed"); }
     return res.json();
   };
+
+  // ── Fetch cross-department patient history ──────────────────────────────
+  const fetchPatientHistory = useCallback(async (patientId: number) => {
+    setHistoryLoading(true);
+    setPatientHistoryData(null);
+    try {
+      const res = await fetch(`/api/patient-history?patientId=${patientId}`);
+      const data = await res.json();
+      if (data.success) setPatientHistoryData(data.data);
+    } catch (err) {
+      console.error("Failed to fetch patient history", err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
 
   // ── Logout ────────────────────────────────────────────────────────────
   const handleLogout = async () => {
@@ -639,6 +292,10 @@ export default function LaboratoryPage() {
     setSelectedDepts([]);
     setCritNotifiedPerson("");
     setCritNotificationMethod("");
+    setActiveSection(0);
+
+    // Fetch cross-department patient history
+    fetchPatientHistory(req.patientId);
 
     // Parse existing attachments
     if (req.attachments) {
@@ -667,6 +324,7 @@ export default function LaboratoryPage() {
       } catch {}
     }
     setResults(getDefaultResults(req));
+    setActiveSection(0);
   };
 
   const closeWorkflow = () => {
@@ -681,25 +339,15 @@ export default function LaboratoryPage() {
     setCritNotifiedPerson("");
     setCritNotificationMethod("");
     setAttachments([]);
+    setActiveSection(0);
   };
 
   // ── Default Results ───────────────────────────────────────────────────
   const getDefaultResults = (req: LabRequestItem): ResultEntry[] => {
-    const panelKey = detectPanel(req.testName);
-    const panel = PANELS[panelKey];
-    if (!panel) return [];
-    const rows: ResultEntry[] = panel.rows.map(r => ({
-      test: r.test, unit: r.unit, referenceRange: r.range, result: "", flag: "",
+    const def = getTestDefinition(req.testName);
+    return def.fields.map(f => ({
+      test: f.test, unit: f.unit || "", referenceRange: f.referenceRange || "", result: "", flag: "",
     }));
-    if (panelKey === "URINALYSIS") {
-      const micro = PANELS["URINALYSIS_MICROSCOPY"];
-      if (micro) {
-        micro.rows.forEach(r => {
-          rows.push({ test: r.test, unit: r.unit, referenceRange: r.range, result: "", flag: "" });
-        });
-      }
-    }
-    return rows;
   };
 
   // ── Step 1: Save Specimen ─────────────────────────────────────────────
@@ -791,8 +439,10 @@ export default function LaboratoryPage() {
     if (!selectedRequest) return;
     setSavingResults(true);
     try {
-      const hasAnyResult = results.some(r => r.result.trim() !== "");
-      if (!hasAnyResult) { alert("Enter at least one result value."); setSavingResults(false); return; }
+      const def = getTestDefinition(selectedRequest.testName);
+      const isFileTest = def.fields.every(f => f.inputType === "file");
+      const hasAnyResult = isFileTest ? attachments.length > 0 : results.some(r => r.result.trim() !== "");
+      if (!hasAnyResult) { alert(isFileTest ? "Upload at least one attachment before saving." : "Enter at least one result value."); setSavingResults(false); return; }
 
       const criticalFlags = results.filter(r => r.flag === "HIGH" || r.flag === "LOW");
       const isCrit = criticalFlags.length > 0;
@@ -908,6 +558,7 @@ export default function LaboratoryPage() {
     if (parsedResults.length === 0) {
       parsedResults = getDefaultResults(req);
     }
+    const printDef = getTestDefinition(req.testName);
     const html = generateLabReportHTML(
       `${req.lastName}, ${req.firstName}`,
       req.patientNumber,
@@ -921,6 +572,7 @@ export default function LaboratoryPage() {
       parsedResults,
       req.enteredByName,
       req.validatedByName,
+      printDef.printLayout,
     );
     const w = window.open("", "_blank", "width=900,height=700,scrollbars=yes");
     if (w) {
@@ -956,16 +608,30 @@ export default function LaboratoryPage() {
     </button>
   );
 
+  // ── Small info tile for vitals grid ──────────────────────────────────
+  const InfoTile = ({ label, value }: { label: string; value: string }) => (
+    <div className="bg-white rounded-lg border border-gray-100 px-2.5 py-1.5">
+      <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider">{label}</p>
+      <p className="text-xs font-medium text-gray-700 mt-0.5">{value}</p>
+    </div>
+  );
+
   // ── Render: Loading state ─────────────────────────────────────────────
   if (!isAuthed) return null;
 
   // ── Render: Workflow view ─────────────────────────────────────────────
   if (selectedRequest && workflowStep > 0) {
-    const panelKey = detectPanel(selectedRequest.testName);
-    const panel = PANELS[panelKey];
-    const isUrinalysis = panelKey === "URINALYSIS";
-    const dipstickResults = isUrinalysis ? results.slice(0, 12) : [];
-    const microscopyResults = isUrinalysis ? results.slice(12) : [];
+    const def = getTestDefinition(selectedRequest.testName);
+    const hasSections = !!(def.sections && def.sections.length > 0);
+    const sectionBounds = hasSections ? getSectionFieldBounds(def) : [];
+    // Map activeSection index to the start index in the flat results array
+    const sectionStart = hasSections && activeSection < sectionBounds.length
+      ? (activeSection === 0 ? 0 : sectionBounds[activeSection - 1])
+      : 0;
+    const sectionEnd = hasSections && activeSection < sectionBounds.length
+      ? sectionBounds[activeSection]
+      : results.length;
+    const visibleResults = hasSections ? results.slice(sectionStart, sectionEnd) : results;
 
     return (
       <div className="min-h-screen" style={{ backgroundColor: "#f5f7fa" }}>
@@ -1027,6 +693,306 @@ export default function LaboratoryPage() {
             ))}
           </div>
         </div>
+
+
+        {/* ── Patient History Panel ──────────────────────────────────────── */}
+        <div className="max-w-4xl mx-auto px-4 pb-4">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            {/* Toggle header */}
+            <button
+              onClick={() => setHistoryOpen(!historyOpen)}
+              className="w-full flex items-center justify-between px-5 py-3 hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-gray-500" />
+                <span className="text-sm font-semibold text-gray-700">Patient History</span>
+                {historyLoading && (
+                  <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                )}
+                {!historyLoading && patientHistoryData && (
+                  <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                    {[
+                      patientHistoryData.triage ? 1 : 0,
+                      patientHistoryData.visits?.length || 0,
+                      patientHistoryData.imaging?.length || 0,
+                      patientHistoryData.labHistory?.length || 0,
+                      patientHistoryData.prescriptions?.length || 0,
+                    ].reduce((a: number, b: number) => a + b, 0)} entries
+                  </span>
+                )}
+              </div>
+              {historyOpen ? (
+                <ChevronUp className="w-4 h-4 text-gray-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-gray-400" />
+              )}
+            </button>
+
+            {/* Collapsible content */}
+            {historyOpen && (
+              <div className="border-t border-gray-100 divide-y divide-gray-50">
+                {/* Loading state */}
+                {historyLoading && (
+                  <div className="px-5 py-8 text-center text-sm text-gray-400">
+                    <div className="w-6 h-6 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin mx-auto mb-2" />
+                    Loading patient history...
+                  </div>
+                )}
+
+                {/* Error / empty state (loaded but nothing found) */}
+                {!historyLoading && !patientHistoryData && (
+                  <div className="px-5 py-6 text-center text-sm text-gray-400">
+                    No history data available for this patient.
+                  </div>
+                )}
+
+                {/* ── Triage / Nurse Assessment ── */}
+                {!historyLoading && patientHistoryData?.triage && (
+                  <div className="px-5 py-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-7 h-7 rounded-md bg-blue-100 flex items-center justify-center">
+                        <Activity className="w-3.5 h-3.5 text-blue-600" />
+                      </div>
+                      <span className="text-xs font-bold uppercase tracking-wider text-blue-700">Triage Assessment</span>
+                      <span className="text-[10px] text-blue-500 font-medium ml-auto">Nurse Midwife</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs">
+                      {patientHistoryData.triage.chiefComplaint && (
+                        <div className="col-span-full bg-blue-50/50 rounded-lg px-3 py-2 border border-blue-100">
+                          <span className="font-semibold text-gray-500">Chief Complaint:</span>
+                          <p className="text-gray-700 mt-0.5">{patientHistoryData.triage.chiefComplaint}</p>
+                        </div>
+                      )}
+                      {patientHistoryData.triage.esiLevel && (
+                        <InfoTile label="ESI Level" value={`Level ${patientHistoryData.triage.esiLevel}`} />
+                      )}
+                      {patientHistoryData.triage.temperature && (
+                        <InfoTile label="Temperature" value={`${patientHistoryData.triage.temperature} °C`} />
+                      )}
+                      {patientHistoryData.triage.bpSystolic && (
+                        <InfoTile label="BP" value={`${patientHistoryData.triage.bpSystolic}/${patientHistoryData.triage.bpDiastolic || "—"}`} />
+                      )}
+                      {patientHistoryData.triage.heartRate && (
+                        <InfoTile label="Heart Rate" value={`${patientHistoryData.triage.heartRate} bpm`} />
+                      )}
+                      {patientHistoryData.triage.spo2 && (
+                        <InfoTile label="SpO₂" value={`${patientHistoryData.triage.spo2}%`} />
+                      )}
+                      {patientHistoryData.triage.weight && (
+                        <InfoTile label="Weight" value={`${patientHistoryData.triage.weight} kg`} />
+                      )}
+                      {patientHistoryData.triage.allergies && (
+                        <InfoTile label="Allergies" value={patientHistoryData.triage.allergies} />
+                      )}
+                    </div>
+                    {patientHistoryData.triage.nursingNotes && (
+                      <div className="mt-2 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
+                        <span className="font-semibold text-gray-400">Nursing Notes:</span> {patientHistoryData.triage.nursingNotes}
+                      </div>
+                    )}
+                    <div className="mt-2 text-[10px] text-gray-400">
+                      {new Date(patientHistoryData.triage.createdAt).toLocaleString()}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Doctor Consultations ── */}
+                {!historyLoading && patientHistoryData?.visits?.length > 0 && (
+                  <div className="px-5 py-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-7 h-7 rounded-md bg-amber-100 flex items-center justify-center">
+                        <Stethoscope className="w-3.5 h-3.5 text-amber-600" />
+                      </div>
+                      <span className="text-xs font-bold uppercase tracking-wider text-amber-700">Doctor Consultations</span>
+                      <span className="text-[9px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full ml-auto">
+                        {patientHistoryData.visits.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {patientHistoryData.visits.map((v: any, i: number) => (
+                        <div key={v.id} className="bg-amber-50/30 rounded-lg border border-amber-100 px-3 py-2.5">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">
+                              Visit {patientHistoryData.visits.length - i}
+                            </span>
+                            <span className="text-[9px] text-gray-400">
+                              {new Date(v.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                          {v.diagnosis && (
+                            <p className="text-xs mb-0.5"><span className="font-semibold text-gray-500">Diagnosis:</span> {v.diagnosis}</p>
+                          )}
+                          {v.assessment && (
+                            <p className="text-xs mb-0.5"><span className="font-semibold text-gray-500">Assessment:</span> {v.assessment}</p>
+                          )}
+                          {v.treatmentPlan && (
+                            <p className="text-xs mb-0.5"><span className="font-semibold text-gray-500">Plan:</span> {v.treatmentPlan}</p>
+                          )}
+                          {v.notes && (
+                            <p className="text-xs text-gray-500"><span className="font-semibold text-gray-400">Notes:</span> {v.notes}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Imaging / Radiology Reports ── */}
+                {!historyLoading && patientHistoryData?.imaging?.length > 0 && (
+                  <div className="px-5 py-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-7 h-7 rounded-md bg-cyan-100 flex items-center justify-center">
+                        <Microscope className="w-3.5 h-3.5 text-cyan-600" />
+                      </div>
+                      <span className="text-xs font-bold uppercase tracking-wider text-cyan-700">Imaging Reports</span>
+                      <span className="text-[9px] bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded-full ml-auto">
+                        {patientHistoryData.imaging.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {patientHistoryData.imaging.map((img: any) => (
+                        <div key={img.id} className="bg-cyan-50/30 rounded-lg border border-cyan-100 px-3 py-2.5">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-semibold text-gray-700">{img.studyType}</span>
+                            <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
+                              img.status === "REPORTED" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                            }`}>{img.status}</span>
+                          </div>
+                          {img.Staff && (
+                            <p className="text-[9px] text-gray-400 mb-1">By: {img.Staff.fullName} ({img.Staff.department})</p>
+                          )}
+                          {img.clinicalNotes && (
+                            <p className="text-xs text-gray-600"><span className="font-semibold text-gray-500">Notes:</span> {img.clinicalNotes}</p>
+                          )}
+                          {img.findings && (
+                            <p className="text-xs text-gray-600"><span className="font-semibold text-gray-500">Findings:</span> {img.findings}</p>
+                          )}
+                          {img.impression && (
+                            <p className="text-xs text-gray-600"><span className="font-semibold text-gray-500">Impression:</span> {img.impression}</p>
+                          )}
+                          {img.conclusion && (
+                            <p className="text-xs text-gray-600"><span className="font-semibold text-gray-500">Conclusion:</span> {img.conclusion}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Lab History ── */}
+                {!historyLoading && patientHistoryData?.labHistory?.length > 0 && (
+                  <div className="px-5 py-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-7 h-7 rounded-md bg-purple-100 flex items-center justify-center">
+                        <FlaskConical className="w-3.5 h-3.5 text-purple-600" />
+                      </div>
+                      <span className="text-xs font-bold uppercase tracking-wider text-purple-700">Previous Lab Results</span>
+                      <span className="text-[9px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded-full ml-auto">
+                        {patientHistoryData.labHistory.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {patientHistoryData.labHistory.map((lab: any) => (
+                        <div key={lab.id} className="bg-purple-50/30 rounded-lg border border-purple-100 px-3 py-2.5 flex items-center justify-between">
+                          <div>
+                            <p className="text-xs font-semibold text-gray-700">{lab.testName}</p>
+                            <p className="text-[10px] text-gray-400">
+                              {lab.Staff?.fullName || "—"} &middot; {new Date(lab.createdAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {lab.results && (
+                              <span className="text-[10px] font-mono bg-white px-2 py-0.5 rounded border border-purple-200 text-purple-700">
+                                Results entered
+                              </span>
+                            )}
+                            <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
+                              lab.status === "COMPLETED" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                            }`}>{lab.status}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Prescriptions ── */}
+                {!historyLoading && patientHistoryData?.prescriptions?.length > 0 && (
+                  <div className="px-5 py-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-7 h-7 rounded-md bg-emerald-100 flex items-center justify-center">
+                        <Heart className="w-3.5 h-3.5 text-emerald-600" />
+                      </div>
+                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">Prescriptions</span>
+                      <span className="text-[9px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full ml-auto">
+                        {patientHistoryData.prescriptions.length}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {patientHistoryData.prescriptions.map((rx: any) => (
+                        <div key={rx.id} className="bg-emerald-50/30 rounded-lg border border-emerald-100 px-3 py-2">
+                          <p className="text-xs font-semibold text-gray-700">{rx.medication}</p>
+                          {rx.dosage && <p className="text-[10px] text-gray-500">{rx.dosage}</p>}
+                          {rx.instructions && <p className="text-[10px] text-gray-400">{rx.instructions}</p>}
+                          <div className="flex items-center justify-between mt-1">
+                            <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
+                              rx.status === "COMPLETED" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
+                            }`}>{rx.status}</span>
+                            <span className="text-[9px] text-gray-400">{new Date(rx.createdAt).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Timeline ── */}
+                {!historyLoading && patientHistoryData?.timeline?.length > 0 && (
+                  <div className="px-5 py-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-7 h-7 rounded-md bg-gray-100 flex items-center justify-center">
+                        <Clock className="w-3.5 h-3.5 text-gray-600" />
+                      </div>
+                      <span className="text-xs font-bold uppercase tracking-wider text-gray-600">Patient Timeline</span>
+                      <span className="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full ml-auto">
+                        {patientHistoryData.timeline.length}
+                      </span>
+                    </div>
+                    <div className="relative pl-5 space-y-0">
+                      {patientHistoryData.timeline.map((t: any, i: number) => (
+                        <div key={t.id || i} className="relative pb-3 last:pb-0">
+                          {/* Vertical line */}
+                          {i < patientHistoryData.timeline.length - 1 && (
+                            <div className="absolute left-0 top-2 bottom-0 w-px bg-gray-200" />
+                          )}
+                          {/* Dot */}
+                          <div className="absolute left-[-5px] top-1.5 w-2.5 h-2.5 rounded-full bg-gray-300 border-2 border-white" />
+                          {/* Content */}
+                          <div className="ml-3">
+                            <p className="text-xs text-gray-700">
+                              {t.action}
+                              {t.fromDepartment && t.toDepartment && (
+                                <span className="text-gray-400">: {t.fromDepartment} → {t.toDepartment}</span>
+                              )}
+                            </p>
+                            {t.description && (
+                              <p className="text-[10px] text-gray-400">{t.description}</p>
+                            )}
+                            <p className="text-[9px] text-gray-300 mt-0.5">
+                              {new Date(t.createdAt).toLocaleString()} {t.performedBy ? `by ${t.performedBy}` : ""}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        {/* ── End Patient History Panel ──────────────────────────────────── */}
+
 
         {/* Workflow Content */}
         <div className="max-w-4xl mx-auto px-4 pb-8">
@@ -1104,198 +1070,26 @@ export default function LaboratoryPage() {
 
           {/* ── STEP 2 ─────────────────────────────────────────────────── */}
           {workflowStep === 2 && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: BRAND_LIGHT }}>
-                  <Microscope className="w-5 h-5" style={{ color: BRAND }} />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800">Step 2: Enter Results</h2>
-                  <p className="text-xs text-gray-500">Test: {selectedRequest.testName} | {panel?.label}</p>
-                </div>
-                {resultsSaved && (
-                  <span className="ml-auto flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
-                    <CheckCircle className="w-3.5 h-3.5" /> Results Saved
-                  </span>
-                )}
-              </div>
-              <div className="p-6">
-                {isUrinalysis && (
-                  <div className="flex gap-1 mb-4 p-1 rounded-lg" style={{ backgroundColor: "#f0f0f0" }}>
-                    <button
-                      onClick={() => setUrinalysisTab("dipstick")}
-                      className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all ${
-                        urinalysisTab === "dipstick" ? "bg-white text-gray-800 shadow-sm" : "text-gray-500 hover:text-gray-700"
-                      }`}
-                    >
-                      Dipstick ({dipstickResults.length})
-                    </button>
-                    <button
-                      onClick={() => setUrinalysisTab("microscopy")}
-                      className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-all ${
-                        urinalysisTab === "microscopy" ? "bg-white text-gray-800 shadow-sm" : "text-gray-500 hover:text-gray-700"
-                      }`}
-                    >
-                      Microscopy ({microscopyResults.length})
-                    </button>
-                  </div>
-                )}
-                <div className="overflow-x-auto overflow-y-visible">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b-2" style={{ borderColor: BRAND }}>
-                        <th className="text-left py-3 px-2 font-semibold text-gray-700">#</th>
-                        <th className="text-left py-3 px-2 font-semibold text-gray-700">Parameter</th>
-                        <th className="text-left py-3 px-2 font-semibold text-gray-700">Result</th>
-                        <th className="text-left py-3 px-2 font-semibold text-gray-700">Unit</th>
-                        <th className="text-left py-3 px-2 font-semibold text-gray-700">Reference Range</th>
-                        <th className="text-center py-3 px-2 font-semibold text-gray-700 whitespace-nowrap" style={{ minWidth: 52 }}>Flag</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(isUrinalysis && urinalysisTab === "dipstick" ? dipstickResults :
-                        isUrinalysis && urinalysisTab === "microscopy" ? microscopyResults : results
-                      ).map((row, idx) => {
-                        const actualIdx = isUrinalysis && urinalysisTab === "microscopy" ? idx + 12 : idx;
-                        const flagColor = getFlagColor(row.flag);
-                        return (
-                          <tr key={actualIdx} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                            <td className="py-2 px-2 text-gray-400 text-xs">{actualIdx + 1}</td>
-                            <td className="py-2 px-2 font-medium text-gray-700">{row.test}</td>
-                            <td className="py-2 px-2">
-                              <input
-                                type="text"
-                                value={row.result}
-                                onChange={e => handleResultChange(actualIdx, e.target.value)}
-                                placeholder="Enter value..."
-                                className={`w-full px-2.5 py-1.5 border rounded-md text-sm focus:ring-2 focus:outline-none ${
-                                  row.flag === "HIGH" || row.flag === "LOW"
-                                    ? "border-red-300 bg-red-50 focus:ring-red-200"
-                                    : row.flag === "NORMAL"
-                                    ? "border-green-300 bg-green-50 focus:ring-green-200"
-                                    : "border-gray-200 focus:ring-blue-200"
-                                }`}
-                                style={{ minWidth: 70 }}
-                              />
-                            </td>
-                            <td className="py-2 px-2 text-gray-500 text-xs">{row.unit}</td>
-                            <td className="py-2 px-2 text-gray-500 text-xs font-mono">{row.referenceRange}</td>
-                            <td className="py-2 px-2 text-center whitespace-nowrap" style={{ minWidth: 52 }}>
-                              {row.flag && (
-                                <span className={`inline-block text-xs font-bold px-2 py-0.5 rounded border whitespace-nowrap ${flagColor}`}>
-                                  {row.flag}
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                {results.some(r => r.flag === "HIGH" || r.flag === "LOW") && (
-                  <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                    <div className="flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-sm font-medium text-red-800">Abnormal Results Detected</p>
-                        <p className="text-xs text-red-600 mt-0.5">
-                          {results.filter(r => r.flag === "HIGH" || r.flag === "LOW").map(r => `${r.test} (${r.flag})`).join(", ")}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {/* ── Attachments Section ──────────────────────────────────── */}
-                <div className="mt-6 pt-6 border-t border-gray-200">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                      <Paperclip className="w-4 h-4" style={{ color: BRAND }} />
-                      Attachments ({attachments.length})
-                    </h3>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="file"
-                        ref={fileInputRef}
-                        onChange={handleFileSelect}
-                        className="hidden"
-                        accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-                      />
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isUploading}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-50"
-                        style={{ backgroundColor: BRAND }}
-                      >
-                        {isUploading ? (
-                          <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Uploading...</>
-                        ) : (
-                          <><Upload className="w-3.5 h-3.5" /> Upload File</>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  {attachments.length === 0 ? (
-                    <p className="text-xs text-gray-400 text-center py-4 border-2 border-dashed border-gray-200 rounded-lg">
-                      No attachments yet. Click "Upload File" to attach documents or images.
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {attachments.map((att, idx) => {
-                        const isImage = att.type.startsWith("image/");
-                        return (
-                          <div
-                            key={idx}
-                            className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50 hover:bg-white transition-colors"
-                          >
-                            <div className="flex items-center gap-3 min-w-0 flex-1">
-                              {isImage ? (
-                                <div className="w-10 h-10 rounded-md overflow-hidden flex-shrink-0 border border-gray-200 bg-white">
-                                  <img
-                                    src={`data:${att.type};base64,${att.data}`}
-                                    alt={att.name}
-                                    className="w-full h-full object-cover"
-                                  />
-                                </div>
-                              ) : (
-                                <div className="w-10 h-10 rounded-md flex items-center justify-center flex-shrink-0" style={{ backgroundColor: BRAND_LIGHT }}>
-                                  <FileText className="w-5 h-5" style={{ color: BRAND }} />
-                                </div>
-                              )}
-                              <div className="min-w-0 flex-1">
-                                <p className="text-xs font-semibold text-gray-700 truncate">{att.name}</p>
-                                <p className="text-[10px] text-gray-400">
-                                  {formatFileSize(att.size)} &middot; {att.uploadedBy}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                              <button
-                                onClick={() => downloadAttachment(att)}
-                                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-all"
-                                title="Download"
-                              >
-                                <Eye className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  onClick={handleSaveResults}
-                  disabled={savingResults}
-                  className="w-full mt-6 py-3 text-white font-semibold rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
-                  style={{ backgroundColor: BRAND }}
-                >
-                  {savingResults ? "Saving Results..." : <><Save className="w-4 h-4" /> Save Results & Continue</>}
-                </button>
-              </div>
-            </div>
+            <ResultEntryForm
+              def={def}
+              results={results}
+              hasSections={hasSections}
+              activeSection={activeSection}
+              sectionBounds={sectionBounds}
+              sectionStart={sectionStart}
+              visibleResults={visibleResults}
+              resultsSaved={resultsSaved}
+              attachments={attachments}
+              isUploading={isUploading}
+              fileInputRef={fileInputRef}
+              onResultChange={handleResultChange}
+              onSectionChange={setActiveSection}
+              onFileSelect={handleFileSelect}
+              onFileUploadClick={() => fileInputRef.current?.click()}
+              onDownloadAttachment={downloadAttachment}
+              onSaveResults={handleSaveResults}
+              savingResults={savingResults}
+            />
           )}
 
           {/* ── STEP 3 ─────────────────────────────────────────────────── */}
@@ -1821,6 +1615,14 @@ export default function LaboratoryPage() {
                               {req.testName}
                             </span>
                           </div>
+                          {(req.clinicalNotes || req.referralNotes) && (
+                            <div className="flex items-start gap-1.5 mt-0.5">
+                              <FileText className="w-2.5 h-2.5 text-gray-300 mt-0.5 flex-shrink-0" />
+                              <span className="text-[10px] text-gray-400 line-clamp-1 leading-tight">
+                                {req.clinicalNotes || req.referralNotes}
+                              </span>
+                            </div>
+                          )}
                         </div>
 
                         {/* Bottom row: progress strip + Open button */}

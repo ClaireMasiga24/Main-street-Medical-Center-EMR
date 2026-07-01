@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 
 
@@ -11468,50 +11468,73 @@ export default function DoctorsPage() {
 
 
               {!loading && patients.length > 0 && (
-
-
-                <div className="grid grid-cols-1 gap-3">
+                <>
                   {(() => {
-                    const returning = patients.filter(p => isReturningPatient(p.source));
-                    const newPats = patients.filter(p => !isReturningPatient(p.source));
-                    return (
-                      <>
-                        {returning.length > 0 && (
-                          <div className="mb-2">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-teal-600 flex items-center gap-1.5">
+                  const returning = patients.filter(p => isReturningPatient(p.source));
+                  const newPats = patients.filter(p => !isReturningPatient(p.source));
+                  const showReturning = returning.length > 0;
+                  const showNew = newPats.length > 0;
+                  return (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {/* Returning Patients Column */}
+                      {showReturning && (
+                        <div className="bg-white rounded-xl border border-teal-100 overflow-hidden">
+                          <div className="bg-gradient-to-r from-teal-50 to-white px-4 py-3 border-b border-teal-100">
+                            <span className="text-xs font-bold uppercase tracking-widest text-teal-700 flex items-center gap-2">
+                              <Users size={14} className="text-teal-500" />
                               <span>Returning Patients</span>
-                              <span className="text-[9px] bg-teal-50 text-teal-600 px-1.5 py-0.5 rounded-full">{returning.length}</span>
+                              <span className="text-[10px] bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full ml-auto">{returning.length}</span>
                             </span>
                           </div>
-                        )}
-                        {returning.map((p) => (
-                          <PatientCard
-                            key={p.id}
-                            patient={p}
-                            onSelect={handleSelectPatient}
-                            onStartConsultation={handleStartConsultation}
-                          />
-                        ))}
-                        {newPats.length > 0 && (
-                          <div className="mb-2 mt-4">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
+                          <div className="p-3 space-y-3">
+                            {returning.map((p) => (
+                              <PatientCard
+                                key={p.id}
+                                patient={p}
+                                onSelect={handleSelectPatient}
+                                onStartConsultation={handleStartConsultation}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* New Patients Column */}
+                      {showNew && (
+                        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                          <div className="bg-gradient-to-r from-slate-50 to-white px-4 py-3 border-b border-slate-200">
+                            <span className="text-xs font-bold uppercase tracking-widest text-slate-600 flex items-center gap-2">
+                              <User size={14} className="text-slate-400" />
                               <span>New Patients</span>
-                              <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full">{newPats.length}</span>
+                              <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full ml-auto">{newPats.length}</span>
                             </span>
                           </div>
-                        )}
-                        {newPats.map((p) => (
-                          <PatientCard
-                            key={p.id}
-                            patient={p}
-                            onSelect={handleSelectPatient}
-                            onStartConsultation={handleStartConsultation}
-                          />
-                        ))}
-                      </>
-                    );
-                  })()}
-                </div>
+                          <div className="p-3 space-y-3">
+                            {newPats.map((p) => (
+                              <PatientCard
+                                key={p.id}
+                                patient={p}
+                                onSelect={handleSelectPatient}
+                                onStartConsultation={handleStartConsultation}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* If only one group has patients, let it fill the full width */}
+                      {showReturning && !showNew && (
+                        <div className="lg:col-span-2 text-center py-8 text-sm text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                          No new patients in queue
+                        </div>
+                      )}
+                      {!showReturning && showNew && (
+                        <div className="lg:col-span-2 text-center py-8 text-sm text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                          No returning patients in queue
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+                </>
 
 
               )}
