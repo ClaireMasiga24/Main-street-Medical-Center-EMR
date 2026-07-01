@@ -927,11 +927,11 @@ export default function NurseMidwifeDashboard() {
       {/* ═══════════════════════════════════════════════════════════════════════
           MAIN CONTENT
           ═══════════════════════════════════════════════════════════════════════ */}
-      <main className="flex-1 flex flex-col min-h-screen overflow-auto">
+      <main className="flex-1 flex flex-col min-h-screen overflow-x-hidden overflow-y-auto">
         {/* Mobile top bar with hamburger */}
         <div className="sticky top-0 z-30 lg:hidden bg-white/95 backdrop-blur-md border-b border-slate-200 px-3 py-2.5 flex items-center justify-between">
           <button onClick={() => setMobileMenuOpen(true)}
-            className="flex items-center gap-2 text-[#00703C] font-bold text-xs">
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center gap-2 text-[#00703C] font-bold text-xs">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
             </svg>
@@ -1012,7 +1012,7 @@ export default function NurseMidwifeDashboard() {
                       <p className="text-sm text-slate-600 font-medium">{p.chiefComplaint}</p>
                     </div>
 
-                    <div className="flex gap-3">
+                    <div className="flex gap-3 flex-wrap">
                       <button onClick={() => handleBeginTriage(p)}
                         className="flex-1 flex items-center justify-center gap-2 bg-[#00703C] hover:bg-[#005a2e] text-white font-bold text-xs py-2.5 px-4 rounded-lg transition-colors">
                         <Activity size={14} /> Begin Triage
@@ -1186,15 +1186,15 @@ export default function NurseMidwifeDashboard() {
                           <div className="flex-1">
                             <input type="text" value={medFormName} onChange={e => setMedFormName(e.target.value)}
                               placeholder="Medication name" maxLength={100}
-                              className="w-full px-2.5 py-1.5 text-[11px] border border-blue-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400" />
+                              className="w-full px-2.5 py-2 text-[11px] border border-blue-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400" />
                           </div>
                           <div className="w-[100px]">
                             <input type="time" value={medFormTime} onChange={e => setMedFormTime(e.target.value)}
-                              className="w-full px-2.5 py-1.5 text-[11px] border border-blue-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400" />
+                              className="w-full px-2.5 py-2 text-[11px] border border-blue-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400" />
                           </div>
                           <button onClick={() => { addTreatmentMed(p.id, medFormName, medFormTime); setMedFormName(""); setMedFormTime(""); setMedFormPatientId(null); }}
                             disabled={!medFormName || !medFormTime}
-                            className="text-[10px] font-bold bg-[#00703C] hover:bg-[#005a2e] text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40">
+                            className="text-[10px] font-bold bg-[#00703C] hover:bg-[#005a2e] text-white px-3 py-2 rounded-lg transition-colors disabled:opacity-40">
                             Add
                           </button>
                           <button onClick={() => setMedFormPatientId(null)}
@@ -1205,7 +1205,7 @@ export default function NurseMidwifeDashboard() {
                       )}
 
                       {/* ── Action Row ─────────────────────────────────────────── */}
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-wrap">
                         <button onClick={(e) => { e.stopPropagation(); handleCompleteTreatment(p.id); }}
                           className="flex-1 flex items-center justify-center gap-2 bg-[#00703C] hover:bg-[#005a2e] text-white font-bold text-xs py-2.5 px-4 rounded-lg transition-colors">
                           <CheckCircle size={14} /> Complete Treatment
@@ -1341,7 +1341,7 @@ export default function NurseMidwifeDashboard() {
                         {p.referringDoctorName && <><span className="text-slate-300">|</span> Dr. {p.referringDoctorName}</>}
                       </p>
 
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-wrap">
                         <button onClick={() => handleBeginAnc(p)}
                           className="flex-1 flex items-center justify-center gap-2 bg-[#00703C] hover:bg-[#005a2e] text-white font-bold text-xs py-2.5 px-4 rounded-lg transition-colors">
                           <Baby size={14} /> Begin ANC Assessment
@@ -1488,16 +1488,16 @@ export default function NurseMidwifeDashboard() {
               <StickyHeader tabName="Pharmacy">
                 <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
                   <button onClick={() => { setPharmacySubTab("inventory"); setDrugPage(1); }}
-                    className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors ${pharmacySubTab === "inventory" ? "bg-white text-[#00703C] shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                    className={`px-2.5 py-2 rounded-md text-[11px] sm:text-[10px] font-bold transition-colors ${pharmacySubTab === "inventory" ? "bg-white text-[#00703C] shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
                     <Package size={13} className="inline mr-1" /> Inventory
                   </button>
                   <button onClick={() => setPharmacySubTab("prescriptions")}
-                    className={`px-3 py-1.5 rounded-md text-[10px] font-bold transition-colors ${pharmacySubTab === "prescriptions" ? "bg-white text-[#00703C] shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                    className={`px-2.5 py-2 rounded-md text-[11px] sm:text-[10px] font-bold transition-colors ${pharmacySubTab === "prescriptions" ? "bg-white text-[#00703C] shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
                     <Pill size={13} className="inline mr-1" /> Prescriptions
                   </button>
                 </div>
                 <button onClick={pharmacySubTab === "inventory" ? () => fetchDrugs(drugPage) : fetchPharmacyPatients} disabled={drugsLoading || pharmacyLoading}
-                  className="flex items-center gap-1.5 text-xs font-bold text-[#00703C] bg-[#00703C]/10 hover:bg-[#00703C]/20 px-2 sm:px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
+                  className="flex items-center gap-1.5 text-xs font-bold text-[#00703C] bg-[#00703C]/10 hover:bg-[#00703C]/20 px-2 sm:px-3 py-2 rounded-lg transition-colors disabled:opacity-50">
                   <RefreshCw size={13} className={(drugsLoading || pharmacyLoading) ? "animate-spin" : ""} /> <span className="hidden sm:inline">Refresh</span>
                 </button>
               </StickyHeader>
@@ -1517,7 +1517,7 @@ export default function NurseMidwifeDashboard() {
                           className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C] transition-all" />
                       </div>
                       <select value={drugCategoryFilter} onChange={e => { setDrugCategoryFilter(e.target.value); setDrugPage(1); }}
-                        className="text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20">
+                        className="text-xs px-3 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20">
                         <option value="all">All Categories</option>
                         <option value="Drug">Drug</option>
                         <option value="Sundry">Sundry</option>
@@ -1528,13 +1528,13 @@ export default function NurseMidwifeDashboard() {
                         <option value="General">General</option>
                       </select>
                       <button onClick={openAddDrugModal}
-                        className="flex items-center gap-1.5 text-xs font-bold bg-[#00703C] hover:bg-[#005a2e] text-white px-4 py-2 rounded-xl transition-colors">
+                        className="flex items-center gap-1.5 text-xs font-bold bg-[#00703C] hover:bg-[#005a2e] text-white px-4 py-2.5 rounded-xl transition-colors">
                         <Plus size={14} /> Add Drug
                       </button>
                     </div>
 
                     {/* Summary */}
-                    <div className="flex items-center gap-3 mb-3 text-[11px] text-slate-500">
+                    <div className="flex items-center gap-3 mb-3 text-[11px] text-slate-500 flex-wrap">
                       <span className="font-semibold">Total Drugs: <span className="text-[#00703C]">{drugTotal}</span></span>
                       <span className="text-slate-300">|</span>
                       <span className="font-semibold">Not Counted: <span className="text-amber-600">{uncountedCount >= 0 ? uncountedCount : "..."}</span></span>
@@ -1631,23 +1631,23 @@ export default function NurseMidwifeDashboard() {
                           {/* Row 5: Action buttons */}
                           <div className="flex flex-wrap gap-1.5">
                             <button onClick={() => openRestockModal(drug)}
-                              className="flex items-center gap-1 text-[10px] font-bold bg-[#00703C] hover:bg-[#005a2e] text-white px-3 py-1.5 rounded-lg transition-colors">
+                              className="flex items-center gap-1 text-[10px] font-bold bg-[#00703C] hover:bg-[#005a2e] text-white px-3 py-2 rounded-lg transition-colors">
                               <PlusCircle size={11} /> Restock
                             </button>
                             <button onClick={() => openDispenseModal(drug)} disabled={isUncounted}
-                              className="flex items-center gap-1 text-[10px] font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40">
+                              className="flex items-center gap-1 text-[10px] font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg transition-colors disabled:opacity-40">
                               <Pill size={11} /> Dispense
                             </button>
                             <button onClick={() => openEditDrugModal(drug)}
-                              className="flex items-center gap-1 text-[10px] font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-1.5 rounded-lg transition-colors">
+                              className="flex items-center gap-1 text-[10px] font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-2 rounded-lg transition-colors">
                               <Edit3 size={11} /> Edit
                             </button>
                             <button onClick={() => openCustomPriceModal(drug)}
-                              className="flex items-center gap-1 text-[10px] font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-1.5 rounded-lg transition-colors">
+                              className="flex items-center gap-1 text-[10px] font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 px-3 py-2 rounded-lg transition-colors">
                               <DollarSign size={11} /> Custom Price
                             </button>
                             <button onClick={() => openDeleteConfirm(drug)}
-                              className="flex items-center gap-1 text-[10px] font-bold border border-red-200 text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors">
+                              className="flex items-center gap-1 text-[10px] font-bold border border-red-200 text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg transition-colors">
                               <Trash2 size={11} /> Remove
                             </button>
                           </div>
@@ -1659,12 +1659,12 @@ export default function NurseMidwifeDashboard() {
                     {drugTotalPages > 1 && (
                       <div className="flex items-center justify-center gap-3 mt-4">
                         <button onClick={() => { setDrugPage(p => Math.max(1, p - 1)); }} disabled={drugPage <= 1}
-                          className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-colors">
+                          className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-colors">
                           <ChevronLeft size={13} /> Prev
                         </button>
                         <span className="text-xs text-slate-500">Page {drugPage} of {drugTotalPages}</span>
                         <button onClick={() => { setDrugPage(p => Math.min(drugTotalPages, p + 1)); }} disabled={drugPage >= drugTotalPages}
-                          className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-colors">
+                          className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30 transition-colors">
                           Next <ChevronRight size={13} />
                         </button>
                       </div>
@@ -1923,7 +1923,7 @@ export default function NurseMidwifeDashboard() {
           TRIAGE ASSESSMENT MODAL — kept original design but polished
           ═══════════════════════════════════════════════════════════════════════ */}
       {showTriageModal && selectedPatient && (
-        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-2 sm:p-5">
           <style>{`
             .watermarked-form::before {
               content: '';
@@ -2262,7 +2262,7 @@ export default function NurseMidwifeDashboard() {
           ANC ASSESSMENT MODAL
           ═══════════════════════════════════════════════════════════════════════ */}
       {showAncModal && ancSelectedPatient && (
-        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-2 sm:p-5">
           <div className="w-full max-w-[900px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
             {/* Modal Header */}
             <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
@@ -2492,7 +2492,7 @@ export default function NurseMidwifeDashboard() {
           PHARMACY DISPENSING MODAL
           ═══════════════════════════════════════════════════════════════════════ */}
       {showPharmacyModal && pharmacySelectedPatient && (
-        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-2 sm:p-5">
           <div className="w-full max-w-[800px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
             {/* Modal Header */}
             <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
@@ -2643,7 +2643,7 @@ export default function NurseMidwifeDashboard() {
 
 	      {/* Add Drug Modal */}
 	      {showAddDrugModal && (
-	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-2 sm:p-5">
 	          <div className="w-full max-w-[550px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
 	            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
 	              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-2"><Plus size={16} /> Add New Drug</h2>
@@ -2655,16 +2655,16 @@ export default function NurseMidwifeDashboard() {
 	              <div className="space-y-4">
 	                <div>
 	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Drug Name *</label>
-	                  <input type="text" value={drugForm.name} onChange={e => setDrugForm(f => ({ ...f, name: e.target.value }))}
-	                    placeholder="e.g. Paracetamol tablets 500mg" maxLength={200}
-	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+                    <input type="text" value={drugForm.name} onChange={e => setDrugForm(f => ({ ...f, name: e.target.value }))}
+                      placeholder="e.g. Paracetamol tablets 500mg" maxLength={200}
+                      className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                </div>
 	                <div className="grid grid-cols-2 gap-3">
 	                  <div>
 	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Category</label>
 	                    <input type="text" value={drugForm.category} onChange={e => setDrugForm(f => ({ ...f, category: e.target.value }))}
 	                      list="category-options"
-	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                      className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                    <datalist id="category-options">
 	                      <option value="Drug" /><option value="Sundry" /><option value="Lab Test" /><option value="Radiology" /><option value="Dental" /><option value="Theatre" /><option value="General" />
 	                    </datalist>
@@ -2672,31 +2672,31 @@ export default function NurseMidwifeDashboard() {
 	                  <div>
 	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Cost Centre</label>
 	                    <input type="text" value={drugForm.costCentre} onChange={e => setDrugForm(f => ({ ...f, costCentre: e.target.value }))}
-	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                      className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                  </div>
 	                </div>
 	                <div className="grid grid-cols-2 gap-3">
 	                  <div>
 	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Buying Cost</label>
 	                    <input type="number" value={drugForm.buyingCost} onChange={e => setDrugForm(f => ({ ...f, buyingCost: e.target.value }))}
-	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                      className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                  </div>
 	                  <div>
 	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Selling Price</label>
 	                    <input type="number" value={drugForm.sellingPrice} onChange={e => setDrugForm(f => ({ ...f, sellingPrice: e.target.value }))}
-	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                      className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                  </div>
 	                </div>
 	                <div className="grid grid-cols-2 gap-3">
 	                  <div>
 	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Initial Stock</label>
 	                    <input type="number" value={drugForm.stockQuantity} onChange={e => setDrugForm(f => ({ ...f, stockQuantity: e.target.value }))}
-	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                      className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                  </div>
 	                  <div>
 	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Reorder Level</label>
 	                    <input type="number" value={drugForm.reorderLevel} onChange={e => setDrugForm(f => ({ ...f, reorderLevel: e.target.value }))}
-	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                      className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                  </div>
 	                </div>
 	              </div>
@@ -2715,7 +2715,7 @@ export default function NurseMidwifeDashboard() {
 
 	      {/* Edit Drug Modal */}
 	      {showEditDrugModal && selectedDrug && (
-	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-2 sm:p-5">
 	          <div className="w-full max-w-[550px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
 	            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
 	              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-2"><Edit3 size={16} /> Edit Drug</h2>
@@ -2729,14 +2729,14 @@ export default function NurseMidwifeDashboard() {
 	                <div>
 	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Drug Name *</label>
 	                  <input type="text" value={drugForm.name} onChange={e => setDrugForm(f => ({ ...f, name: e.target.value }))}
-	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                    className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                </div>
 	                <div className="grid grid-cols-2 gap-3">
 	                  <div>
 	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Category</label>
 	                    <input type="text" value={drugForm.category} onChange={e => setDrugForm(f => ({ ...f, category: e.target.value }))}
 	                      list="edit-category-options"
-	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                      className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                    <datalist id="edit-category-options">
 	                      <option value="Drug" /><option value="Sundry" /><option value="Lab Test" /><option value="Radiology" /><option value="Dental" /><option value="Theatre" />
 	                    </datalist>
@@ -2744,19 +2744,19 @@ export default function NurseMidwifeDashboard() {
 	                  <div>
 	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Buying Cost</label>
 	                    <input type="number" value={drugForm.buyingCost} onChange={e => setDrugForm(f => ({ ...f, buyingCost: e.target.value }))}
-	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                      className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                  </div>
 	                </div>
 	                <div className="grid grid-cols-2 gap-3">
 	                  <div>
 	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Selling Price</label>
 	                    <input type="number" value={drugForm.sellingPrice} onChange={e => setDrugForm(f => ({ ...f, sellingPrice: e.target.value }))}
-	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                      className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                  </div>
 	                  <div>
 	                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Reorder Level</label>
 	                    <input type="number" value={drugForm.reorderLevel} onChange={e => setDrugForm(f => ({ ...f, reorderLevel: e.target.value }))}
-	                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                      className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                  </div>
 	                </div>
 	              </div>
@@ -2775,7 +2775,7 @@ export default function NurseMidwifeDashboard() {
 
 	      {/* Restock Modal */}
 	      {showRestockModal && selectedDrug && (
-	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-2 sm:p-5">
 	          <div className="w-full max-w-[450px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
 	            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
 	              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-2"><PlusCircle size={16} /> Restock</h2>
@@ -2791,13 +2791,13 @@ export default function NurseMidwifeDashboard() {
 	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Quantity to Add *</label>
 	                  <input type="number" value={drugForm.quantity} onChange={e => setDrugForm(f => ({ ...f, quantity: e.target.value }))}
 	                    placeholder="e.g. 50" min="1"
-	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                    className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                </div>
 	                <div>
 	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Note (optional)</label>
 	                  <input type="text" value={drugForm.notes} onChange={e => setDrugForm(f => ({ ...f, notes: e.target.value }))}
 	                    placeholder="e.g. New shipment from supplier"
-	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                    className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                </div>
 	              </div>
 	              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 mt-4">
@@ -2815,7 +2815,7 @@ export default function NurseMidwifeDashboard() {
 
 	      {/* Dispense Modal */}
 	      {showDispenseModal && selectedDrug && (
-	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-2 sm:p-5">
 	          <div className="w-full max-w-[450px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
 	            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
 	              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-2"><Pill size={16} /> Dispense Drug</h2>
@@ -2831,19 +2831,19 @@ export default function NurseMidwifeDashboard() {
 	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Quantity *</label>
 	                  <input type="number" value={drugForm.quantity} onChange={e => setDrugForm(f => ({ ...f, quantity: e.target.value }))}
 	                    placeholder="How many units?" min="1" max={selectedDrug.stockQuantity}
-	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                    className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                </div>
 	                <div>
 	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Dispensed To (optional)</label>
 	                  <input type="text" value={drugForm.dispensedTo} onChange={e => setDrugForm(f => ({ ...f, dispensedTo: e.target.value }))}
 	                    placeholder="Patient name / Ward / Dept"
-	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                    className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                </div>
 	                <div>
 	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Notes (optional)</label>
 	                  <input type="text" value={drugForm.notes} onChange={e => setDrugForm(f => ({ ...f, notes: e.target.value }))}
 	                    placeholder="Reason or instructions"
-	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                    className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                </div>
 	              </div>
 	              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 mt-4">
@@ -2861,7 +2861,7 @@ export default function NurseMidwifeDashboard() {
 
 	      {/* Set Custom Price Modal */}
 	      {showCustomPriceModal && selectedDrug && (
-	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-2 sm:p-5">
 	          <div className="w-full max-w-[400px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
 	            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
 	              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-2"><DollarSign size={16} /> Custom Price</h2>
@@ -2877,7 +2877,7 @@ export default function NurseMidwifeDashboard() {
 	                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 block">Custom Price (leave empty to clear)</label>
 	                  <input type="number" value={drugForm.customPrice} onChange={e => setDrugForm(f => ({ ...f, customPrice: e.target.value }))}
 	                    placeholder="Insurance / negotiated price"
-	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
+	                    className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C]" />
 	                </div>
 	              </div>
 	              <div className="flex items-center justify-end gap-2 border-t border-slate-200 pt-4 mt-4">
@@ -2895,7 +2895,7 @@ export default function NurseMidwifeDashboard() {
 
 	      {/* Delete Confirmation */}
 	      {showDeleteConfirm && selectedDrug && (
-	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-2 sm:p-5">
 	          <div className="w-full max-w-[400px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
 	            <div className="bg-gradient-to-r from-red-600 to-red-700 px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
 	              <h2 className="text-sm sm:text-lg font-bold flex items-center gap-2"><Trash2 size={16} /> Remove Drug</h2>
@@ -2926,7 +2926,7 @@ export default function NurseMidwifeDashboard() {
 	          DOCTOR RECORDS MODAL — shows everything the doctor input
 	          ═══════════════════════════════════════════════════════════════════════ */}
       {showDoctorModal && doctorModalPatient && (
-        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-2 sm:p-5">
           <div className="w-full max-w-[1100px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
             {/* Modal Header */}
             <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
@@ -3223,7 +3223,7 @@ export default function NurseMidwifeDashboard() {
 	          SHARE PATIENT MODAL
 	          ═══════════════════════════════════════════════════════════════════════ */}
 	      {showShareModal && sharePatient && (
-	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-5">
+	        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-start justify-center overflow-auto p-2 sm:p-5">
 	          <div className="w-full max-w-[480px] bg-white rounded-2xl overflow-hidden shadow-2xl mt-5 mb-5" style={{ animation: "fade-in-up 0.25s ease-out" }}>
 	            <div className="bg-gradient-to-r from-[#00703C] to-[#005a2e] px-4 sm:px-8 py-3 sm:py-5 flex items-center justify-between text-white">
 	              <div className="flex items-center gap-3 min-w-0">
@@ -3268,7 +3268,7 @@ export default function NurseMidwifeDashboard() {
 	                  <textarea value={shareNotes} onChange={e => setShareNotes(e.target.value)}
 	                    placeholder="Add a message for the receiving department..."
 	                    rows={3}
-	                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C] resize-none" />
+	                    className="w-full px-3 py-2.5 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-[#00703C]/20 focus:border-[#00703C] resize-none" />
 	                </div>
 	              </div>
 
