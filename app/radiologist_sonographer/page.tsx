@@ -10,7 +10,7 @@ import {
   ShieldAlert, SlidersHorizontal, Stethoscope, Upload, User, X,
   BarChart3, Calendar, FolderOpen, ListChecks, Scan, ClipboardList,
   Heart, ZoomIn, AlertCircle, ChevronDown, ChevronRight,
-  Loader2, Eye, Microscope, Notebook, Radio, Syringe,
+  Loader2, Eye, Microscope, Notebook, Radio, Syringe, Pill, Plus,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────────
@@ -166,6 +166,13 @@ export default function RadiologyDashboard() {
   const [measurementValues, setMeasurementValues] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState("");
 
+  // ── Prescriptions ──────────────────────────────────────────────────────
+  const [rxDrafts, setRxDrafts] = useState<{ medication: string; dosage: string; instructions: string }[]>([]);
+  const [showNewRx, setShowNewRx] = useState(false);
+  const [newRx, setNewRx] = useState({ medication: "", dosage: "", instructions: "" });
+  const [staffName, setStaffName] = useState("");
+  const [staffId, setStaffId] = useState<number | null>(null);
+
   // ── Stats ─────────────────────────────────────────────────────────────
   const [stats, setStats] = useState({ total: 0, pending: 0, inProgress: 0, awaitingReport: 0, reported: 0, critical: 0 });
 
@@ -243,6 +250,19 @@ export default function RadiologyDashboard() {
     const t = setTimeout(() => setSuccessMessage(""), 4000);
     return () => clearTimeout(t);
   }, [successMessage]);
+
+  // ── Load user info from storage ──────────────────────────────────────────
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("user") || localStorage.getItem("user");
+      if (raw) {
+        const u = JSON.parse(raw);
+        if (u.fullName) setStaffName(u.fullName);
+        else if (u.username) setStaffName(u.username);
+        if (u.id) setStaffId(u.id);
+      }
+    } catch {}
+  }, []);
 
   // ── Select Request ────────────────────────────────────────────────────
   const handleSelectRequest = (req: ImagingRequest) => {
@@ -1268,6 +1288,118 @@ export default function RadiologyDashboard() {
                         style={{ padding: "10px 20px", borderRadius: "8px", border: "none", backgroundColor: "#6366f1", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "bold", color: "white" }}>
                         <Send size={15} /> Send Report
                       </button>
+                    )}
+                  </div>
+
+                  {/* ── Prescriptions (Send to Pharmacy) ─────────────────────── */}
+                  <div style={{ backgroundColor: "white", borderRadius: "12px", padding: "20px", border: "1px solid #e2e8f0", marginBottom: "20px", marginTop: "20px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
+                      <h4 style={{ margin: 0, fontSize: "13px", fontWeight: "bold", color: "#1e293b", display: "flex", alignItems: "center", gap: "8px" }}>
+                        <Pill size={16} color="#00703C" /> Prescribe Medication
+                      </h4>
+                    </div>
+
+                    {/* ── Draft list ── */}
+                    {rxDrafts.length > 0 && (
+                      <div style={{ marginBottom: "12px" }}>
+                        {rxDrafts.map((rx, i) => (
+                          <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "6px" }}>
+                            <div>
+                              <p style={{ margin: 0, fontSize: "13px", fontWeight: "bold", color: "#1e293b" }}>{rx.medication}</p>
+                              <p style={{ margin: 0, fontSize: "11px", color: "#64748b" }}>{rx.dosage} — {rx.instructions}</p>
+                            </div>
+                            <button onClick={() => setRxDrafts(rxDrafts.filter((_, j) => j !== i))}
+                              style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444", padding: "4px" }}>
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* ── Add new form ── */}
+                    {showNewRx ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" }}>
+                        <input type="text" placeholder="Medication name"
+                          value={newRx.medication} onChange={e => setNewRx({ ...newRx, medication: e.target.value })}
+                          style={{ ...inputStyle(), fontSize: "13px" }} />
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                          <input type="text" placeholder="Dosage (e.g. 500mg)"
+                            value={newRx.dosage} onChange={e => setNewRx({ ...newRx, dosage: e.target.value })}
+                            style={{ ...inputStyle(), fontSize: "13px" }} />
+                          <input type="text" placeholder="Instructions"
+                            value={newRx.instructions} onChange={e => setNewRx({ ...newRx, instructions: e.target.value })}
+                            style={{ ...inputStyle(), fontSize: "13px" }} />
+                        </div>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button onClick={() => {
+                            if (!newRx.medication.trim()) { alert("Medication name is required"); return; }
+                            setRxDrafts([...rxDrafts, { ...newRx }]);
+                            setNewRx({ medication: "", dosage: "", instructions: "" });
+                            setShowNewRx(false);
+                          }}
+                            style={{ padding: "8px 16px", borderRadius: "8px", border: "none", backgroundColor: "#00703C", cursor: "pointer", fontSize: "12px", fontWeight: "bold", color: "white", display: "flex", alignItems: "center", gap: "6px" }}>
+                            <Plus size={14} /> Add Prescription
+                          </button>
+                          <button onClick={() => { setShowNewRx(false); setNewRx({ medication: "", dosage: "", instructions: "" }); }}
+                            style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #d0d5dd", backgroundColor: "white", cursor: "pointer", fontSize: "12px", color: "#64748b" }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button onClick={() => setShowNewRx(true)}
+                        style={{ display: "flex", alignItems: "center", gap: "6px", color: "#00703C", fontSize: "13px", fontWeight: "bold", background: "none", border: "none", cursor: "pointer", padding: "4px 0" }}>
+                        <Plus size={14} /> Add Prescription
+                      </button>
+                    )}
+
+                    {/* ── Send to Pharmacy button ── */}
+                    {rxDrafts.length > 0 && (
+                      <div style={{ marginTop: "12px" }}>
+                        <button onClick={async () => {
+                          if (!selectedRequest) return;
+                          setIsSaving(true);
+                          try {
+                            const res = await fetch("/api/pharmacy/prescriptions", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                patientId: selectedRequest.patientId,
+                                prescriptions: rxDrafts.map((r) => ({
+                                  medication: r.medication,
+                                  dosage: r.dosage,
+                                  instructions: r.instructions,
+                                })),
+                                prescriberName: staffName || "Radiologist/Sonographer",
+                                prescriberRole: "Radiologist/Sonographer",
+                                source: "RADIOLOGIST_SONOGRAPHER",
+                                visitId: selectedRequest.visitId,
+                              }),
+                            });
+                            if (res.ok) {
+                              setSuccessMessage(`${rxDrafts.length} prescription(s) sent to Pharmacy.`);
+                              setRxDrafts([]);
+                              setShowNewRx(false);
+                              setNewRx({ medication: "", dosage: "", instructions: "" });
+                            } else {
+                              const err = await res.json();
+                              alert(`Error: ${err.error}`);
+                            }
+                          } catch {
+                            alert("Network error sending prescriptions to pharmacy.");
+                          } finally {
+                            setIsSaving(false);
+                          }
+                        }} disabled={isSaving}
+                          style={{ width: "100%", padding: "12px 0", borderRadius: "8px", border: "none", backgroundColor: "#059669", cursor: "pointer", fontSize: "13px", fontWeight: "bold", color: "white", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", opacity: isSaving ? 0.6 : 1 }}>
+                          {isSaving ? (
+                            <><Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> Sending...</>
+                          ) : (
+                            <><Send size={15} /> Send {rxDrafts.length} Prescription{rxDrafts.length > 1 ? "s" : ""} to Pharmacy</>
+                          )}
+                        </button>
+                      </div>
                     )}
                   </div>
 

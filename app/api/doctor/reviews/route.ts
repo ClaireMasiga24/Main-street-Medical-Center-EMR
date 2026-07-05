@@ -28,7 +28,14 @@ export async function GET(req: NextRequest) {
       take: 20,
     });
 
-    return NextResponse.json({ reviews, labRequests, imagingRequests });
+    // Also fetch lab communications for this patient
+    const labCommunications = await prisma.labCommunication.findMany({
+      where: { patientId },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+
+    return NextResponse.json({ reviews, labRequests, imagingRequests, labCommunications });
   } catch (err) {
     console.error("[doctor/reviews GET]", err);
     return NextResponse.json({ error: "Failed to load reviews." }, { status: 500 });

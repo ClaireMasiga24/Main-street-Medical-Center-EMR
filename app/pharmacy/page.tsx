@@ -40,9 +40,27 @@ export default function PharmacyPage() {
   useEffect(() => {
     async function loadQueue() {
       try {
-        const res = await fetch("/api/pharmacyroute");
+        const res = await fetch("/api/pharmacy");
         const data = await res.json();
-        setQueue(data);
+        // Transform API response to QueueItem format
+        const items: QueueItem[] = (data.patients ?? []).map((p: any) => ({
+          id: p.id,
+          patient: {
+            id: p.id,
+            patientNumber: p.patientNumber,
+            firstName: p.firstName,
+            lastName: p.lastName,
+          },
+          prescriptions: (p.Prescription ?? []).map((rx: any) => ({
+            id: rx.id,
+            drugName: rx.medication || rx.drugName || "",
+            dosage: rx.dosage || "",
+            frequency: rx.frequency || "",
+            duration: rx.duration || "",
+            status: rx.status,
+          })),
+        }));
+        setQueue(items);
       } catch (err) {
         console.error("Failed to load queue", err);
       }
@@ -67,8 +85,10 @@ export default function PharmacyPage() {
 
   async function dispense(id: number) {
     try {
-      await fetch(`/api/pharmacyroute/${id}`, {
+      await fetch("/api/pharmacy", {
         method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prescriptionId: id }),
       });
 
       if (selected) {

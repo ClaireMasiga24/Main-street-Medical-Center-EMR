@@ -49,10 +49,17 @@ export async function POST(request: Request) {
       },
     });
 
-    // Update lastSharedFromDept on patient
+    // Build update payload
+    const updateData: any = { lastSharedFromDept: source || "Nurse/Midwife" };
+
+    // If sharing to pharmacy, also update patient status so they appear in pharmacy queue
+    if (targetDept.toLowerCase() === "pharmacy") {
+      updateData.currentStatus = "AWAITING_PHARMACY";
+    }
+
     await prisma.patient.update({
       where: { id: pid },
-      data: { lastSharedFromDept: source || "Nurse/Midwife" },
+      data: updateData,
     });
 
     return NextResponse.json({ success: true, message: `Patient shared with ${targetDepartment}` });

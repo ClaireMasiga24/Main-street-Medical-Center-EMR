@@ -31,7 +31,7 @@ import {
 		  Microscope, Waves, Radio, Home, CreditCard, X, Plus, Loader2, Calendar, ClipboardList, Printer,
 
 
-			  Clock, Activity, AlertCircle, FileText, Bell, Search, User, Pencil, Syringe, RefreshCw, Menu, Send, Receipt, Share2,
+				  Clock, Activity, AlertCircle, FileText, Bell, Search, User, Pencil, Syringe, RefreshCw, Menu, Send, Receipt, Share2, Paperclip, MessageSquareText,
 
 
 	} from "lucide-react";
@@ -2055,6 +2055,7 @@ function ConsultationPanel({
   }, [patient.id]);
   const [returningLabResults, setReturningLabResults] = useState<any[]>([]);
   const [returningImagingResults, setReturningImagingResults] = useState<any[]>([]);
+  const [labCommunications, setLabCommunications] = useState<any[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -2069,6 +2070,9 @@ function ConsultationPanel({
         }
         if (data.imagingRequests) {
           setReturningImagingResults(data.imagingRequests.filter((ir: any) => ir.status === "REPORTED" && (ir.findings || ir.impression || ir.conclusion)));
+        }
+        if (data.labCommunications) {
+          setLabCommunications(data.labCommunications);
         }
       } catch {
         // silently ignore
@@ -2537,6 +2541,43 @@ function ConsultationPanel({
 
 
 
+
+  const handleSendToPharmacy = async () => {
+    if (rxDrafts.length === 0) return;
+    setSaving(true);
+    setSavingAction("SEND_PHARMACY");
+    try {
+      const res = await fetch("/api/pharmacy/prescriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: patient.id,
+          prescriptions: rxDrafts.map((r) => ({
+            medication: r.medication,
+            dosage: r.dosage,
+            instructions: r.instructions,
+          })),
+          prescriberName: staffName,
+          prescriberRole: "Doctor",
+          source: "DOCTOR",
+        }),
+      });
+      if (res.ok) {
+        alert(`${rxDrafts.length} prescription(s) sent to Pharmacy.`);
+        setRxDrafts([]);
+        setShowNewRx(false);
+        setNewRx({ medication: "", dosage: "", instructions: "" });
+      } else {
+        const err = await res.json();
+        alert(`Error: ${err.error}`);
+      }
+    } catch {
+      alert("Network error sending prescriptions to pharmacy.");
+    } finally {
+      setSaving(false);
+      setSavingAction("");
+    }
+  };
 
   const handleShareResults = async () => {
 
@@ -3564,42 +3605,135 @@ function ConsultationPanel({
                   {returningLabResults.length > 0 && (
                     <div className="mt-3 space-y-2">
                       <span className="text-[10px] font-bold text-teal-600 uppercase tracking-wider flex items-center gap-1.5">
-                        <Microscope size={12} /> Lab Results
+                        <Microscope size={12} /> Lab Results ({returningLabResults.length})
                       </span>
-                      {returningLabResults.map((lr: any) => (
-                        <div key={lr.id} className="bg-white rounded-lg border border-teal-100 p-3">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-semibold text-slate-700">{lr.testName}</span>
-                            <span className="text-[9px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full font-medium">Completed</span>
+                      {returningLabResults.map((lr: any) => {
+                        let parsedResults: any[] = [];
+                        if (lr.results) {
+                          try {
+                            const p = typeof lr.results === "string" ? JSON.parse(lr.results) : lr.results;
+                            if (Array.isArray(p)) parsedResults = p;
+                          } catch {}
+                        }
+                        const isCritical = lr.isCritical || parsedResults.some((r: any) => r.flag === "HIGH" || r.flag === "LOW");
+                        let attachments: any[] = [];
+                        if (lr.attachments) {
+                          try {
+                            const a = typeof lr.attachments === "string" ? JSON.parse(lr.attachments) : lr.attachments;
+                            if (Array.isArray(a)) attachments = a;
+                          } catch {}
+                        }
+                        return (
+                        <div key={lr.id} className={`bg-white rounded-lg border p-3 ${isCritical ? "border-red-300 ring-1 ring-red-200" : "border-teal-100"}`}>
+                          {/* Header */}
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-xs font-semibold text-slate-700 truncate">{lr.testName}</span>
+                              {lr.testPanel && <span className="text-[9px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">{lr.testPanel}</span>}
+                            </div>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${isCritical ? "bg-red-100 text-red-700" : "bg-emerald-50 text-emerald-600"}`}>
+                              {isCritical ? "Critical" : "Completed"}
+                            </span>
                           </div>
-                          {lr.results && (() => {
-                            try {
-                              const parsed = typeof lr.results === "string" ? JSON.parse(lr.results) : lr.results;
-                              if (Array.isArray(parsed)) {
-                                return (
-                                  <div className="text-[11px] text-slate-600 space-y-0.5">
-                                    {parsed.map((r: any, ri: number) => (
-                                      <div key={ri} className="flex items-center gap-2">
-                                        <span className="font-medium text-slate-700 min-w-[120px]">{r.test || r.parameter || ""}</span>
-                                        <span className="font-semibold">{r.result || ""}</span>
-                                        {r.unit && <span className="text-slate-400">{r.unit}</span>}
-                                        {r.flag === "HIGH" && <span className="text-[9px] text-red-600 font-bold">HIGH</span>}
-                                        {r.flag === "LOW" && <span className="text-[9px] text-amber-600 font-bold">LOW</span>}
-                                      </div>
-                                    ))}
+
+                          {/* Critical note banner */}
+                          {lr.criticalNote && (
+                            <div className="mb-2 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 flex items-start gap-1.5">
+                              <AlertTriangle size={12} className="text-red-500 mt-0.5 flex-shrink-0" />
+                              <p className="text-[10px] text-red-700 font-medium">{lr.criticalNote}</p>
+                            </div>
+                          )}
+
+                          {/* Result rows with reference ranges */}
+                          {parsedResults.length > 0 && (
+                            <div className="mb-2">
+                              <div className="grid grid-cols-12 gap-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1 px-1">
+                                <div className="col-span-4">Test</div>
+                                <div className="col-span-2">Result</div>
+                                <div className="col-span-2">Ref. Range</div>
+                                <div className="col-span-2">Unit</div>
+                                <div className="col-span-2">Flag</div>
+                              </div>
+                              <div className="space-y-0.5">
+                                {parsedResults.map((r: any, ri: number) => (
+                                  <div key={ri} className={`grid grid-cols-12 gap-1 text-[11px] items-center px-1 py-0.5 rounded ${r.flag === "HIGH" || r.flag === "LOW" ? "bg-red-50" : "hover:bg-slate-50"}`}>
+                                    <span className="col-span-4 font-medium text-slate-700 truncate" title={r.test || r.parameter || ""}>{r.test || r.parameter || ""}</span>
+                                    <span className={`col-span-2 font-bold ${r.flag === "HIGH" || r.flag === "LOW" ? "text-red-700" : "text-slate-800"}`}>{r.result || "-"}</span>
+                                    <span className="col-span-2 text-slate-400">{r.referenceRange || "-"}</span>
+                                    <span className="col-span-2 text-slate-400">{r.unit || "-"}</span>
+                                    <span className="col-span-2">
+                                      {r.flag === "HIGH" && <span className="text-[9px] text-red-600 font-bold bg-red-100 px-1 py-0.5 rounded">HIGH</span>}
+                                      {r.flag === "LOW" && <span className="text-[9px] text-amber-600 font-bold bg-amber-100 px-1 py-0.5 rounded">LOW</span>}
+                                      {(!r.flag || (r.flag !== "HIGH" && r.flag !== "LOW")) && <span className="text-[9px] text-emerald-600">Normal</span>}
+                                    </span>
                                   </div>
-                                );
-                              }
-                              return <p className="text-[11px] text-slate-600 whitespace-pre-wrap">{typeof lr.results === "string" ? lr.results : JSON.stringify(lr.results)}</p>;
-                            } catch {
-                              return <p className="text-[11px] text-slate-600 whitespace-pre-wrap">{lr.results}</p>;
-                            }
-                          })()}
-                          {lr.validatedByName && (
-                            <p className="text-[9px] text-slate-400 mt-1">Validated by: {lr.validatedByName} {lr.validatedAt ? new Date(lr.validatedAt).toLocaleDateString("en-UG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</p>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Attachments */}
+                          {attachments.length > 0 && (
+                            <div className="mb-2 bg-slate-50 rounded-lg p-2">
+                              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Attachments ({attachments.length})</p>
+                              <div className="space-y-1">
+                                {attachments.map((att: any, ai: number) => (
+                                  <div key={ai} className="flex items-center gap-2 text-[10px]">
+                                    <Paperclip size={10} className="text-slate-400 flex-shrink-0" />
+                                    <span className="text-slate-600 truncate flex-1">{att.name || `File ${ai + 1}`}</span>
+                                    {att.size && <span className="text-slate-400 flex-shrink-0">{Math.round(att.size / 1024)} KB</span>}
+                                    {att.data && (
+                                      <button
+                                        onClick={() => {
+                                          const dataUrl = `data:${att.type || "application/octet-stream"};base64,${att.data}`;
+                                          const a = document.createElement("a");
+                                          a.href = dataUrl;
+                                          a.download = att.name || `attachment-${ai}`;
+                                          document.body.appendChild(a);
+                                          a.click();
+                                          document.body.removeChild(a);
+                                        }}
+                                        className="text-[10px] text-teal-600 hover:text-teal-800 font-medium flex-shrink-0"
+                                      >
+                                        Download
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Specimen info */}
+                          {(lr.specimenType || lr.specimenId || lr.collectedByName || lr.specimenCollectedAt) && (
+                            <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500">
+                              {lr.specimenType && <span><span className="font-medium text-slate-400">Specimen:</span> {lr.specimenType}</span>}
+                              {lr.specimenId && <span><span className="font-medium text-slate-400">Specimen ID:</span> {lr.specimenId}</span>}
+                              {lr.collectedByName && <span><span className="font-medium text-slate-400">Collected by:</span> {lr.collectedByName}</span>}
+                              {lr.specimenCollectedAt && <span><span className="font-medium text-slate-400">Collected:</span> {new Date(lr.specimenCollectedAt).toLocaleDateString("en-UG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+                            </div>
+                          )}
+
+                          {/* Personell / Audit info */}
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-slate-400 border-t border-slate-100 pt-2 mt-1">
+                            {lr.enteredByName && <span>Entered by: {lr.enteredByName}</span>}
+                            {lr.validatedByName && <span>Validated by: {lr.validatedByName}</span>}
+                            {lr.validatedAt && <span>Validated: {new Date(lr.validatedAt).toLocaleDateString("en-UG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+                            {lr.resultEnteredAt && <span>Result entered: {new Date(lr.resultEnteredAt).toLocaleDateString("en-UG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>}
+                            {lr.priority && lr.priority !== "ROUTINE" && <span className="text-amber-600 font-medium">Priority: {lr.priority}</span>}
+                          </div>
+
+                          {/* Analyzer info */}
+                          {(lr.analyzerResults || lr.analyzerModel) && (
+                            <div className="mt-1.5 text-[9px] text-slate-400 bg-slate-50 rounded px-2 py-1">
+                              {lr.analyzerModel && <span className="mr-3">Analyzer: {lr.analyzerModel}</span>}
+                              {lr.analyzerType && <span className="mr-3">Type: {lr.analyzerType}</span>}
+                              {lr.analyzerImportStatus && <span>Status: {lr.analyzerImportStatus}</span>}
+                            </div>
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
@@ -3624,8 +3758,35 @@ function ConsultationPanel({
                     </div>
                   )}
 
+                  {/* Lab Communications from lab tech */}
+                  {labCommunications.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <span className="text-[10px] font-bold text-teal-600 uppercase tracking-wider flex items-center gap-1.5">
+                        <MessageSquareText size={12} /> Lab Communications ({labCommunications.length})
+                      </span>
+                      <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                        {labCommunications.map((lc: any) => (
+                          <div key={lc.id} className="bg-white rounded-lg border border-teal-100 p-2.5">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[9px] font-semibold text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded-full">
+                                {lc.senderName || "Lab"} ({lc.senderDept || "Lab"})
+                              </span>
+                              <span className="text-[9px] text-slate-400">
+                                {lc.createdAt ? new Date(lc.createdAt).toLocaleDateString("en-UG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}
+                              </span>
+                              {lc.messageType && (
+                                <span className="text-[8px] text-slate-400 uppercase tracking-wider">{lc.messageType}</span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-600 whitespace-pre-wrap">{lc.message}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* No results yet */}
-                  {returningLabResults.length === 0 && returningImagingResults.length === 0 && (
+                  {returningLabResults.length === 0 && returningImagingResults.length === 0 && labCommunications.length === 0 && (
                     <p className="text-sm text-teal-700 mt-1">
                       This patient was previously seen and sent back from {patient.source?.replace(" Referral", "")}. Results will appear here once available.
                     </p>
@@ -5723,6 +5884,35 @@ l
 
 
 
+
+      {/* â”€â”€ Send to Pharmacy Only â”€â”€ */}
+      <div className="mt-3">
+        <button
+          onClick={handleSendToPharmacy}
+          disabled={isBusy || rxDrafts.length === 0}
+          className={`w-full py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+            isBusy && savingAction === "SEND_PHARMACY"
+              ? "bg-green-100 text-green-700"
+              : "bg-green-600 text-white hover:bg-green-700 active:bg-green-800"
+          }`}
+        >
+          {isBusy && savingAction === "SEND_PHARMACY" ? (
+            <><Loader2 size={16} className="animate-spin" /> Sending to Pharmacy...</>
+          ) : (
+            <><Pill size={16} /> Send to Pharmacy Only</>
+          )}
+        </button>
+        {rxDrafts.length === 0 && (
+          <p className="text-[11px] text-slate-400 text-center mt-1">
+            Add prescriptions above first
+          </p>
+        )}
+        {rxDrafts.length > 0 && (
+          <p className="text-[11px] text-green-500 text-center mt-1 font-medium">
+            Sending {rxDrafts.length} prescription{rxDrafts.length > 1 ? "s" : ""} to Pharmacy
+          </p>
+        )}
+      </div>
 
       {/* â”€â”€ Referral Department Picker Modal â”€â”€ */}
 

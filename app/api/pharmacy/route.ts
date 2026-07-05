@@ -5,9 +5,10 @@ export async function GET() {
   try {
     const patients = await prisma.patient.findMany({
       where: {
-        Prescription: {
-          some: { status: "PENDING" },
-        },
+        OR: [
+          { Prescription: { some: { status: "PENDING" } } },
+          { currentStatus: "AWAITING_PHARMACY" },
+        ],
       },
       orderBy: { updatedAt: "desc" },
       include: {
