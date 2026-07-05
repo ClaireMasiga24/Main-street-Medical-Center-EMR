@@ -5,10 +5,7 @@ export async function GET() {
   try {
     const patients = await prisma.patient.findMany({
       where: {
-        OR: [
-          { Prescription: { some: { status: "PENDING" } } },
-          { currentStatus: "AWAITING_PHARMACY" },
-        ],
+        Prescription: { some: { status: "PENDING" } },
       },
       orderBy: { updatedAt: "desc" },
       include: {
@@ -41,10 +38,33 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "prescriptionId is required" }, { status: 400 });
     }
 
+    // Get the prescription first to find the patient
+    const prescription = await prisma.prescription.findUnique({
+      where: { id: prescriptionId },
+      select: { id: true, patientId: true },
+    });
+
+    if (!prescription) {
+      return NextResponse.json({ error: "Prescription not found" }, { status: 404 });
+    }
+
     const updated = await prisma.prescription.update({
       where: { id: prescriptionId },
       data: { status: "DISPENSED" },
     });
+
+    // Check if the patient has any remaining PENDING prescriptions
+    const remainingPending = await prisma.prescription.count({
+      where: { patientId: prescription.patientId, status: "PENDING" },
+    });
+
+    // If no more pending prescriptions, clear the AWAITING_PHARMACY status
+    if (remainingPending === 0) {
+      await prisma.patient.update({
+        where: { id: prescription.patientId },
+        data: { currentStatus: "ADMITTED" },
+      });
+    }
 
     return NextResponse.json({ success: true, prescription: updated });
   } catch (error: any) {
