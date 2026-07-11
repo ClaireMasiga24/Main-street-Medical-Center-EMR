@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 
 
@@ -6976,9 +6976,20 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
 
   const [updatedTreatmentPlan, setUpdatedTreatmentPlan] = useState("");
 
-
-
-
+  // Discharge fillable form state
+  const [dischargeForm, setDischargeForm] = useState({
+    address: "",
+    examAtAdmission: "",
+    vitals: "",
+    investigations: "",
+    condition: "",
+    conditionOther: "",
+    medication: "",
+    followUpNum: "",
+    followUpUnit: "days",
+    followUpInstr: "",
+    nextOfKin: "",
+  });
 
   // Review system state
 
@@ -7259,6 +7270,19 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
 
 
       setUpdatedTreatmentPlan(selectedPatient.treatmentPlan || "");
+      setDischargeForm({
+        address: (selectedPatient as any).address || "",
+        examAtAdmission: "",
+        vitals: "",
+        investigations: "",
+        condition: "",
+        conditionOther: "",
+        medication: "",
+        followUpNum: "",
+        followUpUnit: "days",
+        followUpInstr: "",
+        nextOfKin: "",
+      });
 
 
       fetchReviews(selectedPatient.id);
@@ -7469,6 +7493,19 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
 
 
         setFollowUpNotes("");
+        setDischargeForm({
+          address: "",
+          examAtAdmission: "",
+          vitals: "",
+          investigations: "",
+          condition: "",
+          conditionOther: "",
+          medication: "",
+          followUpNum: "",
+          followUpUnit: "days",
+          followUpInstr: "",
+          nextOfKin: "",
+        });
 
 
       }, 3000);
@@ -7495,506 +7532,210 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
 
 
 
-  const buildDischargeHtml = (): string => {
-
-
+    const buildDischargeHtml = (): string => {
     const p = selectedPatient!;
-
-
+    const df = dischargeForm;
     const today = new Date().toLocaleDateString("en-UG", { day: "numeric", month: "long", year: "numeric" });
-
-
     const admitDate = new Date(p.admittedAt).toLocaleDateString("en-UG", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    const genderStr = p.gender === "MALE" ? "Male" : p.gender === "FEMALE" ? "Female" : p.gender;
 
-
-
-
+    // Determine condition checkbox rendering
+    const cond = df.condition;
+    const condOther = df.conditionOther;
+    const condStable = cond === "Stable" ? "☑" : "☐";
+    const condImproved = cond === "Improved" ? "☑" : "☐";
+    const condReferred = cond === "Referred/Transferred" ? "☑" : "☐";
+    const showOtherChecked = cond === "Other" || (condOther && cond !== "Stable" && cond !== "Improved" && cond !== "Referred/Transferred") ? "☑" : "☐";
 
     return `<!DOCTYPE html>
-
-
 <html>
-
-
 <head>
-
-
   <title>Main Street Medical Center - Discharge Form</title>
-
-
   <style>
-
-
     @page { size: A4; margin: 15mm; }
-
-
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
-
     body {
-
-
-      font-family: Arial, sans-serif;
-
-
-      font-size: 13px;
-
-
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 12px;
       color: #222;
-
-
       line-height: 1.5;
-
-
-      padding: 0;
-
-
       position: relative;
-
-
-      min-height: 100vh;
-
-
     }
-
-
     body::before {
-
-
       content: '';
-
-
       position: fixed;
-
-
       inset: 0;
-
-
       background-image: url('/Images/LOGO.jpg');
-
-
-      background-size: 55%;
-
-
       background-repeat: no-repeat;
-
-
       background-position: center;
-
-
+      background-size: 60%;
       opacity: 0.07;
-
-
       pointer-events: none;
-
-
       z-index: -1;
-
-
       print-color-adjust: exact;
-
-
       -webkit-print-color-adjust: exact;
-
-
     }
-
-
-    .container { width: 100%; margin: 0 auto; }
-
-
-    .header {
-
-
-      text-align: center;
-
-
-      border-bottom: 2px solid #0a2e1a;
-
-
-      padding-bottom: 14px;
-
-
-      margin-bottom: 22px;
-
-
+    .container { width: 100%; max-width: 190mm; margin: 0 auto; }
+    .letterhead { text-align: center; margin-bottom: 8px; }
+    .letterhead .logo-img { max-width: 80mm; margin-bottom: 4px; }
+    .letterhead .contact-line { font-size: 10px; color: #444; line-height: 1.6; }
+    .letterhead .hours-line { font-size: 9px; color: #888; }
+    .title {
+      text-align: center; font-size: 16px; font-weight: bold;
+      text-decoration: underline; color: #0a2e1a;
+      margin: 10px 0 14px 0;
     }
-
-
-    .header h1 { font-size: 22px; color: #0a2e1a; font-weight: bold; letter-spacing: 1px; }
-
-
-    .header p { font-size: 12px; color: #555; margin-top: 2px; }
-
-
-    h2.section-title {
-
-
-      font-size: 14px;
-
-
-      color: #0a2e1a;
-
-
-      font-weight: bold;
-
-
-      text-transform: uppercase;
-
-
-      letter-spacing: 1px;
-
-
-      border-bottom: 1px solid #ccc;
-
-
-      padding-bottom: 4px;
-
-
-      margin: 18px 0 10px 0;
-
-
+    .section-header {
+      font-size: 12px; font-weight: bold; text-decoration: underline;
+      color: #0a2e1a; margin: 14px 0 6px 0;
+      page-break-inside: avoid;
     }
-
-
-    table.info { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
-
-
-    table.info td { padding: 3px 6px; vertical-align: top; font-size: 13px; }
-
-
-    table.info td.label { font-weight: bold; color: #0a2e1a; width: 160px; }
-
-
-    table.info td.sep { width: 20px; color: #aaa; }
-
-
-    table.info td.bottom-border { border-bottom: 1px solid #e0e0e0; padding-bottom: 5px; }
-
-
-    .field-group { margin-bottom: 12px; }
-
-
-    .field-group .field-label { font-weight: bold; color: #0a2e1a; font-size: 12px; margin-bottom: 2px; }
-
-
-    .field-group .field-value { font-size: 13px; color: #333; white-space: pre-wrap; }
-
-
-    .checkbox-grid { display: flex; flex-wrap: wrap; gap: 16px; margin: 6px 0 8px 0; }
-
-
-    .checkbox-item { font-size: 13px; display: flex; align-items: center; gap: 4px; }
-
-
-    .checkbox-item input[type=checkbox] { width: 14px; height: 14px; accent-color: #0a2e1a; }
-
-
-    .sig-line {
-
-
-      border-bottom: 1px solid #000;
-
-
-      display: inline-block;
-
-
-      min-width: 220px;
-
-
-      padding: 3px 8px;
-
-
-      font-size: 18px;
-
-
-      font-family: 'Brush Script MT', 'Segoe Script', cursive, sans-serif;
-
-
+    .info-row {
+      display: flex; flex-wrap: wrap; gap: 4px 20px;
+      margin: 2px 0; font-size: 12px;
+      page-break-inside: avoid;
     }
-
-
-    .sig-row { display: flex; justify-content: space-between; margin-top: 30px; padding-top: 14px; border-top: 1px solid #ccc; }
-
-
+    .info-row .field { display: inline-flex; gap: 2px; }
+    .info-row .label { font-weight: bold; white-space: nowrap; }
+    .info-row .value { }
+    .field-block { margin: 4px 0 8px 0; page-break-inside: avoid; }
+    .field-block .block-label { font-weight: bold; font-size: 11px; color: #333; margin-bottom: 1px; }
+    .field-block .block-value {
+      border-bottom: 1px solid #ccc; min-height: 18px;
+      padding: 2px 4px; white-space: pre-wrap; font-size: 12px;
+    }
+    .condition-row {
+      display: flex; flex-wrap: wrap; gap: 14px;
+      margin: 6px 0; font-size: 12px;
+      page-break-inside: avoid;
+    }
+    .condition-row .cb-item { display: inline-flex; align-items: center; gap: 3px; }
+    .follow-up-row {
+      display: flex; align-items: center; gap: 6px; font-size: 12px;
+      page-break-inside: avoid;
+    }
+    .follow-up-row .uf {
+      border-bottom: 1px solid #000; display: inline-block;
+      min-width: 50px; text-align: center; padding: 0 4px;
+    }
+    .sig-row {
+      display: flex; justify-content: space-between; gap: 20px;
+      margin-top: 30px; padding-top: 16px; border-top: 1px solid #ccc;
+      page-break-inside: avoid;
+    }
     .sig-block { flex: 1; }
-
-
-    .sig-block p { font-size: 12px; font-weight: bold; color: #0a2e1a; margin-bottom: 2px; }
-
-
-    .footer-note { text-align: center; font-size: 10px; color: #999; margin-top: 30px; border-top: 1px solid #eee; padding-top: 10px; }
-
-
+    .sig-block .sig-label { font-size: 11px; font-weight: bold; color: #0a2e1a; margin-bottom: 2px; }
+    .sig-block .sig-line {
+      border-bottom: 1px solid #000; display: block; min-width: 140px;
+      padding: 3px 8px; font-size: 18px;
+      font-family: 'Brush Script MT', 'Segoe Script', cursive, sans-serif;
+    }
+    .sig-block .sig-sub { font-size: 10px; color: #666; margin-top: 2px; }
+    .footer-note { text-align: center; font-size: 9px; color: #999; margin-top: 20px; border-top: 1px solid #eee; padding-top: 8px; }
   </style>
-
-
 </head>
-
-
 <body>
-
-
   <div class="container">
+    <div class="letterhead">
+      <img src="/Images/LOGO.jpg" class="logo-img" alt="Main Street Medical Center" />
+      <div class="contact-line">Contact us on 0740944150 / 0785586979</div>
+      <div class="contact-line">For emergency call our ambulance on 0394533750</div>
+      <div class="hours-line">Open 7 days a week 24HRS</div>
+    </div>
+    <div class="title">DISCHARGE FORM</div>
 
-
-    <!-- Header -->
-
-
-    <div class="header">
-
-
-      <h1>MAIN STREET MEDICAL CENTER</h1>
-
-
-      <p>0740944150 / 0785586979</p>
-
-
-      <p style="font-size:11px;color:#666">Emergency Ambulance: 0394533750 â€” Open 7 days a week 24HRS</p>
-
-
+    <div class="section-header">PATIENT INFORMATION</div>
+    <div class="info-row">
+      <span class="field"><span class="label">NAME:</span><span class="value">${p.lastName}, ${p.firstName}</span></span>
+      <span class="field"><span class="label">AGE/SEX:</span><span class="value">${p.age} / ${genderStr}</span></span>
+      <span class="field"><span class="label">PATIENT ID:</span><span class="value">${p.patientNumber}</span></span>
+    </div>
+    <div class="info-row">
+      <span class="field"><span class="label">CONTACT:</span><span class="value">${p.phoneNumber || "N/A"}</span></span>
+      <span class="field"><span class="label">DATE OF ADMISSION:</span><span class="value">${admitDate}</span></span>
+    </div>
+    <div class="info-row">
+      <span class="field"><span class="label">ADDRESS:</span><span class="value">${df.address || "____________________"}</span></span>
+      <span class="field"><span class="label">DATE OF DISCHARGE:</span><span class="value">${today}</span></span>
     </div>
 
-
-
-
-
-    <h2 class="section-title" style="margin-top:4px">Discharge Summary</h2>
-
-
-
-
-
-    <!-- Patient Information -->
-
-
-    <table class="info">
-
-
-      <tr><td class="label">Patient Name:</td><td class="bottom-border" colspan="3"><strong>${p.lastName}, ${p.firstName}</strong></td></tr>
-
-
-      <tr><td class="label">Age / Sex:</td><td class="bottom-border">${p.age} yrs / ${p.gender === "MALE" ? "Male" : "Female"}</td><td class="label" style="width:120px">Patient ID:</td><td class="bottom-border">${p.patientNumber}</td></tr>
-
-
-      <tr><td class="label">Contact:</td><td class="bottom-border">${p.phoneNumber || "N/A"}</td><td class="label">Address:</td><td class="bottom-border">${(p as any).address || "N/A"}</td></tr>
-
-
-      <tr><td class="label">Date of Admission:</td><td class="bottom-border">${admitDate}</td><td class="label">Date of Discharge:</td><td class="bottom-border">${today}</td></tr>
-
-
-    </table>
-
-
-
-
-
-    <!-- Admission Details -->
-
-
-    <h2 class="section-title">Admission Details</h2>
-
-
-    <div class="field-group">
-
-
-      <div class="field-label">Reason for Admission / Chief Complaint</div>
-
-
-      <div class="field-value">${p.chiefComplaint || "Not recorded"}</div>
-
-
+    <div class="section-header">ADMISSION DETAILS</div>
+    <div class="field-block">
+      <div class="block-label">Reason for admission/chief complaint:</div>
+      <div class="block-value">${p.chiefComplaint || "Not recorded"}</div>
+    </div>
+    <div class="field-block">
+      <div class="block-label">Clinical summary:</div>
+      <div class="block-value">${p.assessment || followUpNotes || "Not documented"}</div>
     </div>
 
-
-    <div class="field-group">
-
-
-      <div class="field-label">Clinical Summary</div>
-
-
-      <div class="field-value">${p.assessment || followUpNotes || "Not documented"}</div>
-
-
+    <div class="section-header">EXAMINATION FINDINGS SUMMARY</div>
+    <div class="field-block">
+      <div class="block-label">At admission:</div>
+      <div class="block-value">${df.examAtAdmission || "See clinical notes"}</div>
+    </div>
+    <div class="field-block">
+      <div class="block-label">At discharge vitals:</div>
+      <div class="block-value">${df.vitals || "See clinical notes"}</div>
     </div>
 
-
-
-
-
-    <!-- Examination Findings -->
-
-
-    <h2 class="section-title">Examination Findings Summary</h2>
-
-
-    <div class="field-group">
-
-
-      <div class="field-label">At Admission</div>
-
-
-      <div class="field-value">${(p as any).examinationAtAdmission || "See clinical notes"}</div>
-
-
+    <div class="section-header">INVESTIGATIONS DONE</div>
+    <div class="field-block">
+      <div class="block-value">${df.investigations || "See lab records"}</div>
     </div>
 
-
-    <div class="field-group">
-
-
-      <div class="field-label">At Discharge Vitals</div>
-
-
-      <div class="field-value">${(p as any).dischargeVitals || "See clinical notes"}</div>
-
-
+    <div class="section-header">DIAGNOSIS</div>
+    <div class="field-block">
+      <div class="block-value">${p.diagnosis || "Not specified"}</div>
+    </div>
+    <div class="field-block">
+      <div class="block-label">Summary of treatment given during admission:</div>
+      <div class="block-value">${p.treatmentPlan || "Not documented"}</div>
     </div>
 
-
-
-
-
-    <!-- Investigations Done -->
-
-
-    <h2 class="section-title">Investigations Done</h2>
-
-
-    <div class="field-value">${(p as any).investigations || "See lab records"}</div>
-
-
-
-
-
-    <!-- Diagnosis -->
-
-
-    <h2 class="section-title">Diagnosis</h2>
-
-
-    <div class="field-value">${p.diagnosis || "Not specified"}</div>
-
-
-
-
-
-    <!-- Summary of Treatment -->
-
-
-    <h2 class="section-title">Summary of Treatment Given During Admission</h2>
-
-
-    <div class="field-value">${p.treatmentPlan || "Not documented"}</div>
-
-
-
-
-
-    <!-- Condition at Discharge -->
-
-
-    <h2 class="section-title">Condition at Discharge</h2>
-
-
-    <div class="checkbox-grid">
-
-
-      <div class="checkbox-item"><input type="checkbox" /> Stable</div>
-
-
-      <div class="checkbox-item"><input type="checkbox" /> Improved</div>
-
-
-      <div class="checkbox-item"><input type="checkbox" /> Referred / Transferred</div>
-
-
-      <div class="checkbox-item"><input type="checkbox" /> Other (specify): ___________</div>
-
-
+    <div class="section-header">CONDITION AT DISCHARGE</div>
+    <div class="condition-row">
+      <span class="cb-item">${condStable} Stable</span>
+      <span class="cb-item">${condImproved} Improved</span>
+      <span class="cb-item">${condReferred} Referred/Transferred</span>
+      <span class="cb-item">${showOtherChecked} Other: ${condOther || "___________"}</span>
     </div>
 
+    <div class="section-header">DISCHARGE MEDICATION AND INSTRUCTIONS</div>
+    <div class="field-block">
+      <div class="block-value">${df.medication || followUpNotes || "See prescription records"}</div>
+    </div>
 
-
-
-
-    <!-- Discharge Medication -->
-
-
-    <h2 class="section-title">Discharge Medication and Instructions</h2>
-
-
-    <div class="field-value">${followUpNotes || "See prescription records"}</div>
-
-
-
-
-
-    <!-- Follow-Up -->
-
-
-    <h2 class="section-title">Follow-Up and Review Plan</h2>
-
-
-    <div style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px">
-
-
+    <div class="section-header">FOLLOW-UP AND REVIEW PLAN</div>
+    <div class="follow-up-row">
       <span>Review in:</span>
-
-
-      <span style="border-bottom:1px solid #000;display:inline-block;min-width:80px">&nbsp;</span>
-
-
-      <span>days / weeks / months</span>
-
-
+      <span class="uf">${df.followUpNum || "___"}</span>
+      <span>${df.followUpUnit}</span>
+    </div>
+    <div class="field-block">
+      <div class="block-label">Specific instructions:</div>
+      <div class="block-value">${df.followUpInstr || "None"}</div>
     </div>
 
-
-    <div style="margin-top:8px">
-
-
-      <div class="field-label">Specific Instructions:</div>
-
-
-      <div style="border-bottom:1px solid #e0e0e0;min-height:40px;padding:4px 0">&nbsp;</div>
-
-
+    <div class="sig-row">
+      <div class="sig-block">
+        <p class="sig-label">Next of kin name:</p>
+        <div class="sig-line">${df.nextOfKin || ""}</div>
+        <div class="sig-sub">Signature / date: ${df.nextOfKin || "___________"} / ${today}</div>
+      </div>
+      <div class="sig-block">
+        <p class="sig-label">Doctor's name:</p>
+        <div class="sig-line">${staffName}</div>
+        <div class="sig-sub">Signature / date: ${staffName || "___________"} / ${today}</div>
+      </div>
     </div>
-
-
-
-
-
-	    <!-- Signatures -->
-	    <div class="sig-row">
-	      <div class="sig-block">
-	        <p>Next of Kin Name:</p>
-	        <div style="border-bottom:1px solid #000;min-width:200px;padding:3px 8px;font-size:16px">&nbsp;</div>
-	        <div style="font-size:11px;color:#666;margin-top:2px">Signature / Relation</div>
-	      </div>
-	    </div>
-	    ${buildSignatureHtml(priorDoctors, staffName, "", today)}
-
-
 
     <div class="footer-note">This is a computer-generated discharge summary from Main Street Medical Center EMR</div>
-
-
   </div>
-
-
-  <script>window.onload = function() { window.print(); window.close(); };<\/script>
-
-
+  <script>window.onload = function() { window.print(); window.close(); };</script>
 </body>
-
-
 </html>`;
-
-
   };
-
 
 
 
@@ -8733,39 +8474,101 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
 
 
 
-        {/* Follow-up / Discharge Notes */}
+        {/* Discharge Form — Fillable Section */}
+        <div className="bg-white rounded-xl border border-slate-100 overflow-hidden mb-6">
+          <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Discharge Form — Complete before printing</h3>
+          </div>
+          <div className="p-4 sm:p-5 space-y-4">
+            {/* Patient Information — read-only */}
+            <div className="bg-slate-50 rounded-lg p-3">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">PATIENT INFORMATION</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+                <div><span className="font-semibold text-slate-600">NAME:</span> <span className="text-slate-800">{p.lastName}, {p.firstName}</span></div>
+                <div><span className="font-semibold text-slate-600">AGE/SEX:</span> <span className="text-slate-800">{p.age} / {p.gender === "MALE" ? "M" : "F"}</span></div>
+                <div><span className="font-semibold text-slate-600">PATIENT ID:</span> <span className="text-slate-800 font-mono">{p.patientNumber}</span></div>
+                <div><span className="font-semibold text-slate-600">CONTACT:</span> <span className="text-slate-800">{p.phoneNumber || "N/A"}</span></div>
+                <div><span className="font-semibold text-slate-600">DATE OF ADMISSION:</span> <span className="text-slate-800">{new Date(p.admittedAt).toLocaleDateString("en-UG", { day: "numeric", month: "short", year: "numeric" })}</span></div>
+                <div><span className="font-semibold text-slate-600">DATE OF DISCHARGE:</span> <span className="text-slate-800">{new Date().toLocaleDateString("en-UG", { day: "numeric", month: "short", year: "numeric" })}</span></div>
+              </div>
+            </div>
+            {/* Address */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Address</label>
+              <input type="text" className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]" placeholder="Patient address for discharge form" value={dischargeForm.address} onChange={(e) => setDischargeForm({...dischargeForm, address: e.target.value})} />
+            </div>
+            {/* Examination at Admission */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Examination at Admission</label>
+              <textarea className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[60px]" placeholder="Physical exam findings at time of admission..." value={dischargeForm.examAtAdmission} onChange={(e) => setDischargeForm({...dischargeForm, examAtAdmission: e.target.value})} />
+            </div>
+            {/* Discharge Vitals */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Discharge Vitals</label>
+              <textarea className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[60px]" placeholder="Vital signs at time of discharge (BP, HR, RR, Temp, SpO2, etc.)" value={dischargeForm.vitals} onChange={(e) => setDischargeForm({...dischargeForm, vitals: e.target.value})} />
+            </div>
+            {/* Investigations Done */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Investigations Done</label>
+              <textarea className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[60px]" placeholder="List investigations performed during admission..." value={dischargeForm.investigations} onChange={(e) => setDischargeForm({...dischargeForm, investigations: e.target.value})} />
+            </div>
+            {/* Condition at Discharge */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Condition at Discharge</label>
+              <div className="flex flex-wrap items-center gap-4">
+                {["Stable", "Improved", "Referred/Transferred"].map((opt) => (
+                  <label key={opt} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                    <input type="radio" name="discharge-condition" className="accent-[#0a2e1a]" checked={dischargeForm.condition === opt} onChange={() => setDischargeForm({...dischargeForm, condition: opt})} />
+                    {opt}
+                  </label>
+                ))}
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+                  <input type="radio" name="discharge-condition" className="accent-[#0a2e1a]" checked={dischargeForm.condition === "Other"} onChange={() => setDischargeForm({...dischargeForm, condition: "Other"})} />
+                  Other:
+                </label>
+                <input type="text" className="p-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:border-[#0a2e1a] flex-1 max-w-[200px]" placeholder="Specify..." value={dischargeForm.conditionOther} onChange={(e) => { setDischargeForm({...dischargeForm, condition: "Other", conditionOther: e.target.value}) }} disabled={dischargeForm.condition !== "Other"} />
+              </div>
+            </div>
+            {/* Discharge Medication */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Discharge Medication and Instructions</label>
+              <textarea className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[60px]" placeholder="Prescribe discharge medications and instructions..." value={dischargeForm.medication} onChange={(e) => setDischargeForm({...dischargeForm, medication: e.target.value})} />
+            </div>
+            {/* Follow-Up */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Follow-Up and Review Plan</label>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm text-slate-600">Review in:</span>
+                <input type="number" min="1" className="w-20 p-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:border-[#0a2e1a]" placeholder="#" value={dischargeForm.followUpNum} onChange={(e) => setDischargeForm({...dischargeForm, followUpNum: e.target.value})} />
+                <select className="p-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:border-[#0a2e1a]" value={dischargeForm.followUpUnit} onChange={(e) => setDischargeForm({...dischargeForm, followUpUnit: e.target.value})}>
+                  <option value="days">days</option>
+                  <option value="weeks">weeks</option>
+                  <option value="months">months</option>
+                </select>
+              </div>
+              <textarea className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[50px]" placeholder="Specific follow-up instructions..." value={dischargeForm.followUpInstr} onChange={(e) => setDischargeForm({...dischargeForm, followUpInstr: e.target.value})} />
+            </div>
+            {/* Next of Kin */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Next of Kin / Person Collecting Patient</label>
+              <input type="text" className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]" placeholder="Full name of next of kin or person collecting patient" value={dischargeForm.nextOfKin} onChange={(e) => setDischargeForm({...dischargeForm, nextOfKin: e.target.value})} />
+            </div>
+          </div>
+        </div>
 
-
+        {/* Additional Clinical Notes */}
         <div className="bg-white rounded-xl border border-slate-100 p-4 mb-6">
-
-
           <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">
-
-
-            Discharge Summary Notes
-
-
+            Additional Clinical Notes
           </label>
-
-
           <textarea
-
-
-            className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[100px]"
-
-
-            placeholder="Document final discharge summary, instructions, and follow-up plan..."
-
-
+            className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[80px]"
+            placeholder="Any additional clinical notes or observations..."
             value={followUpNotes}
-
-
             onChange={(e) => setFollowUpNotes(e.target.value)}
-
-
           />
-
-
         </div>
 
 

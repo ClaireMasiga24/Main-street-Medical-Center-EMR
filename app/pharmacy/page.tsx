@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Search, PackageCheck, Pill, LogOut, User } from "lucide-react";
+import { useEffect, useState, useRef } from "react";
+import { Search, X, PackageCheck, Pill, LogOut, User } from "lucide-react";
 import NotificationInbox from "../components/NotificationInbox";
 import StaffMessaging from "../components/StaffMessaging";
 import { useRouter } from "next/navigation";
@@ -36,6 +36,8 @@ export default function PharmacyPage() {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [selected, setSelected] = useState<QueueItem | null>(null);
   const [search, setSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     async function loadQueue() {
@@ -126,16 +128,8 @@ export default function PharmacyPage() {
               <User size={18} /> Patients
             </button>
           </div>
-        </div>
-
-        <div className="mb-2"><NotificationInbox department="Pharmacy" /></div>
-        <div className="mb-2"><StaffMessaging /></div>
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-2 text-red-200 hover:text-white"
-        >
-          <LogOut size={18} /> Logout
-        </button>
+          </div>
+          <div className="mt-4"><NotificationInbox department="Pharmacy" /></div>
       </aside>
 
       {/* Main */}
@@ -147,14 +141,28 @@ export default function PharmacyPage() {
             Pharmacy Dashboard
           </h2>
 
-          <div className="relative w-72">
-            <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
+          <div className="flex items-center gap-3">
+            <div className="relative w-72">
+            <button type="button" className="absolute left-1 top-1/2 -translate-y-1/2 flex items-center justify-center w-9 h-9 rounded-lg text-gray-400 hover:text-white hover:bg-green-600 transition-colors z-10" onClick={() => setSearch(searchInputRef.current?.value || "")}>
+              <Search size={18} />
+            </button>
             <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              ref={searchInputRef}
+              defaultValue=""
+              onChange={() => setSearch(searchInputRef.current?.value || "")}
               placeholder="Search patient..."
-              className="w-full pl-10 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+              className="w-full pl-12 pr-12 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
             />
+            <button type="button" className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center justify-center w-9 h-9 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors z-10" onClick={() => {
+              if (searchInputRef.current) searchInputRef.current.value = "";
+              setSearch("");
+            }}>
+              <X size={18} />
+            </button>
+          </div>
+          <button onClick={handleLogout} className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors shadow-sm">
+            <LogOut size={14} /> Logout
+          </button>
           </div>
         </div>
 
