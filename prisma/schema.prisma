@@ -50,8 +50,9 @@ model Patient {
   ImagingRequest        ImagingRequest[]
   LabCommunications     LabCommunication[]
 	  LabRequest            LabRequest[]
-	  MedicalProcedure      MedicalProcedure[]
-	  Notification          Notification[]
+  MedicalProcedure      MedicalProcedure[]
+  NurseAction           NurseAction[]
+  Notification          Notification[]
   OdontogramFinding     OdontogramFinding[]
   PatientReview         PatientReview[]
   PatientTimeline       PatientTimeline[]
@@ -653,6 +654,22 @@ model MedicalProcedure {
   performedBy       String
   createdAt         DateTime @default(now())
   Patient           Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+}
+
+model NurseAction {
+  id               Int      @id @default(autoincrement())
+  patientId        Int
+  medication       String?  // drug/treatment administered
+  dose             String?  // dosage given
+  route            String?  // route of administration (PO, IV, IM, etc.)
+  timeAdministered DateTime? // when the treatment was given
+  notes            String?  // free-text nurse comments / observations
+  performedBy      String   // nurse name
+  createdAt        DateTime @default(now())
+  Patient          Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([createdAt])
 }
 
 enum PatientStatus {

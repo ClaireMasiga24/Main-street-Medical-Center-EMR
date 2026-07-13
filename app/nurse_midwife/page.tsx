@@ -1041,7 +1041,7 @@ export default function NurseMidwifeDashboard() {
 
 
 
-  const handleMarkDispensed = async (prescriptionId: number) => {
+  const handleMarkDispensed = async (prescriptionId: number, patientName?: string) => {
 
 
     setPharmacySaving(true);
@@ -1059,7 +1059,7 @@ export default function NurseMidwifeDashboard() {
         headers: { "Content-Type": "application/json" },
 
 
-        body: JSON.stringify({ prescriptionId }),
+        body: JSON.stringify({ prescriptionId, nurseName, patientName }),
 
 
       });
@@ -1149,7 +1149,7 @@ export default function NurseMidwifeDashboard() {
           headers: { "Content-Type": "application/json" },
 
 
-          body: JSON.stringify({ prescriptionId: rx.id }),
+          body: JSON.stringify({ prescriptionId: rx.id, nurseName, patientName: `${pharmacySelectedPatient.firstName || ""} ${pharmacySelectedPatient.lastName || ""}` }),
 
 
         });
@@ -5278,7 +5278,67 @@ export default function NurseMidwifeDashboard() {
                       const pendingRx = (p.Prescription || []).filter((rx: any) => rx.status === "PENDING");
 
 
-                      if (pendingRx.length === 0) return null;
+                      if (pendingRx.length === 0) {
+                        // Still show patients who were sent to pharmacy (even without prescriptions yet)
+                        if (p.currentStatus === "AWAITING_PHARMACY") {
+                          return (
+                            <div key={p.id} onClick={() => handleBeginDispense(p)} className="rounded-xl border-l-4 border-l-amber-400 border border-slate-200/80 p-3 sm:p-5 mb-3 hover:shadow-md hover:bg-slate-50 transition-all duration-200 bg-white cursor-pointer">
+
+                              <div className="flex items-start justify-between mb-3">
+
+                                <div className="flex items-center gap-2 flex-wrap">
+
+                                  <span className="font-mono text-[11px] font-extrabold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">{p.patientNumber}</span>
+
+                                  <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded">Awaiting Rx</span>
+
+                                </div>
+
+                                <div className="text-right text-[11px] text-slate-400">
+
+                                  <div className="font-semibold text-slate-500">{p.gender} &middot; {p.age} yrs</div>
+
+                                  {p.phoneNumber && <div className="flex items-center gap-1 mt-0.5 justify-end"><Phone size={9} />{p.phoneNumber}</div>}
+
+                                </div>
+
+                              </div>
+
+                              <h4 className="text-base font-bold text-slate-800 mb-2">{p.lastName}, {p.firstName}</h4>
+
+                              {p.Visit?.[0] && (
+                                <div className="mb-2 space-y-1 bg-blue-50/50 rounded-lg border border-blue-100/70 p-2.5">
+                                  {p.Visit[0].diagnosis && (
+                                    <div>
+                                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Diagnosis</p>
+                                      <p className="text-[11px] font-semibold text-slate-700">{p.Visit[0].diagnosis}</p>
+                                    </div>
+                                  )}
+                                  {p.Visit[0].treatmentPlan && (
+                                    <div>
+                                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Treatment Plan</p>
+                                      <p className="text-[11px] text-slate-600">{p.Visit[0].treatmentPlan}</p>
+                                    </div>
+                                  )}
+                                  {p.Visit[0].doctorName && (
+                                    <p className="text-[9px] text-slate-400 italic">Dr. {p.Visit[0].doctorName}</p>
+                                  )}
+                                </div>
+                              )}
+
+                              <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50/70 rounded-lg px-3 py-2">
+
+                                <Clock size={14} />
+
+                                <span>Awaiting medication</span>
+
+                              </div>
+
+                            </div>
+                          );
+                        }
+                        return null;
+                      }
 
 
                       return (
@@ -7672,13 +7732,20 @@ export default function NurseMidwifeDashboard() {
                           <Stethoscope size={14} className="text-blue-500" />
 
 
-                          <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">Diagnosis</span>
-
-
+                          <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider">Doctor's Recommendations</span>
                         </div>
 
+                        <div className="mb-2">
+                          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Diagnosis</p>
+                          <p className="text-sm font-semibold text-blue-700">{visit.diagnosis}</p>
+                        </div>
 
-                        <p className="text-sm font-semibold text-blue-700">{visit.diagnosis}</p>
+                        {visit.treatmentPlan && (
+                          <div className="mb-2">
+                            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Treatment Plan</p>
+                            <p className="text-sm text-slate-600">{visit.treatmentPlan}</p>
+                          </div>
+                        )}
 
 
                         {visit.doctorName && (

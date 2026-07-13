@@ -16,4 +16,6 @@ export const ROLE_ROUTES: Record<string, string> = {
   CASHIER: "/billing",
 
   PHARMACIST: "/pharmacy",
+
+  CLEANER: "/cleaner",
 };

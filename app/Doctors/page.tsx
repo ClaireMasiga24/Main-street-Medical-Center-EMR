@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 
 
@@ -5765,8 +5765,6 @@ function ConsultationPanel({
       </div>
 
 
-l
-
 
       {/* â”€â”€ Send Orders Button â”€â”€ */}
 
@@ -6995,6 +6993,7 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
 
 
   const [reviews, setReviews] = useState<any[]>([]);
+  const [nurseActions, setNurseActions] = useState<any[]>([]);
 
 
   const [patientLabRequests, setPatientLabRequests] = useState<any[]>([]);
@@ -7306,13 +7305,22 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
     try {
 
 
-      const res = await fetch(`/api/doctor/reviews?patientId=${patientId}`);
+      const [reviewsRes, nurseRes] = await Promise.all([
 
 
-      if (res.ok) {
+        fetch(`/api/doctor/reviews?patientId=${patientId}`),
 
 
-        const d = await res.json();
+        fetch(`/api/nurse-actions?patientId=${patientId}`),
+
+
+      ]);
+
+
+      if (reviewsRes.ok) {
+
+
+        const d = await reviewsRes.json();
 
 
         setReviews(d.reviews ?? []);
@@ -7322,6 +7330,18 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
 
 
         setPatientImagingRequests(d.imagingRequests ?? []);
+
+
+      }
+
+
+      if (nurseRes.ok) {
+
+
+        const nd = await nurseRes.json();
+
+
+        setNurseActions(nd.actions ?? []);
 
 
       }
@@ -8321,6 +8341,46 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
 
 
 
+        {/* -- Nurse Actions / Treatments -------------------------------- */}
+        <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden mb-6">
+          <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Nurse Actions &amp; Treatments</h3>
+            {nurseActions.length > 0 && (
+              <span className="text-[9px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{nurseActions.length} record(s)</span>
+            )}
+          </div>
+          <div className="divide-y divide-slate-50">
+            {nurseActions.length === 0 ? (
+              <div className="py-6 text-center text-sm text-slate-400">No nurse treatments recorded yet</div>
+            ) : (
+              nurseActions.map((na: any) => (
+                <div key={na.id} className="px-5 py-3 hover:bg-slate-50 transition-colors">
+                  <div className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center text-[9px] font-bold text-blue-700 flex-shrink-0 mt-0.5">
+                      <Syringe size={12} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-semibold text-slate-700">{na.performedBy}</span>
+                        <span className="text-[10px] text-slate-400">·</span>
+                        <span className="text-[10px] text-slate-400">{new Date(na.createdAt).toLocaleDateString("en-UG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                      </div>
+                      {na.medication ? (
+                        <div className="text-sm text-slate-600">
+                          <span className="font-medium text-slate-700">{na.medication}</span>
+                          {na.dose && <span className="text-slate-400"> — {na.dose}</span>}
+                          {na.route && <span className="text-slate-400"> ({na.route})</span>}
+                        </div>
+                      ) : na.notes ? (
+                        <p className="text-sm text-slate-600 italic">{na.notes}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
         {/* Lab & Imaging Orders Status */}
 
 
@@ -10824,6 +10884,12 @@ export default function DoctorsPage() {
 
 
   const handleSelectPatient = (patient: DashboardPatient) => {
+    // Admitted patients must never enter the consultation flow
+    if (patient.currentStatus === "ADMITTED") {
+      setActiveSection("admitted");
+      // The AdmittedPatientsView will refetch on mount, so the patient will appear there
+      return;
+    }
     setActivePatient(patient);
     setOpenedFromNotification(false);
   };
@@ -10890,7 +10956,12 @@ export default function DoctorsPage() {
 
 
 
-  const handleStartConsultation = async (patient: DashboardPatient) => {
+	  const handleStartConsultation = async (patient: DashboardPatient) => {
+	    // Admitted patients must never enter the consultation flow
+	    if (patient.currentStatus === "ADMITTED") {
+	      setActiveSection("admitted");
+	      return;
+	    }
 
 
     try {

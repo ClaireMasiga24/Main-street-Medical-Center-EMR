@@ -144,6 +144,7 @@ export async function POST(req: NextRequest) {
         await tx.notification.create({
           data: {
             department: deptName,
+            patientId,
             title: "Patient sent for monitoring",
             message: `${followUpNotes || `Dr. ${doctorName} sent patient for monitoring`}`,
             type: "RESULT_READY",
