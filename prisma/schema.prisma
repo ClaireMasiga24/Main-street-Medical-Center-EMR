@@ -595,16 +595,19 @@ model DispenseLog {
 }
 
 model Billing {
-  id          Int           @id @default(autoincrement())
-  patientId   Int
-  visitId     Int?
-  amount      Float
-  description String?
-  status      BillingStatus @default(UNPAID)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  Patient     Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  Visit       Visit?        @relation(fields: [visitId], references: [id])
+  id            Int           @id @default(autoincrement())
+  patientId     Int
+  visitId       Int?
+  amount        Float
+  amountPaid    Float         @default(0)
+  balanceDue    Float         @default(0)
+  invoiceNumber String?
+  description   String?
+  status        BillingStatus @default(UNPAID)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  Patient       Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Visit         Visit?        @relation(fields: [visitId], references: [id])
 }
 
 model Staff {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Image from "next/image";
 import NotificationInbox from "../components/NotificationInbox";
 import StaffMessaging from "../components/StaffMessaging";
@@ -11,8 +11,9 @@ import {
   LogOut, Receipt, Plus, Trash2, CreditCard, Banknote, Smartphone,
   Printer, X, BadgeCheck, Stethoscope, FlaskConical, Scan, Baby,
   Waves, RadioTower, Calendar, Clock, UserRound, Loader2,
-  Pencil,
+  Pencil, Package,
 } from "lucide-react";
+import { FULL_SERVICE_CATALOG, CatalogItemWithCategory } from "./servicePriceCatalog";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,41 @@ interface BillLine {
 }
 
 type PaymentMethod = "CASH" | "MOBILE_MONEY" | "CARD" | "INSURANCE";
+
+interface PartialBillPatient {
+  id: number;
+  patientNumber: string;
+  firstName: string;
+  lastName: string;
+  age: number;
+  gender: string;
+  status: string;
+  balanceDue: number;
+  invoiceNumber: string;
+  billingId: number;
+}
+
+interface BillingRecord {
+  id: number;
+  patientId: number;
+  amount: number;
+  amountPaid: number;
+  balanceDue: number;
+  status: string;
+  invoiceNumber: string;
+  description: string;
+  createdAt: string;
+  Patient?: {
+    id: number;
+    patientNumber: string;
+    firstName: string;
+    lastName: string;
+    age: number;
+    gender: string;
+    currentStatus: string;
+  };
+  isPartial?: boolean;
+}
 
 const PAYMENT_ICONS: Record<PaymentMethod, React.ReactNode> = {
   CASH: <Banknote size={15} />,
@@ -173,29 +209,38 @@ const LAB_TESTS: LabTestItem[] = [
   { code: "LAB030", name: "Urinalysis", defaultPrice: 10000 },
 ];
 
-const LAB_PRICE_STORAGE_KEY = "msmc_lab_prices";
+const SERVICE_PRICE_KEY = "MSMC_SERVICE_PRICES";
 
-function getLabPrice(code: string): number {
-  if (typeof window === "undefined") return 0;
+/* Generalized price functions — used across all 13 categories */
+function getServicePrice(code: string, defaultPrice: number): number {
+  if (typeof window === "undefined") return defaultPrice;
   try {
-    const stored = localStorage.getItem(LAB_PRICE_STORAGE_KEY);
+    const stored = localStorage.getItem(SERVICE_PRICE_KEY);
     if (stored) {
       const prices: Record<string, number> = JSON.parse(stored);
       if (prices[code] !== undefined) return prices[code];
     }
   } catch {}
-  const test = LAB_TESTS.find((t) => t.code === code);
-  return test?.defaultPrice ?? 0;
+  return defaultPrice;
 }
 
-function setLabPrice(code: string, price: number) {
+function setServicePrice(code: string, price: number) {
   if (typeof window === "undefined") return;
   try {
-    const stored = localStorage.getItem(LAB_PRICE_STORAGE_KEY);
+    const stored = localStorage.getItem(SERVICE_PRICE_KEY);
     const prices: Record<string, number> = stored ? JSON.parse(stored) : {};
     prices[code] = price;
-    localStorage.setItem(LAB_PRICE_STORAGE_KEY, JSON.stringify(prices));
+    localStorage.setItem(SERVICE_PRICE_KEY, JSON.stringify(prices));
   } catch {}
+}
+
+/* Legacy lab-price helpers — delegate to the catalog-wide system */
+function getLabPrice(code: string): number {
+  const test = LAB_TESTS.find((t) => t.code === code);
+  return getServicePrice(code, test?.defaultPrice ?? 0);
+}
+function setLabPrice(code: string, price: number) {
+  setServicePrice(code, price);
 }
 
 // ─── StaffAttendancePanel ──────────────────────────────────────────────────────
@@ -982,6 +1027,280 @@ function AppointmentsPanel({ staffId, patients }: { staffId: string | null; pati
   );
 }
 
+// ─── QuickAddPanel (catalog-wide service quick-add) ────────────────────────────
+
+const CATEGORIES: { key: string; label: string }[] = [
+  { key: "All", label: "All" },
+  { key: "Drug", label: "Drugs" },
+  { key: "Sundry", label: "Sundries" },
+  { key: "Procedures", label: "Procedures" },
+  { key: "Add-Ons", label: "Add-Ons" },
+  { key: "Dental", label: "Dental" },
+  { key: "Lab Test", label: "Lab Tests" },
+  { key: "Radiology", label: "Radiology" },
+  { key: "Copay", label: "Copay" },
+  { key: "Consultation", label: "Consultations" },
+  { key: "Beds", label: "Beds" },
+  { key: "Packages", label: "Packages" },
+  { key: "Cardiology", label: "Cardiology" },
+  { key: "NonMedicalCategory", label: "Non-Medical" },
+  { key: "Custom", label: "Custom" },
+];
+
+function QuickAddPanel({ setBillLines, setInvoiceConfirmed }: {
+  setBillLines: React.Dispatch<React.SetStateAction<BillLine[]>>;
+  setInvoiceConfirmed: React.Dispatch<React.SetStateAction<boolean>>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [category, setCategory] = useState("All");
+  const [search, setSearch] = useState("");
+  const [editingPrice, setEditingPrice] = useState<string | null>(null);
+  const [editPriceValue, setEditPriceValue] = useState("");
+  const [customItems, setCustomItems] = useState<CatalogItemWithCategory[]>([]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("MSMC_CUSTOM_CATALOG_ITEMS");
+      if (raw) {
+        const parsed: CatalogItemWithCategory[] = JSON.parse(raw);
+        setCustomItems(parsed);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const hasActiveFilter = category !== "All" || search.trim().length > 0;
+
+  /* Merge custom catalog items from localStorage */
+  const catalog = useMemo(
+    () => (customItems.length > 0 ? [...FULL_SERVICE_CATALOG, ...customItems] : FULL_SERVICE_CATALOG),
+    [customItems]
+  );
+
+  /* Filter + sort */
+  let filtered = catalog;
+  if (category !== "All") {
+    filtered = filtered.filter((i) => i.category === category);
+  }
+  if (search.trim()) {
+    const q = search.toLowerCase().trim();
+    filtered = filtered.filter(
+      (i) => i.code.toLowerCase().includes(q) || i.name.toLowerCase().includes(q)
+    );
+    filtered = [...filtered].sort((a, b) => {
+      const q = search.toLowerCase().trim();
+      const aExact = a.code.toLowerCase() === q ? 0 : 1;
+      const bExact = b.code.toLowerCase() === q ? 0 : 1;
+      if (aExact !== bExact) return aExact - bExact;
+      const aStarts = a.code.toLowerCase().startsWith(q) ? 0 : 1;
+      const bStarts = b.code.toLowerCase().startsWith(q) ? 0 : 1;
+      if (aStarts !== bStarts) return aStarts - bStarts;
+      const aNameStarts = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+      const bNameStarts = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+      if (aNameStarts !== bNameStarts) return aNameStarts - bNameStarts;
+      return a.name.localeCompare(b.name);
+    });
+  } else {
+    filtered = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /* Cap at 50 when browsing a category without a search term */
+  const showCapped = category !== "All" && !search.trim();
+  const displayList = showCapped ? filtered.slice(0, 50) : filtered;
+
+  const getEffectivePrice = (item: CatalogItemWithCategory): number =>
+    getServicePrice(item.code, item.defaultPrice);
+
+  const handleEditSave = (item: CatalogItemWithCategory) => {
+    const price = Math.max(0, Math.round(parseInt(editPriceValue.replace(/,/g, "")) || 0));
+    setServicePrice(item.code, price);
+    setEditingPrice(null);
+  };
+
+  const addToBill = (item: CatalogItemWithCategory) => {
+    const price = getEffectivePrice(item);
+    setBillLines((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), description: `${item.code} — ${item.name}`, qty: 1, unitPrice: price, subtotal: price },
+    ]);
+    setInvoiceConfirmed(false);
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {/* Header toggle */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between border-b border-slate-100 bg-slate-50/70 px-5 py-3 transition hover:bg-slate-50"
+      >
+        <div className="flex items-center gap-2">
+          <Package size={14} className="text-amber-600" />
+          <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
+            Quick Add
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] text-slate-400 font-medium">
+            {catalog.length} items
+          </span>
+          <svg
+            className={`w-3.5 h-3.5 text-slate-400 transition-transform ${expanded ? "rotate-180" : ""}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </button>
+
+      {expanded && (
+        <div>
+          {/* Search row */}
+          <div className="px-4 pt-3 pb-1">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name or code…"
+                className="w-full rounded-lg border border-slate-200 bg-slate-50 pl-8 pr-3 py-2 text-[11px] font-medium outline-none transition focus:border-[#00703C] focus:bg-white"
+              />
+              {search && (
+                <button onClick={() => setSearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500">
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Category filter tabs */}
+          <div className="flex gap-1 overflow-x-auto px-4 py-2 scrollbar-thin">
+            {CATEGORIES.map((cat) => (
+              <button
+                key={cat.key}
+                onClick={() => setCategory(cat.key)}
+                className={`flex-shrink-0 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 rounded-full transition-colors ${
+                  category === cat.key
+                    ? "bg-[#00703C] text-white"
+                    : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                }`}
+              >
+                {cat.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Results or empty state */}
+          {!hasActiveFilter ? (
+            <div className="px-4 py-10 text-center">
+              <Package size={28} className="mx-auto text-slate-200 mb-2" />
+              <p className="text-xs font-medium text-slate-400">Select a category or type a search term</p>
+              <p className="text-[10px] text-slate-300 mt-1">Browse {catalog.length} services across {CATEGORIES.length} categories</p>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="px-4 py-10 text-center">
+              <Search size={24} className="mx-auto text-slate-200 mb-2" />
+              <p className="text-xs font-medium text-slate-400">No items match your search</p>
+              <p className="text-[10px] text-slate-300 mt-1">Try a different term or category</p>
+            </div>
+          ) : (
+            <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
+              {displayList.map((item) => {
+                const currentPrice = getEffectivePrice(item);
+                const isEditing = editingPrice === item.code;
+                return (
+                  <div
+                    key={item.code}
+                    className="flex items-center gap-2 px-4 py-2.5 hover:bg-slate-50/50 transition group"
+                  >
+                    <button
+                      onClick={() => addToBill(item)}
+                      className="flex-1 min-w-0 text-left"
+                      title={`Add ${item.name} to bill`}
+                    >
+                      <p className="text-[11px] font-semibold text-slate-700 truncate leading-tight">
+                        <span className="font-mono text-[10px] text-amber-600">{item.code}</span>{" "}
+                        {item.name}
+                        {item.needsPricing && (
+                          <span className="ml-1.5 inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[8px] font-extrabold uppercase tracking-wider text-amber-700">
+                            Needs Pricing
+                          </span>
+                        )}
+                      </p>
+                      <span className="text-[9px] text-slate-400">{item.category}</span>
+                    </button>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {isEditing ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min={0}
+                            value={editPriceValue}
+                            onChange={(e) => setEditPriceValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleEditSave(item);
+                              if (e.key === "Escape") setEditingPrice(null);
+                            }}
+                            className="w-20 rounded-lg border border-[#00703C] px-2 py-1 text-[10px] font-bold text-right outline-none"
+                            autoFocus
+                          />
+                          <button onClick={() => handleEditSave(item)}
+                            className="text-[#00703C] hover:text-emerald-700 p-0.5">
+                            <CheckCircle2 size={12} />
+                          </button>
+                          <button onClick={() => setEditingPrice(null)}
+                            className="text-slate-400 hover:text-rose-500 p-0.5">
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          {!item.needsPricing && (
+                            <button
+                              onClick={() => addToBill(item)}
+                              className="rounded-lg bg-[#00703C]/10 px-2.5 py-1 text-[10px] font-extrabold text-[#00703C] hover:bg-[#00703C]/20 transition"
+                            >
+                              + {formatUGX(currentPrice)}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setEditingPrice(item.code);
+                              setEditPriceValue(String(currentPrice));
+                            }}
+                            className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-amber-600 p-1 transition-all"
+                            title="Edit price"
+                          >
+                            <Pencil size={11} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {showCapped && filtered.length > 50 && (
+                <div className="px-4 py-2.5 text-center border-t border-slate-50">
+                  <p className="text-[10px] font-medium text-slate-400">
+                    Showing 50 of {filtered.length} &mdash; type to search for more
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Count badge */}
+          {filtered.length > 0 && (
+            <div className="border-t border-slate-50 px-4 py-1.5 text-[9px] text-slate-400 text-right">
+              {displayList.length} of {catalog.length} items
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── CashierPOS ───────────────────────────────────────────────────────────────
 
 function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; directBillPatient?: Patient | null }) {
@@ -994,6 +1313,7 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
   const [newDesc, setNewDesc] = useState("");
   const [newQty, setNewQty] = useState("1");
   const [newPrice, setNewPrice] = useState("");
+  const [saveToCatalog, setSaveToCatalog] = useState(false);
 
   const [invoiceConfirmed, setInvoiceConfirmed] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
@@ -1005,39 +1325,25 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
   const [receiptVisible, setReceiptVisible] = useState(false);
   const [savedInvoiceNumber, setSavedInvoiceNumber] = useState("");
 
-  // ── Lab test billing state ─────────────────────────────────────────────
-  const [showLabTests, setShowLabTests] = useState(false);
-  const [labPrices, setLabPrices] = useState<Record<string, number>>(() => {
-    const p: Record<string, number> = {};
-    LAB_TESTS.forEach((t) => { p[t.code] = getLabPrice(t.code); });
-    return p;
-  });
-  const [editingPrice, setEditingPrice] = useState<string | null>(null);
-  const [editPriceValue, setEditPriceValue] = useState("");
-
-  const updateLabPrice = (code: string, newPrice: number) => {
-    const price = Math.max(0, Math.round(newPrice));
-    setLabPrices((prev) => ({ ...prev, [code]: price }));
-    setLabPrice(code, price);
-    setEditingPrice(null);
-  };
-
-  const addLabTestToBill = (test: LabTestItem) => {
-    const price = labPrices[test.code] || test.defaultPrice;
-    setBillLines((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), description: `${test.code} — ${test.name}`, qty: 1, unitPrice: price, subtotal: price },
-    ]);
-    setInvoiceConfirmed(false);
-  };
+  // ── Partial / resume-bill state ──────────────────────────────────────────
+  const [isResumeBill, setIsResumeBill] = useState(false);
+  const [resumeBillId, setResumeBillId] = useState<number | null>(null);
+  const [existingAmountPaid, setExistingAmountPaid] = useState(0);
+  const [partialBillPatients, setPartialBillPatients] = useState<PartialBillPatient[]>([]);
 
   const subtotal = billLines.reduce((s, l) => s + l.subtotal, 0);
   const total = subtotal;
   const tendered = parseFloat(amountTendered) || 0;
   const change = tendered - total;
+  const balanceDue = Math.max(0, total - tendered);
+  const isPartialPayment = balanceDue > 0;
 
   const canConfirm = !!selectedPatient && billLines.length > 0;
-  const canPay = invoiceConfirmed && (paymentMethod !== "CASH" || tendered >= total);
+  const canPay = invoiceConfirmed
+    && tendered > 0
+    && (paymentMethod !== "MOBILE_MONEY" || paymentReference.trim().length > 0)
+    && (paymentMethod !== "CARD" || paymentReference.trim().length > 0)
+    && (paymentMethod !== "INSURANCE" || insuranceProvider.trim().length > 0);
 
   // ── Auto-select patient for direct billing ──────────────────────────────
   useEffect(() => {
@@ -1047,6 +1353,28 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
       setInvoiceConfirmed(false);
     }
   }, [directBillPatient]);
+
+  // ── Fetch patients with partial bills (for the queue) ───────────────────
+  const fetchPartialBillPatients = useCallback(async () => {
+    try {
+      const res = await fetch("/api/receptionist?status=PARTIAL");
+      if (res.ok) setPartialBillPatients(await res.json());
+    } catch {}
+  }, []);
+
+  // ── Fetch a single patient's partial bill (for resume flow) ────────────
+  const fetchPatientBill = useCallback(async (patientId: number): Promise<BillingRecord | null> => {
+    try {
+      const res = await fetch(`/api/receptionist?patientId=${patientId}&status=PARTIAL`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.[0] ?? null;
+    } catch { return null; }
+  }, []);
+
+  useEffect(() => {
+    fetchPartialBillPatients();
+  }, [fetchPartialBillPatients]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -1064,6 +1392,13 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
       p.patientNumber.toLowerCase().includes(patientSearch.toLowerCase())
   );
 
+  const slugify = (s: string) =>
+    s.trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9\s-]/g, "")
+      .replace(/[\s-]+/g, "_")
+      .replace(/^_|_$/g, "");
+
   const handleAddLine = () => {
     const desc = newDesc.trim();
     const qty = parseInt(newQty) || 1;
@@ -1073,7 +1408,22 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
       ...prev,
       { id: crypto.randomUUID(), description: desc, qty, unitPrice: price, subtotal: qty * price },
     ]);
-    setNewDesc(""); setNewQty("1"); setNewPrice("");
+    if (saveToCatalog) {
+      const code = `CUSTOM-${slugify(desc)}-${Date.now()}`;
+      const customItem: CatalogItemWithCategory = {
+        code,
+        name: desc,
+        defaultPrice: price,
+        category: "Custom",
+      };
+      try {
+        const raw = localStorage.getItem("MSMC_CUSTOM_CATALOG_ITEMS");
+        const existing: CatalogItemWithCategory[] = raw ? JSON.parse(raw) : [];
+        existing.push(customItem);
+        localStorage.setItem("MSMC_CUSTOM_CATALOG_ITEMS", JSON.stringify(existing));
+      } catch { /* localStorage full or unavailable — silently skip */ }
+    }
+    setNewDesc(""); setNewQty("1"); setNewPrice(""); setSaveToCatalog(false);
     setInvoiceConfirmed(false);
   };
 
@@ -1099,26 +1449,39 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
     if (!selectedPatient) return;
     setIsProcessing(true);
     try {
+      const payload: any = {
+        patientId: selectedPatient.id,
+        paymentMethod,
+        reference: ["MOBILE_MONEY", "CARD"].includes(paymentMethod) ? paymentReference : null,
+        insuranceProvider: paymentMethod === "INSURANCE" ? insuranceProvider : null,
+        insurancePolicyNumber: paymentMethod === "INSURANCE" ? insurancePolicyNumber : null,
+        lines: billLines.map((l) => ({
+          description: l.description,
+          qty: l.qty,
+          unitPrice: l.unitPrice,
+          subtotal: l.subtotal,
+        })),
+      };
+
+      let action: string;
+      if (isResumeBill && resumeBillId) {
+        // Follow-up payment on an existing partial bill
+        action = "ADD_PAYMENT";
+        payload.billingId = resumeBillId;
+        payload.additionalAmountPaid = tendered;
+      } else {
+        // First payment — create a new bill
+        action = "CREATE_BILL";
+        payload.amountTendered = tendered;
+        payload.amountPaid = tendered;
+        payload.balanceDue = balanceDue;
+        payload.visitId = null;
+      }
+
       const res = await fetch("/api/receptionist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "CREATE_BILL",
-          payload: {
-            patientId: selectedPatient.id,
-            paymentMethod,
-            amountTendered: paymentMethod === "CASH" ? tendered : total,
-            reference: ["MOBILE_MONEY", "CARD"].includes(paymentMethod) ? paymentReference : null,
-            insuranceProvider: paymentMethod === "INSURANCE" ? insuranceProvider : null,
-            insurancePolicyNumber: paymentMethod === "INSURANCE" ? insurancePolicyNumber : null,
-            lines: billLines.map((l) => ({
-              description: l.description,
-              qty: l.qty,
-              unitPrice: l.unitPrice,
-              subtotal: l.subtotal,
-            })),
-          },
-        }),
+        body: JSON.stringify({ action, payload }),
       });
 
       if (!res.ok) {
@@ -1158,7 +1521,24 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
       .join("");
 
     let paymentExtraHtml = "";
-    if (paymentMethod === "CASH") {
+    if (isPartialPayment || existingAmountPaid > 0) {
+      // Partial payment or resume — show cumulative payment info
+      if (existingAmountPaid > 0) {
+        paymentExtraHtml += `
+          <tr><td style="color:#64748b;padding:2px 4px;font-size:10px">Previously Paid</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:600">${formatUGX(existingAmountPaid)}</td></tr>`;
+      }
+      paymentExtraHtml += `
+        <tr><td style="color:#64748b;padding:2px 4px;font-size:10px">Amount Paid</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:600">${formatUGX(tendered)}</td></tr>`;
+      if (balanceDue > 0) {
+        paymentExtraHtml += `
+          <tr><td style="color:#dc2626;padding:2px 4px;font-size:10px;font-weight:700">Balance Owing</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:700;color:#dc2626">${formatUGX(balanceDue)}</td></tr>
+          <tr><td colspan="2" style="padding:2px 4px;font-size:9px;font-weight:700;color:#d97706;text-align:center">PARTIAL PAYMENT</td></tr>`;
+      } else if (existingAmountPaid > 0) {
+        // Now fully paid after resume
+        paymentExtraHtml += `
+          <tr><td colspan="2" style="padding:2px 4px;font-size:9px;font-weight:700;color:#059669;text-align:center">PAID IN FULL</td></tr>`;
+      }
+    } else if (paymentMethod === "CASH") {
       paymentExtraHtml = `
         <tr><td style="color:#64748b;padding:2px 4px;font-size:10px">Tendered</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:600">${formatUGX(tendered)}</td></tr>
         <tr><td style="color:#64748b;padding:2px 4px;font-size:10px">Change</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:700;color:#059669">${formatUGX(change)}</td></tr>`;
@@ -1274,14 +1654,79 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
     setPaymentMethod("CASH"); setAmountTendered(""); setPaymentReference("");
     setInsuranceProvider(""); setInsurancePolicyNumber("");
     setInvoiceConfirmed(false); setReceiptVisible(false); setSavedInvoiceNumber("");
+    setIsResumeBill(false); setResumeBillId(null); setExistingAmountPaid(0);
+  };
+
+  // ── Resume a partial bill: restore lines from saved bill ────────────────
+  const handleResumePartialBill = async (patient: Patient & { billingId: number }) => {
+    const bill = await fetchPatientBill(patient.id);
+    if (!bill) {
+      alert("Could not load the saved bill.");
+      return;
+    }
+    // Restore bill lines from the description JSON
+    try {
+      const desc = JSON.parse(bill.description || "{}");
+      if (desc.lines && Array.isArray(desc.lines)) {
+        setBillLines(
+          desc.lines.map((l: any) => ({
+            id: crypto.randomUUID(),
+            description: l.description || l.name || "",
+            qty: l.qty || 1,
+            unitPrice: l.unitPrice || 0,
+            subtotal: l.subtotal || (l.qty || 1) * (l.unitPrice || 0),
+          }))
+        );
+      }
+    } catch {}
+    setSelectedPatient(patient);
+    setPatientSearch("");
+    setIsResumeBill(true);
+    setResumeBillId(bill.id);
+    setExistingAmountPaid(bill.amountPaid);
+    setAmountTendered("");
+    setInvoiceConfirmed(true); // skip invoice review step
   };
 
   const waitingCashier = patients.filter(p => p.status === "AWAITING_CASHIER");
 
+  // Combined queue: AWAITING_CASHIER patients + PARTIAL-bill patients not already in the queue
+  const mergedQueue = [
+    ...waitingCashier.map(p => {
+      const partial = partialBillPatients.find(pp => pp.id === p.id);
+      return {
+        ...p,
+        queueType: (partial ? "partial" : "new") as "new" | "partial",
+        billingId: partial?.billingId ?? 0,
+        balanceDue: partial?.balanceDue ?? 0,
+      };
+    }),
+    ...partialBillPatients
+      .filter(p => !waitingCashier.some(w => w.id === p.id))
+      .map(p => ({
+        id: p.id,
+        patientNumber: p.patientNumber,
+        firstName: p.firstName,
+        lastName: p.lastName,
+        age: p.age,
+        gender: p.gender,
+        dob: null as string | null,
+        phone: null as string | null,
+        address: null as string | null,
+        chiefComplaint: "Balance collection",
+        isEmergency: false,
+        status: p.status,
+        createdAt: new Date().toISOString(),
+        queueType: "partial" as const,
+        billingId: p.billingId,
+        balanceDue: p.balanceDue,
+      })),
+  ];
+
   return (
     <div className="flex flex-col gap-5">
       {/* ── Awaiting Cashier Queue ── */}
-      {waitingCashier.length > 0 && !selectedPatient && (
+      {mergedQueue.length > 0 && !selectedPatient && (
         <div className="rounded-xl border border-amber-200 bg-white shadow-sm overflow-hidden">
           <div className="bg-amber-50 border-b border-amber-100 px-5 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1291,23 +1736,38 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
               </span>
             </div>
             <span className="text-xs font-bold text-amber-600 bg-amber-100 px-2.5 py-1 rounded-full">
-              {waitingCashier.length} waiting
+              {mergedQueue.length} waiting
             </span>
           </div>
           <div className="divide-y divide-slate-50 max-h-56 overflow-y-auto">
-            {waitingCashier.map(p => (
+            {mergedQueue.map(p => (
               <button
                 key={p.id}
-                onClick={() => { setSelectedPatient(p); setPatientSearch(""); setInvoiceConfirmed(false); }}
+                onClick={() => {
+                  if (p.queueType === "partial") {
+                    handleResumePartialBill(p as any);
+                  } else {
+                    setSelectedPatient(p);
+                    setPatientSearch("");
+                    setInvoiceConfirmed(false);
+                  }
+                }}
                 className="flex w-full items-center justify-between px-5 py-3 text-left hover:bg-slate-50 transition"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-xs font-bold text-amber-700 flex-shrink-0">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                    p.queueType === "partial" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"
+                  }`}>
                     {p.firstName[0]}{p.lastName[0]}
                   </div>
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-slate-800 truncate">{p.lastName}, {p.firstName}</div>
                     <div className="text-xs text-slate-400">
+                      {p.queueType === "partial" && (
+                        <span className="font-bold text-rose-500">
+                          Balance: {formatUGX(p.balanceDue)} &middot;{" "}
+                        </span>
+                      )}
                       <span className="font-mono text-amber-600">{p.patientNumber}</span>
                       <span className="mx-1">·</span>
                       {p.age} yrs · {p.gender}
@@ -1315,8 +1775,12 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-                  <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                    Bill Now
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                    p.queueType === "partial"
+                      ? "text-rose-700 bg-rose-50 border border-rose-100"
+                      : "text-amber-700 bg-amber-50 border border-amber-100"
+                  }`}>
+                    {p.queueType === "partial" ? "Collect Balance" : "Bill Now"}
                   </span>
                   <ArrowRight size={14} className="text-slate-300" />
                 </div>
@@ -1326,7 +1790,7 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
         </div>
       )}
 
-      {waitingCashier.length === 0 && !selectedPatient && (
+      {mergedQueue.length === 0 && !selectedPatient && (
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-5 text-center">
           <Receipt size={28} className="mx-auto text-slate-200 mb-2" />
           <p className="text-sm font-medium text-slate-400">No patients awaiting payment</p>
@@ -1437,6 +1901,15 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
                 <span>{formatUGX((parseInt(newQty) || 1) * (parseFloat(newPrice) || 0))}</span>
               </div>
             )}
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={saveToCatalog}
+                onChange={(e) => setSaveToCatalog(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-[#00703C] accent-[#00703C] focus:ring-[#00703C]"
+              />
+              <span className="text-[11px] font-medium text-slate-500">Save to catalog for next time</span>
+            </label>
             <button
               onClick={handleAddLine}
               disabled={!newDesc.trim() || !newPrice || parseFloat(newPrice) <= 0}
@@ -1447,109 +1920,7 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
           </div>
         </div>
 
-        {/* ── Lab Test Quick-Add Panel ─────────────────────────────────────── */}
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <button
-            onClick={() => setShowLabTests(!showLabTests)}
-            className="flex w-full items-center justify-between border-b border-slate-100 bg-slate-50/70 px-5 py-3 transition hover:bg-slate-50"
-          >
-            <div className="flex items-center gap-2">
-              <FlaskConical size={14} className="text-amber-600" />
-              <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">
-                Lab Tests — Quick Add
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[9px] text-slate-400 font-medium">{LAB_TESTS.length} tests</span>
-              <svg
-                className={`w-3.5 h-3.5 text-slate-400 transition-transform ${showLabTests ? "rotate-180" : ""}`}
-                fill="none" stroke="currentColor" viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </div>
-          </button>
-          {showLabTests && (
-            <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
-              {LAB_TESTS.map((test) => {
-                const currentPrice = labPrices[test.code] || test.defaultPrice;
-                const isEditing = editingPrice === test.code;
-                return (
-                  <div
-                    key={test.code}
-                    className="flex items-center gap-2 px-4 py-2.5 hover:bg-slate-50/50 transition group"
-                  >
-                    <button
-                      onClick={() => addLabTestToBill(test)}
-                      className="flex-1 min-w-0 text-left"
-                      title={`Add ${test.name} to bill`}
-                    >
-                      <p className="text-[11px] font-semibold text-slate-700 truncate leading-tight">
-                        <span className="font-mono text-[10px] text-amber-600">{test.code}</span>{" "}
-                        {test.name}
-                      </p>
-                    </button>
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      {isEditing ? (
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            min={0}
-                            value={editPriceValue}
-                            onChange={(e) => setEditPriceValue(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                const p = parseInt(editPriceValue.replace(/,/g, "")) || 0;
-                                updateLabPrice(test.code, p);
-                              }
-                              if (e.key === "Escape") setEditingPrice(null);
-                            }}
-                            className="w-20 rounded-lg border border-[#00703C] px-2 py-1 text-[10px] font-bold text-right outline-none"
-                            autoFocus
-                          />
-                          <button
-                            onClick={() => {
-                              const p = parseInt(editPriceValue.replace(/,/g, "")) || 0;
-                              updateLabPrice(test.code, p);
-                            }}
-                            className="text-[#00703C] hover:text-emerald-700 p-0.5"
-                          >
-                            <CheckCircle2 size={12} />
-                          </button>
-                          <button
-                            onClick={() => setEditingPrice(null)}
-                            className="text-slate-400 hover:text-rose-500 p-0.5"
-                          >
-                            <X size={12} />
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => addLabTestToBill(test)}
-                            className="rounded-lg bg-[#00703C]/10 px-2.5 py-1 text-[10px] font-extrabold text-[#00703C] hover:bg-[#00703C]/20 transition"
-                          >
-                            + {formatUGX(currentPrice)}
-                          </button>
-                          <button
-                            onClick={() => {
-                              setEditingPrice(test.code);
-                              setEditPriceValue(String(currentPrice));
-                            }}
-                            className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-amber-600 p-1 transition-all"
-                            title="Edit price"
-                          >
-                            <Pencil size={11} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <QuickAddPanel setBillLines={setBillLines} setInvoiceConfirmed={setInvoiceConfirmed} />
       </div>
 
       {/* ── RIGHT ── */}
@@ -1615,21 +1986,49 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
                   </button>
                 ))}
               </div>
-              {paymentMethod === "CASH" && (
-                <div>
-                  <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Amount Tendered (UGX)</label>
-                  <input type="number" min={0} value={amountTendered}
-                    onChange={(e) => setAmountTendered(e.target.value)}
-                    placeholder="Enter cash amount…"
-                    className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-bold outline-none transition focus:border-[#00703C]" />
-                  {tendered > 0 && (
-                    <div className={`mt-2 flex justify-between rounded-xl px-3 py-2 text-xs font-extrabold ${change >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-600"}`}>
-                      <span>{change >= 0 ? "Change" : "Shortfall"}</span>
-                      <span>{formatUGX(Math.abs(change))}</span>
-                    </div>
-                  )}
-                </div>
-              )}
+              {/* Amount Paid — shown for ALL payment methods */}
+              <div>
+                <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                  {paymentMethod === "CASH" ? "Amount Tendered (UGX)" : "Amount Paid (UGX)"}
+                </label>
+                <input type="number" min={0} value={amountTendered}
+                  onChange={(e) => setAmountTendered(e.target.value)}
+                  placeholder="Enter amount…"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-bold outline-none transition focus:border-[#00703C]" />
+                {tendered > 0 && (
+                  <div className={`mt-2 flex justify-between rounded-xl px-3 py-2 text-xs font-extrabold ${
+                    isPartialPayment
+                      ? "bg-amber-50 text-amber-700"
+                      : change >= 0
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-rose-50 text-rose-600"
+                  }`}>
+                    {isPartialPayment ? (
+                      <>
+                        <span>Amount to be Paid</span>
+                        <span>{formatUGX(tendered)}</span>
+                      </>
+                    ) : change >= 0 ? (
+                      <>
+                        <span>Change</span>
+                        <span>{formatUGX(change)}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Shortfall</span>
+                        <span>{formatUGX(Math.abs(change))}</span>
+                      </>
+                    )}
+                  </div>
+                )}
+                {existingAmountPaid > 0 && (
+                  <div className="mt-2 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-[10px] text-slate-600">
+                    <span className="font-bold">Previously Paid:</span> {formatUGX(existingAmountPaid)} &middot;{" "}
+                    <span className="font-bold">Balance Owing:</span> <span className="text-amber-600">{formatUGX(total - existingAmountPaid)}</span>
+                  </div>
+                )}
+              </div>
+              {paymentMethod === "CASH" && null /* amount field above handles all methods */}
               {(paymentMethod === "MOBILE_MONEY" || paymentMethod === "CARD") && (
                 <div>
                   <label className="mb-1 block text-[10px] font-bold text-slate-500 uppercase tracking-wide">
@@ -1710,7 +2109,35 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
               <div className="border-t border-slate-200 pt-2 flex justify-between font-extrabold text-lg">
                 <span>TOTAL BILL</span><span className="text-[#00703C]">{formatUGX(total)}</span>
               </div>
-              {paymentMethod === "CASH" && (
+              {isPartialPayment || existingAmountPaid > 0 ? (
+                <>
+                  {existingAmountPaid > 0 && (
+                    <div className="flex justify-between text-[10px]">
+                      <span className="text-slate-500">Previously Paid</span>
+                      <span>{formatUGX(existingAmountPaid)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-[10px]">
+                    <span className="text-slate-500">Amount Paid</span>
+                    <span>{formatUGX(tendered)}</span>
+                  </div>
+                  {balanceDue > 0 ? (
+                    <>
+                      <div className="flex justify-between text-sm font-extrabold text-amber-600 border-t border-dashed border-amber-200 pt-2 mt-1">
+                        <span>Balance Owing</span>
+                        <span>{formatUGX(balanceDue)}</span>
+                      </div>
+                      <div className="text-[9px] font-extrabold uppercase tracking-wider text-amber-500 bg-amber-50 rounded-lg px-3 py-1.5 text-center mt-2">
+                        Partial Payment
+                      </div>
+                    </>
+                  ) : existingAmountPaid > 0 ? (
+                    <div className="text-[9px] font-extrabold uppercase tracking-wider text-emerald-600 bg-emerald-50 rounded-lg px-3 py-1.5 text-center mt-2">
+                      Paid in Full
+                    </div>
+                  ) : null}
+                </>
+              ) : paymentMethod === "CASH" ? (
                 <>
                   <div className="flex justify-between text-[10px]">
                     <span className="text-slate-500">Tendered</span><span>{formatUGX(tendered)}</span>
@@ -1720,7 +2147,7 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
                     <span className="font-bold text-emerald-600">{formatUGX(change)}</span>
                   </div>
                 </>
-              )}
+              ) : null}
             </div>
             <div className="flex gap-2 px-6 pb-5">
               <button onClick={handlePrintReceipt}
@@ -1761,6 +2188,7 @@ export default function ReceptionistPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [isRouting, setIsRouting] = useState(false);
+  const [isDischarging, setIsDischarging] = useState(false);
   const [billPatient, setBillPatient] = useState<Patient | null>(null);
   const [directBillKey, setDirectBillKey] = useState(0);
 
@@ -1921,6 +2349,38 @@ export default function ReceptionistPage() {
     setBillPatient(patient);
     setDirectBillKey((k) => k + 1);
     setActiveTab("cashier");
+  };
+
+  // ── Explicitly discharge a patient (separate from billing) ──────────────
+  const handleDischargePatient = async (patient: Patient) => {
+    if (patient.status === "DISCHARGED") return;
+    if (!confirm(`Discharge ${patient.lastName}, ${patient.firstName}? This cannot be undone automatically.`)) return;
+
+    setIsDischarging(true);
+    try {
+      const res = await fetch("/api/receptionist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "DISCHARGE_PATIENT",
+          payload: { patientId: patient.id },
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body.error || "Discharge failed.");
+      }
+
+      await fetchActiveRegistry();
+      setSelectedPatient(null);
+      alert(`✓ ${patient.lastName}, ${patient.firstName} discharged`);
+    } catch (err: any) {
+      console.error("Discharge error:", err);
+      alert(err.message || "Could not discharge patient.");
+    } finally {
+      setIsDischarging(false);
+    }
   };
 
   const filteredPatients = patients.filter((p) =>
@@ -2137,6 +2597,26 @@ export default function ReceptionistPage() {
                         >
                           <Receipt size={14} />
                           Direct Billing
+                        </button>
+                      </div>
+
+                      {/* Discharge Patient — explicit, not coupled to billing */}
+                      <div className="pt-2">
+                        <button
+                          disabled={isDischarging || selectedPatient.status === "DISCHARGED"}
+                          onClick={() => handleDischargePatient(selectedPatient)}
+                          className={`flex w-full items-center justify-center gap-2 rounded-xl py-3 text-[10px] font-extrabold uppercase tracking-wide transition-all ${
+                            selectedPatient.status === "DISCHARGED"
+                              ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                              : "bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 hover:border-red-300"
+                          }`}
+                        >
+                          {isDischarging ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <LogOut size={14} />
+                          )}
+                          {selectedPatient.status === "DISCHARGED" ? "Already Discharged" : "Discharge Patient"}
                         </button>
                       </div>
 

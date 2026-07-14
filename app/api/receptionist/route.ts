@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -11,10 +11,60 @@ async function generatePatientNumber(): Promise<string> {
   return `MSMC-${year}-${random}${suffix}`;
 }
 
-// ─── GET — fetch all active patients for the Tracking Desk ───────────────────
+// ─── GET — fetch patients for Tracking Desk OR billing records ────────────
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const { searchParams } = req.nextUrl;
+    const patientId = searchParams.get("patientId");
+    const statusFilter = searchParams.get("status");
+
+    // ── Billing queries ──────────────────────────────────────────────────
+    if (patientId || statusFilter) {
+      const where: any = {};
+      if (patientId) where.patientId = parseInt(patientId, 10);
+      if (statusFilter) where.status = statusFilter;
+
+      const bills = await prisma.billing.findMany({
+        where,
+        include: {
+          Patient: {
+            select: {
+              id: true,
+              patientNumber: true,
+              firstName: true,
+              lastName: true,
+              age: true,
+              gender: true,
+              currentStatus: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      // If status=PARTIAL was requested without a specific patientId,
+      // return patient data shaped to match the frontend's Patient lookup
+      if (statusFilter === "PARTIAL" && !patientId) {
+        const shaped = bills.map((b) => ({
+          id: b.Patient.id,
+          patientNumber: b.Patient.patientNumber,
+          firstName: b.Patient.firstName,
+          lastName: b.Patient.lastName,
+          age: b.Patient.age,
+          gender: b.Patient.gender,
+          status: b.Patient.currentStatus,
+          balanceDue: b.balanceDue,
+          invoiceNumber: b.invoiceNumber,
+          billingId: b.id,
+        }));
+        return NextResponse.json(shaped);
+      }
+
+      return NextResponse.json(bills);
+    }
+
+    // ── Default: fetch all active patients for the Tracking Desk ─────────
     const patients = await prisma.patient.findMany({
       where: {
         currentStatus: {
@@ -31,8 +81,6 @@ export async function GET() {
     });
 
     // Shape the data to match what the frontend's Patient interface expects.
-    // The frontend uses: patientNumber, firstName, lastName, age, dob, gender,
-    // phone, address, chiefComplaint, isEmergency, status, createdAt
     const shaped = patients.map((p) => ({
       id: p.id,
       patientNumber: p.patientNumber,
@@ -43,7 +91,6 @@ export async function GET() {
       gender: p.gender,
       phone: p.phoneNumber ?? null,
       address: p.address ?? null,
-      // chiefComplaint lives on Visit in the schema — surface from latest visit
       chiefComplaint: p.Visit[0]?.symptoms ?? "Not recorded",
       isEmergency: p.isEmergency,
       status: p.currentStatus,
@@ -53,7 +100,7 @@ export async function GET() {
     return NextResponse.json(shaped);
   } catch (err: any) {
     return NextResponse.json(
-      { error: err.message || "Failed to fetch patients" },
+      { error: err.message || "Failed to fetch data" },
       { status: 500 }
     );
   }
@@ -198,15 +245,14 @@ export async function POST(req: Request) {
       }
 
       // ── Cashier: process payment and create a billing record ────────────────
-      // NOTE: The Billing model stores a single amount + description.
-      // We serialise the line items into the description field as JSON
-      // so no schema migration is needed.
       case "CREATE_BILL": {
         const {
           patientId,
           visitId,        // optional — pass if you have the visit id
           paymentMethod,
           amountTendered,
+          amountPaid,     // NEW: the actual amount received (may be less than total)
+          balanceDue,     // NEW: computed as max(0, total - amountPaid)
           lines,          // BillLine[]
           reference,
           insuranceProvider,
@@ -225,14 +271,23 @@ export async function POST(req: Request) {
           0
         );
 
+        const paid = amountPaid ?? total;
+        const due = balanceDue ?? Math.max(0, total - paid);
+        const isPartial = due > 0;
+
         // Build a rich description string from the line items + payment meta
         const descriptionObj = {
-          paymentMethod,
-          amountTendered,
-          reference: reference ?? null,
-          insuranceProvider: insuranceProvider ?? null,
-          insurancePolicyNumber: insurancePolicyNumber ?? null,
           lines,
+          payments: [
+            {
+              paymentMethod,
+              amountPaid: paid,
+              reference: reference ?? null,
+              insuranceProvider: insuranceProvider ?? null,
+              insurancePolicyNumber: insurancePolicyNumber ?? null,
+              date: new Date().toISOString(),
+            },
+          ],
         };
 
         const billing = await prisma.billing.create({
@@ -240,21 +295,22 @@ export async function POST(req: Request) {
             patientId,
             visitId: visitId ?? null,
             amount: total,
+            amountPaid: paid,
+            balanceDue: due,
             description: JSON.stringify(descriptionObj),
-            status: "PAID",
+            status: isPartial ? "PARTIAL" : "PAID",
           },
         });
 
-        // Move patient to DISCHARGED after successful payment
-        await prisma.patient.update({
-          where: { id: patientId },
-          data: { currentStatus: "DISCHARGED" },
+        // Generate invoice number from the new billing id
+        const invoiceNumber = `INV-${billing.id.toString().padStart(6, "0")}`;
+        await prisma.billing.update({
+          where: { id: billing.id },
+          data: { invoiceNumber },
         });
 
-        // Generate a simple invoice number for the receipt
-        const invoiceNumber = `INV-${billing.id.toString().padStart(6, "0")}`;
-
-        return NextResponse.json({ ...billing, invoiceNumber });
+        // Note: billing does NOT change Patient.status — discharge is a separate explicit action.
+        return NextResponse.json({ ...billing, invoiceNumber, isPartial });
       }
 
       // ── Create a visit (used by doctors/nurses on other pages) ──────────────
@@ -293,14 +349,118 @@ export async function POST(req: Request) {
         return NextResponse.json(updated);
       }
 
+      // ── Explicitly discharge a patient (separate from billing) ──────────────
+      case "DISCHARGE_PATIENT": {
+        const { patientId } = payload;
+
+        if (!patientId) {
+          return NextResponse.json(
+            { error: "patientId is required" },
+            { status: 400 }
+          );
+        }
+
+        const updated = await prisma.patient.update({
+          where: { id: patientId },
+          data: { currentStatus: "DISCHARGED" },
+        });
+
+        return NextResponse.json(updated);
+      }
+
       // ── Billing helpers (used by other pages) ────────────────────────────────
       case "PAY_BILL": {
         const { id, status } = payload;
+        const updateData: any = { status };
+        // When marking as paid, also zero out the balance
+        if (status === "PAID") {
+          const bill = await prisma.billing.findUnique({ where: { id } });
+          if (bill) {
+            updateData.amountPaid = bill.amount;
+            updateData.balanceDue = 0;
+          }
+        }
         const updated = await prisma.billing.update({
           where: { id },
-          data: { status },
+          data: updateData,
         });
         return NextResponse.json(updated);
+      }
+
+      // ── Follow-up payment on an existing partial bill ───────────────────────
+      case "ADD_PAYMENT": {
+        const {
+          billingId,
+          additionalAmountPaid,
+          paymentMethod,
+          reference,
+          insuranceProvider,
+          insurancePolicyNumber,
+        } = payload;
+
+        if (!billingId || !additionalAmountPaid || additionalAmountPaid <= 0) {
+          return NextResponse.json(
+            { error: "billingId and a positive additionalAmountPaid are required" },
+            { status: 400 }
+          );
+        }
+
+        const existing = await prisma.billing.findUnique({
+          where: { id: billingId },
+          include: { Patient: true },
+        });
+
+        if (!existing) {
+          return NextResponse.json(
+            { error: "Billing record not found" },
+            { status: 404 }
+          );
+        }
+
+        const newAmountPaid = existing.amountPaid + additionalAmountPaid;
+        const newBalanceDue = Math.max(0, existing.amount - newAmountPaid);
+        const isNowPaid = newBalanceDue <= 0;
+
+        // Merge payment metadata into description JSON
+        let desc: any = {};
+        try { desc = JSON.parse(existing.description || "{}"); } catch {}
+        if (!desc.payments) {
+          // Old format — migrate the original payment into a payments array
+          const originalPayment = {
+            paymentMethod: desc.paymentMethod || "CASH",
+            amountPaid: existing.amountPaid,
+            reference: desc.reference ?? null,
+            insuranceProvider: desc.insuranceProvider ?? null,
+            insurancePolicyNumber: desc.insurancePolicyNumber ?? null,
+            date: existing.createdAt.toISOString(),
+          };
+          desc.payments = [originalPayment];
+        }
+        desc.payments.push({
+          paymentMethod: paymentMethod ?? "CASH",
+          amountPaid: additionalAmountPaid,
+          reference: reference ?? null,
+          insuranceProvider: insuranceProvider ?? null,
+          insurancePolicyNumber: insurancePolicyNumber ?? null,
+          date: new Date().toISOString(),
+        });
+
+        const updated = await prisma.billing.update({
+          where: { id: billingId },
+          data: {
+            amountPaid: newAmountPaid,
+            balanceDue: newBalanceDue,
+            status: isNowPaid ? "PAID" : "PARTIAL",
+            description: JSON.stringify(desc),
+          },
+        });
+
+        // Note: ADD_PAYMENT does NOT change Patient.status — discharge is a separate explicit action.
+        return NextResponse.json({
+          ...updated,
+          invoiceNumber: existing.invoiceNumber,
+          isPartial: !isNowPaid,
+        });
       }
 
       default:
