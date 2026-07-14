@@ -40,6 +40,12 @@ export async function GET() {
         notes: v.notes || "",
         symptoms: v.symptoms || "",
         physicalExamination: v.physicalExamination || "",
+        historyOfPresentIllness: v.historyOfPresentIllness || "",
+        pastMedicalHistory: v.pastMedicalHistory || "",
+        reviewOfOtherSystems: v.reviewOfOtherSystems || "",
+        differentialDiagnosis: v.differentialDiagnosis || "",
+        doctorName: v.doctorName || "",
+        doctorSignature: v.doctorSignature || "",
       }));
 
       return {
