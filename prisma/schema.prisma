@@ -31,6 +31,7 @@ model Patient {
   lastName              String
   gender                Gender
   age                   Int
+  ageUnit               String   @default("years")
   dateOfBirth           DateTime?
   phoneNumber           String?
   address               String?
@@ -60,6 +61,8 @@ model Patient {
   ResultShares          ResultShare[]
   Triage                Triage[]
   Visit                 Visit[]
+
+  @@index([currentStatus])
 }
 
 model Visit {
@@ -89,6 +92,8 @@ model Visit {
   Prescription            Prescription[]
   Triage                  Triage[]
   Patient                 Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt, doctorId])
 }
 
 model Triage {
@@ -153,6 +158,9 @@ model ImagingRequest {
   Patient          Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
   Staff            Staff?    @relation(fields: [requestedById], references: [id])
   Visit            Visit?    @relation(fields: [visitId], references: [id])
+
+  @@index([status])
+  @@index([patientId])
 }
 
 model DentalRecord {
@@ -381,12 +389,13 @@ model ANCAssessment {
 model PatientReview {
   id                  Int      @id @default(autoincrement())
   patientId           Int
-  followUpNotes       String?
-  examinationFindings String?
-  diagnosis           String?
-  treatmentPlan       String?
-  labOrders           String?
-  imagingOrders       String?
+  followUpNotes           String?
+  examinationFindings     String?
+  historyOfPresentIllness String?
+  diagnosis               String?
+  treatmentPlan           String?
+  labOrders               String?
+  imagingOrders           String?
   doctorId            Int
   doctorName          String
   createdAt           DateTime @default(now())
@@ -411,6 +420,8 @@ model Appointment {
   CreatedBy       Staff?            @relation("CreatedByStaff", fields: [createdById], references: [id])
   Patient         Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
   Staff           Staff?            @relation("StaffAppointments", fields: [staffId], references: [id])
+
+  @@index([appointmentDate, department, status])
 }
 
 model StaffAttendance {
@@ -437,6 +448,8 @@ model LabRequest {
   visitId               Int?
   requestedById         Int
   testName              String
+  testCode              String?
+  orderedBy             String?
   results               String?
   status                LabStatus              @default(PENDING)
   createdAt             DateTime               @default(now())
@@ -476,6 +489,9 @@ model LabRequest {
   Staff                 Staff                  @relation(fields: [requestedById], references: [id])
   Visit                 Visit?                 @relation(fields: [visitId], references: [id])
   ResultShares          ResultShare[]
+
+  @@index([status])
+  @@index([patientId])
 }
 
 model CriticalNotification {

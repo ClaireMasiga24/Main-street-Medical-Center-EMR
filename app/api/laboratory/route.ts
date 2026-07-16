@@ -17,7 +17,7 @@ export async function GET(req: Request) {
       const request = await prisma.labRequest.findUnique({
         where: { id: parseInt(id) },
         include: {
-          Patient: { select: { patientNumber: true, firstName: true, lastName: true, age: true, gender: true, phoneNumber: true, address: true, isEmergency: true } },
+          Patient: { select: { patientNumber: true, firstName: true, lastName: true, age: true, ageUnit: true, gender: true, phoneNumber: true, address: true, isEmergency: true } },
           Staff: { select: { fullName: true, department: true } },
           Visit: { select: { symptoms: true, diagnosis: true, notes: true } },
           CriticalNotifications: { orderBy: { createdAt: "desc" } },
@@ -111,7 +111,7 @@ export async function GET(req: Request) {
       take: allParam === "true" ? undefined : 500,
       where,
       include: {
-        Patient: { select: { id: true, patientNumber: true, firstName: true, lastName: true, age: true, gender: true, isEmergency: true } },
+        Patient: { select: { id: true, patientNumber: true, firstName: true, lastName: true, age: true, ageUnit: true, gender: true, isEmergency: true } },
         Staff: { select: { fullName: true, department: true } },
       },
       orderBy: [{ isCritical: "desc" }, { createdAt: "desc" }],
@@ -119,7 +119,7 @@ export async function GET(req: Request) {
 
     const shaped = requests.map((r) => ({
       id: r.id, patientId: r.Patient.id, patientNumber: r.Patient.patientNumber, firstName: r.Patient.firstName,
-      lastName: r.Patient.lastName, age: r.Patient.age, gender: r.Patient.gender,
+      lastName: r.Patient.lastName, age: r.Patient.age, ageUnit: r.Patient.ageUnit, gender: r.Patient.gender,
       isEmergency: r.Patient.isEmergency, testName: r.testName, testPanel: r.testPanel,
       priority: r.priority, referralSource: r.referralSource,
       referralNotes: r.referralNotes, clinicalNotes: r.clinicalNotes,
@@ -200,11 +200,36 @@ export async function POST(req: Request) {
 
       case "REJECT_SPECIMEN": {
         const { id, rejectionReason, rejectionCategory, rejectedBy } = payload;
-        if (!id || !rejectionReason) return NextResponse.json({ error: "id and rejectionReason are required" }, { status: 400 });
+        if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
+        const reason = rejectionReason || "Rejected by lab technician";
+
+        // Fetch lab request with patient + staff info before rejecting
+        const labReq = await prisma.labRequest.findUnique({
+          where: { id: parseInt(id) },
+          include: {
+            Patient: { select: { firstName: true, lastName: true, patientNumber: true, id: true } },
+            Staff: { select: { fullName: true, department: true } },
+          },
+        });
+        if (!labReq) return NextResponse.json({ error: "Lab request not found" }, { status: 404 });
+
         const updated = await prisma.labRequest.update({
           where: { id: parseInt(id) },
-          data: { specimenRejected: true, rejectionReason, rejectionCategory: rejectionCategory || null, rejectedBy: rejectedBy || null, rejectedAt: new Date(), status: "REJECTED" },
+          data: { specimenRejected: true, rejectionReason: reason, rejectionCategory: rejectionCategory || null, rejectedBy: rejectedBy || null, rejectedAt: new Date(), status: "REJECTED" },
         });
+
+        // Notify the referring department
+        const patientName = `${labReq.Patient.firstName} ${labReq.Patient.lastName}`;
+        await createNotification({
+          department: labReq.referralSource || labReq.Staff.department || "GENERAL",
+          title: "Lab Specimen Rejected",
+          message: `Lab specimen for ${patientName} (${labReq.Patient.patientNumber}) — ${labReq.testName} has been rejected by ${rejectedBy || "Lab Technician"}. Reason: ${reason}`,
+          type: "LAB_REJECTED",
+          referenceId: labReq.id,
+          referenceType: "lab_request",
+          patientId: labReq.Patient.id,
+        });
+
         return NextResponse.json(updated);
       }
 
@@ -249,6 +274,27 @@ export async function POST(req: Request) {
             status: "AWAITING_VALIDATION",
           },
         });
+        // Advance patient out of lab-holding status so the receptionist no longer
+        // shows them as "awaiting lab" — even if the lab tech never completes
+        // Step 3 (Share/Validate Results), entering results is the meaningful
+        // "lab work is done" milestone.
+        const labReqForStatus = await prisma.labRequest.findUnique({
+          where: { id: parseInt(id) }, include: { Patient: true },
+        });
+        if (labReqForStatus) {
+          const ps = labReqForStatus.Patient.currentStatus;
+	          if (ps === "AWAITING_LAB") {
+	            await prisma.patient.update({
+	              where: { id: labReqForStatus.Patient.id },
+	              data: { currentStatus: "AWAITING_DOCTOR", lastSharedFromDept: "Lab" },
+	            });
+	          } else if (ps === "ADMITTED") {
+            await prisma.patient.update({
+              where: { id: labReqForStatus.Patient.id },
+              data: { lastSharedFromDept: "Lab" },
+            });
+          }
+        }
         return NextResponse.json(updated);
       }
 
@@ -263,6 +309,31 @@ export async function POST(req: Request) {
           where: { id: parseInt(id) }, include: { Patient: true },
         });
         if (labReq) {
+          // Move patient out of lab-related holding statuses so the
+          // receptionist / doctor dashboard no longer shows them as
+          // "awaiting lab" after results are validated.
+          const ps = labReq.Patient.currentStatus;
+	          if (ps === "AWAITING_LAB") {
+	            // Non-admitted patient → route to doctor for review
+	            await prisma.patient.update({
+	              where: { id: labReq.Patient.id },
+	              data: { currentStatus: "AWAITING_DOCTOR", lastSharedFromDept: "Lab" },
+	            });
+	          } else if (ps === "ADMITTED") {
+	            // Admitted patient — stays admitted; flag that lab results are
+	            // back so the doctor dashboard surfaces them.
+	            await prisma.patient.update({
+	              where: { id: labReq.Patient.id },
+	              data: { lastSharedFromDept: "Lab" },
+	            });
+	          } else {
+	            // Patient is at some other status — still flag that lab
+	            // results were shared from this department for traceability.
+	            await prisma.patient.update({
+	              where: { id: labReq.Patient.id },
+	              data: { lastSharedFromDept: "Lab" },
+	            });
+	          }
           await createNotification({
             department: labReq.referralSource || "GENERAL",
             title: "Lab Results Ready",
@@ -311,19 +382,46 @@ export async function POST(req: Request) {
         return NextResponse.json(updated);
       }
 
-      case "SHARE_RESULT": {
-        const { labRequestId, patientId, sharedById, sharedByName, targetUserId, targetDept, includeReport, note } = payload;
-        if (!labRequestId || !patientId || !sharedByName || !targetDept) {
-          return NextResponse.json({ error: "labRequestId, patientId, sharedByName, and targetDept are required" }, { status: 400 });
-        }
-        const share = await prisma.resultShare.create({
-          data: {
-            labRequestId: parseInt(labRequestId), patientId: parseInt(patientId),
-            sharedById: sharedById ? parseInt(sharedById) : null, sharedByName,
-            targetUserId: targetUserId ? parseInt(targetUserId) : null, targetDept,
-            includeReport: includeReport !== false, note: note || null,
-          },
-        });
+	      case "SHARE_RESULT": {
+	        const { labRequestId, patientId, sharedById, sharedByName, targetUserId, targetDept, includeReport, note } = payload;
+	        if (!labRequestId || !patientId || !sharedByName || !targetDept) {
+	          return NextResponse.json({ error: "labRequestId, patientId, sharedByName, and targetDept are required" }, { status: 400 });
+	        }
+	        const share = await prisma.resultShare.create({
+	          data: {
+	            labRequestId: parseInt(labRequestId), patientId: parseInt(patientId),
+	            sharedById: sharedById ? parseInt(sharedById) : null, sharedByName,
+	            targetUserId: targetUserId ? parseInt(targetUserId) : null, targetDept,
+	            includeReport: includeReport !== false, note: note || null,
+	          },
+	        });
+	        // Route the patient to the correct status based on where results
+	        // were shared. The targetDept determines the patient's next queue.
+	        const DEPT_TO_STATUS: Record<string, string> = {
+	          "Doctor": "AWAITING_DOCTOR",
+	          "Reception": "AWAITING_CASHIER",
+	          "Nurse/Midwife": "AWAITING_TRIAGE",
+	          "Radiology": "AWAITING_RADIOLOGY",
+	        };
+	        try {
+	          const patient = await prisma.patient.findUnique({ where: { id: parseInt(patientId) }, select: { currentStatus: true } });
+	          if (patient) {
+	            if (patient.currentStatus === "ADMITTED") {
+	              // Admitted patient — stays admitted; flag that lab results are back.
+	              await prisma.patient.update({
+	                where: { id: parseInt(patientId) },
+	                data: { lastSharedFromDept: "Lab" },
+	              });
+	            } else {
+	              // Route to the status corresponding to the target department
+	              const mappedStatus = DEPT_TO_STATUS[targetDept] || "AWAITING_DOCTOR";
+	              await prisma.patient.update({
+	                where: { id: parseInt(patientId) },
+	                data: { currentStatus: mappedStatus as any, lastSharedFromDept: "Lab" },
+	              });
+	            }
+	          }
+	        } catch (e) { console.error("[SHARE_RESULT] Patient status update failed:", e); }
         await createNotification({
           department: targetDept,
           title: "Lab Result Shared With Your Department",
@@ -354,25 +452,32 @@ export async function POST(req: Request) {
         return NextResponse.json(share, { status: 201 });
       }
 
-      case "SHARE_RESULT_AND_ROUTE_TO_DOCTOR": {
-        const { labRequestId, patientId, sharedById, sharedByName, targetUserId, targetDept, includeReport, note } = payload;
-        if (!labRequestId || !patientId || !sharedByName || !targetDept) {
-          return NextResponse.json({ error: "labRequestId, patientId, sharedByName, and targetDept are required" }, { status: 400 });
-        }
-        // 1. Create ResultShare record
-        const shareResult = await prisma.resultShare.create({
-          data: {
-            labRequestId: parseInt(labRequestId), patientId: parseInt(patientId),
-            sharedById: sharedById ? parseInt(sharedById) : null, sharedByName,
-            targetUserId: targetUserId ? parseInt(targetUserId) : null, targetDept,
-            includeReport: includeReport !== false, note: note || null,
-          },
-        });
-        // 2. Route patient back to doctor and record which department shared
-        await prisma.patient.update({
-          where: { id: parseInt(patientId) },
-          data: { currentStatus: "AWAITING_DOCTOR", lastSharedFromDept: "Lab" },
-        });
+	      case "SHARE_RESULT_AND_ROUTE_TO_DOCTOR": {
+	        const { labRequestId, patientId, sharedById, sharedByName, targetUserId, targetDept, includeReport, note } = payload;
+	        if (!labRequestId || !patientId || !sharedByName || !targetDept) {
+	          return NextResponse.json({ error: "labRequestId, patientId, sharedByName, and targetDept are required" }, { status: 400 });
+	        }
+	        const DEPT_TO_STATUS: Record<string, string> = {
+	          "Doctor": "AWAITING_DOCTOR",
+	          "Reception": "AWAITING_CASHIER",
+	          "Nurse/Midwife": "AWAITING_TRIAGE",
+	          "Radiology": "AWAITING_RADIOLOGY",
+	        };
+	        // 1. Create ResultShare record
+	        const shareResult = await prisma.resultShare.create({
+	          data: {
+	            labRequestId: parseInt(labRequestId), patientId: parseInt(patientId),
+	            sharedById: sharedById ? parseInt(sharedById) : null, sharedByName,
+	            targetUserId: targetUserId ? parseInt(targetUserId) : null, targetDept,
+	            includeReport: includeReport !== false, note: note || null,
+	          },
+	        });
+	        // 2. Route patient to the status corresponding to targetDept
+	        const mappedStatus = DEPT_TO_STATUS[targetDept] || "AWAITING_DOCTOR";
+	        await prisma.patient.update({
+	          where: { id: parseInt(patientId) },
+	          data: { currentStatus: mappedStatus as any, lastSharedFromDept: "Lab" },
+	        });
         // 3. Notify the doctor
         await createNotification({
           department: "Doctor",
@@ -538,7 +643,7 @@ export async function POST(req: Request) {
         const request = await prisma.labRequest.findUnique({
           where: { id: parseInt(id) },
           include: {
-            Patient: { select: { patientNumber: true, firstName: true, lastName: true, age: true, gender: true, phoneNumber: true, address: true, isEmergency: true } },
+            Patient: { select: { patientNumber: true, firstName: true, lastName: true, age: true, ageUnit: true, gender: true, phoneNumber: true, address: true, isEmergency: true } },
             Staff: { select: { fullName: true, department: true } },
             Visit: { select: { symptoms: true, diagnosis: true, notes: true } },
             CriticalNotifications: { orderBy: { createdAt: "desc" } },

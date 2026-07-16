@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
   try {
     const {
       patientId, doctorId, doctorName,
-      followUpNotes, examinationFindings,
+      followUpNotes, examinationFindings, historyOfPresentIllness,
       diagnosis, treatmentPlan,
       labOrders, imagingOrders,
       notifyDepartment,
@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
           doctorName,
           followUpNotes: followUpNotes || null,
           examinationFindings: examinationFindings || null,
+          historyOfPresentIllness: historyOfPresentIllness || null,
           diagnosis: diagnosis || null,
           treatmentPlan: treatmentPlan || null,
           labOrders: labOrders?.length ? JSON.stringify(labOrders) : null,

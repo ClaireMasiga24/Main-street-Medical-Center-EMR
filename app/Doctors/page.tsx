@@ -6933,6 +6933,9 @@ interface AdmittedPatient {
   diagnosis: string;
 
 
+  historyOfPresentIllness: string;
+
+
   assessment: string;
 
 
@@ -7063,6 +7066,9 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
 
 
     examinationFindings: "",
+
+
+    historyOfPresentIllness: "",
 
 
     diagnosis: "",
@@ -7406,6 +7412,9 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
         setPatientImagingRequests(d.imagingRequests ?? []);
 
 
+      } else {
+        const errBody = await reviewsRes.json().catch(() => ({}));
+        console.warn("[AdmittedPatientsView] reviews API returned", reviewsRes.status, errBody);
       }
 
 
@@ -7418,10 +7427,14 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
         setNurseActions(nd.actions ?? []);
 
 
+      } else {
+        console.warn("[AdmittedPatientsView] nurse-actions API returned", nurseRes.status);
       }
 
 
-    } catch {} finally { setReviewsLoading(false); }
+    } catch (err) {
+      console.error("[AdmittedPatientsView] fetchReviews error:", err);
+    } finally { setReviewsLoading(false); }
 
 
   };
@@ -7469,6 +7482,9 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
           examinationFindings: reviewForm.examinationFindings,
 
 
+          historyOfPresentIllness: reviewForm.historyOfPresentIllness,
+
+
           diagnosis: reviewForm.diagnosis,
 
 
@@ -7490,7 +7506,7 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
       if (res.ok) {
 
 
-        setReviewForm({ followUpNotes: "", examinationFindings: "", diagnosis: "", treatmentPlan: "", labOrders: [], imagingOrders: [] });
+        setReviewForm({ followUpNotes: "", examinationFindings: "", historyOfPresentIllness: "", diagnosis: "", treatmentPlan: "", labOrders: [], imagingOrders: [] });
 
 
         setShowReviewForm(false);
@@ -8067,6 +8083,10 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Chief Complaint</p>
               <p className="text-sm text-slate-700">{p.chiefComplaint || "Not recorded"}</p>
             </div>
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">History of Presenting Illness</p>
+              <p className="text-sm text-slate-700">{p.historyOfPresentIllness || "Not recorded"}</p>
+            </div>
             <VisitHistoryTimeline visitHistory={visitHistory} />
           </div>
         </ChartSection>
@@ -8220,7 +8240,7 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
                     className="text-[10px] font-bold text-teal-600 hover:text-teal-700 flex items-center gap-1"
                   >
                     <ChevronDown size={12} className={`transition-transform ${showMoreOptions ? "rotate-180" : ""}`} />
-                    {showMoreOptions ? "Hide" : "More"} options (exam findings, diagnosis, orders)
+                    {showMoreOptions ? "Hide" : "More"} options (HPI, exam findings, diagnosis, orders)
                   </button>
 
                   {showMoreOptions && (
@@ -8228,6 +8248,11 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
                       <div>
                         <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">Examination Findings</label>
                         <textarea className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[60px]" placeholder="Physical exam findings from this review..." value={reviewForm.examinationFindings} onChange={(e) => setReviewForm({...reviewForm, examinationFindings: e.target.value})} />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 block">History of Presenting Illness (HPI)</label>
+                        <textarea className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[60px]" placeholder="Narrative of the present illness onset, progression, and relevant details..." value={reviewForm.historyOfPresentIllness} onChange={(e) => setReviewForm({...reviewForm, historyOfPresentIllness: e.target.value})} />
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -8255,41 +8280,82 @@ function AdmittedPatientsView({ onBack, staffId, staffName }: { onBack: () => vo
             </div>
 
             {/* Reviews List */}
-            <div className="divide-y divide-slate-50 max-h-[400px] overflow-y-auto border border-slate-100 rounded-xl">
+            <div className="space-y-4 max-h-[400px] overflow-y-auto border border-slate-100 rounded-xl p-1">
               {reviews.length === 0 && !reviewsLoading ? (
                 <div className="py-8 text-center text-sm text-slate-400">No reviews yet. Add a follow-up note above.</div>
               ) : reviewsLoading ? (
                 <div className="py-8 text-center text-sm text-slate-400"><Loader2 size={14} className="animate-spin inline mr-1" /> Loading reviews...</div>
               ) : (
                 reviews.map((r: any) => (
-                  <div key={r.id} className="px-5 py-4 hover:bg-slate-50 transition-colors">
-                    <div className="flex items-center justify-between mb-2">
+                  <div key={r.id} className="border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
+                    {/* Record header — formal byline */}
+                    <div className="bg-slate-50 border-b border-slate-200 px-4 py-2.5 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="w-6 h-6 rounded-full bg-[#0a2e1a]/10 flex items-center justify-center text-[9px] font-bold text-[#0a2e1a]">
-                          {r.doctorName?.[0] || "D"}
+                          {(r.doctorName || "Unknown")[0]}
                         </div>
-                        <span className="text-xs font-semibold text-slate-700">{r.doctorName}</span>
+                        <span className="text-xs font-semibold text-slate-700">Dr. {r.doctorName || "Unknown"}</span>
                         <span className="text-[10px] text-slate-400">·</span>
                         <span className="text-[10px] text-slate-400">
                           {new Date(r.createdAt).toLocaleString("en-UG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
                         </span>
                       </div>
-                      <span className="text-[9px] text-slate-300 font-mono">#{r.id}</span>
+                      <span className="text-[9px] text-slate-400 font-mono">Review #{r.id}</span>
                     </div>
-                    {r.followUpNotes && <div className="mb-1"><span className="text-[10px] font-bold text-slate-400 uppercase mr-1">Notes:</span><span className="text-sm text-slate-600">{r.followUpNotes}</span></div>}
-                    {r.examinationFindings && <div className="mb-1"><span className="text-[10px] font-bold text-slate-400 uppercase mr-1">Exam:</span><span className="text-sm text-slate-600">{r.examinationFindings}</span></div>}
-                    {r.diagnosis && <div className="mb-1"><span className="text-[10px] font-bold text-slate-400 uppercase mr-1">Dx:</span><span className="text-sm text-slate-700 font-medium">{r.diagnosis}</span></div>}
-                    {r.treatmentPlan && <div className="mb-1"><span className="text-[10px] font-bold text-slate-400 uppercase mr-1">Plan:</span><span className="text-sm text-slate-600">{r.treatmentPlan}</span></div>}
-                    {r.labOrders && (() => { try { return JSON.parse(r.labOrders); } catch { return []; } })().length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {JSON.parse(r.labOrders).map((l: string, i: number) => <span key={i} className="text-[9px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full">{l}</span>)}
-                      </div>
-                    )}
-                    {r.imagingOrders && (() => { try { return JSON.parse(r.imagingOrders); } catch { return []; } })().length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {JSON.parse(r.imagingOrders).map((img: string, i: number) => <span key={i} className="text-[9px] bg-cyan-50 text-cyan-600 px-2 py-0.5 rounded-full">{img}</span>)}
-                      </div>
-                    )}
+
+                    {/* Fields as structured label/value rows */}
+                    <div className="p-4 space-y-3">
+                      {r.followUpNotes && (
+                        <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-1">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Notes</span>
+                          <span className="text-sm text-slate-700 leading-relaxed">{r.followUpNotes}</span>
+                        </div>
+                      )}
+                      {r.examinationFindings && (
+                        <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-1 border-t border-slate-100 pt-2.5">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Exam Findings</span>
+                          <span className="text-sm text-slate-700">{r.examinationFindings}</span>
+                        </div>
+                      )}
+                      {r.historyOfPresentIllness && (
+                        <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-1 border-t border-slate-100 pt-2.5">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">HPI</span>
+                          <span className="text-sm text-slate-700">{r.historyOfPresentIllness}</span>
+                        </div>
+                      )}
+                      {r.diagnosis && (
+                        <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-1 border-t border-slate-100 pt-2.5">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Diagnosis</span>
+                          <span className="text-sm text-slate-700 font-medium">{r.diagnosis}</span>
+                        </div>
+                      )}
+                      {r.treatmentPlan && (
+                        <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-1 border-t border-slate-100 pt-2.5">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Plan</span>
+                          <span className="text-sm text-slate-700">{r.treatmentPlan}</span>
+                        </div>
+                      )}
+                      {r.labOrders && (() => { try { return JSON.parse(r.labOrders); } catch { return []; } })().length > 0 && (
+                        <div className="border-t border-slate-100 pt-2.5">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Lab Orders</span>
+                          <div className="flex flex-wrap gap-1">
+                            {JSON.parse(r.labOrders).map((l: string, i: number) => (
+                              <span key={i} className="text-[9px] bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded">{l}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {r.imagingOrders && (() => { try { return JSON.parse(r.imagingOrders); } catch { return []; } })().length > 0 && (
+                        <div className="border-t border-slate-100 pt-2.5">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Imaging Orders</span>
+                          <div className="flex flex-wrap gap-1">
+                            {JSON.parse(r.imagingOrders).map((img: string, i: number) => (
+                              <span key={i} className="text-[9px] bg-cyan-50 text-cyan-700 border border-cyan-200 px-2 py-0.5 rounded">{img}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
@@ -11188,7 +11254,7 @@ export default function DoctorsPage() {
               {/* Metrics Bar */}
 
 
-              {metrics && <MetricsBar metrics={metrics} />}
+              {metrics ? <MetricsBar metrics={metrics} /> : null}
 
 
 

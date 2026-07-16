@@ -64,6 +64,9 @@ const formatShortDate = (iso: string) => {
   catch { return iso; }
 };
 
+const formatAge = (age: number, unit: string) =>
+  `${age} ${unit === "months" ? "mo" : "y"}`;
+
 const timeElapsed = (iso: string) => {
   if (!iso) return "";
   try {
@@ -84,7 +87,7 @@ const timeElapsed = (iso: string) => {
 // ─── Types ───────────────────────────────────────────────────────────────
 interface LabRequestItem {
   id: number; patientId: number; patientNumber: string; firstName: string; lastName: string;
-  age: number; gender: string; isEmergency: boolean;
+  age: number; ageUnit: string; gender: string; isEmergency: boolean;
   testName: string; testPanel: string | null;
   priority: string; referralSource: string | null;
   referralNotes: string | null; clinicalNotes: string | null;
@@ -155,6 +158,9 @@ export default function LaboratoryPage() {
   const [attachments, setAttachments] = useState<LabAttachment[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Rejection state (currently rejecting)
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
 
   // Patient history (cross-department)
   const [patientHistoryData, setPatientHistoryData] = useState<any>(null);
@@ -651,7 +657,7 @@ export default function LaboratoryPage() {
                   {selectedRequest.lastName}, {selectedRequest.firstName}
                 </p>
                 <p className="text-white/70 text-xs">
-                  {selectedRequest.patientNumber} | {selectedRequest.gender} / {selectedRequest.age}y | {selectedRequest.testName}
+                  {selectedRequest.patientNumber} | {selectedRequest.gender} / {formatAge(selectedRequest.age, selectedRequest.ageUnit)} | {selectedRequest.testName}
                 </p>
               </div>
               {(selectedRequest.priority === "URGENT" || selectedRequest.priority === "STAT") && (
@@ -1606,7 +1612,7 @@ export default function LaboratoryPage() {
                             </span>
                             <span className="text-[11px] text-gray-400">|</span>
                             <span className="text-[11px] text-gray-500">
-                              {req.gender} / {req.age}y
+                              {req.gender} / {formatAge(req.age, req.ageUnit)}
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5">
@@ -1654,6 +1660,45 @@ export default function LaboratoryPage() {
                             })}
                           </div>
                           <div className="flex items-center gap-1">
+                            {!isCompleted && (
+                              <>
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (rejectingId === req.id) return;
+                                    setRejectingId(req.id);
+                                    try {
+                                      await callLabApi("REJECT_SPECIMEN", {
+                                        id: req.id,
+                                        rejectionReason: "Rejected by lab technician",
+                                        rejectedBy: user?.fullName || "Lab Technician",
+                                      });
+                                      fetchRequests();
+                                    } catch (err: any) {
+                                      alert("Failed to reject: " + (err.message || "Unknown error"));
+                                    } finally {
+                                      setRejectingId(null);
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-red-600 bg-red-50 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-2 py-1 rounded-md transition-all duration-200 disabled:opacity-50"
+                                  disabled={rejectingId === req.id}
+                                >
+                                  {rejectingId === req.id ? (
+                                    <span className="w-2.5 h-2.5 border-2 border-red-300 border-t-transparent rounded-full animate-spin" />
+                                  ) : (
+                                    <XCircle className="w-2.5 h-2.5" />
+                                  )}
+                                  {rejectingId === req.id ? "Rejecting..." : "Reject"}
+                                </button>
+                                <span
+                                  className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-white px-2 py-1 rounded-md transition-all duration-200"
+                                  style={{ backgroundColor: BRAND }}
+                                >
+                                  Open
+                                  <ChevronRight className="w-2.5 h-2.5" />
+                                </span>
+                              </>
+                            )}
                             {isCompleted && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); openPrintWindow(req); }}
@@ -1663,13 +1708,6 @@ export default function LaboratoryPage() {
                                 <Printer className="w-3 h-3" />
                               </button>
                             )}
-                            <span
-                              className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-white px-2 py-1 rounded-md transition-all duration-200"
-                              style={{ backgroundColor: BRAND }}
-                            >
-                              Open
-                              <ChevronRight className="w-2.5 h-2.5" />
-                            </span>
                           </div>
                         </div>
                       </div>
@@ -1968,6 +2006,7 @@ export default function LaboratoryPage() {
 
         </div>
       </div>
+
     </div>
   );
 }

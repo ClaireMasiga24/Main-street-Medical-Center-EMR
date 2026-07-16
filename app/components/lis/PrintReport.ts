@@ -140,7 +140,7 @@ export function generateLabReportHTML(
     <div style="text-align:center;margin-bottom:20px;">
       <h1 style="font-size:20px;font-weight:800;color:#00703C;letter-spacing:1px;margin:0;">MAIN STREET MEDICAL CENTER</h1>
       <p style="font-size:11px;color:#4b5563;margin:2px 0 0 0;">P.O BOX 154293, Seeta, Uganda</p>
-      <p style="font-size:10px;color:#9ca3af;margin:2px 0 0 0;">Laboratory Report</p>
+      <p style="font-size:10px;color:#6b7280;margin:2px 0 0 0;">Laboratory Report</p>
     </div>
     <hr style="border:none;border-top:2px solid #00703C;margin-bottom:16px;" />
     <!-- Patient details -->
@@ -210,16 +210,16 @@ export function generateLabReportHTML(
         <td style="width:50%;padding:4px 8px;vertical-align:top;">
           <p style="font-size:11px;color:#6b7280;font-weight:600;margin:0 0 2px 0;">Lab Technician</p>
           <p style="font-size:11px;color:#111827;font-weight:500;margin:0;border-bottom:1px solid #374151;display:inline-block;min-width:180px;padding-bottom:4px;">${enteredByName || "\u2014"}</p>
-          <p style="font-size:9px;color:#9ca3af;margin:2px 0 0 0;">Signature</p>
+          <p style="font-size:9px;color:#6b7280;margin:2px 0 0 0;">Signature</p>
         </td>
         <td style="width:50%;padding:4px 8px;vertical-align:top;">
           <p style="font-size:11px;color:#6b7280;font-weight:600;margin:0 0 2px 0;">Authorized By</p>
           <p style="font-size:11px;color:#111827;font-weight:500;margin:0;border-bottom:1px solid #374151;display:inline-block;min-width:180px;padding-bottom:4px;">${validatedByName || "\u2014"}</p>
-          <p style="font-size:9px;color:#9ca3af;margin:2px 0 0 0;">Signature</p>
+          <p style="font-size:9px;color:#6b7280;margin:2px 0 0 0;">Signature</p>
         </td>
       </tr>
     </table>
-    <p style="font-size:8px;color:#9ca3af;text-align:center;margin-top:16px;">Printed: ${now} &bull; Main Street Medical Center Laboratory</p>
+    <p style="font-size:8px;color:#6b7280;text-align:center;margin-top:16px;">Printed: ${now} &bull; Main Street Medical Center Laboratory</p>
   </div>
   <script>
     (function(){ try { setTimeout(function(){ window.print(); }, 500); } catch(e) {} })();

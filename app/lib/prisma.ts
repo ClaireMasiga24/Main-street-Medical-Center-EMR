@@ -13,6 +13,7 @@ export const prisma =
       },
     },
     log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+    // connection_limit is set via DATABASE_URL query params
   });
 
 if (process.env.NODE_ENV !== "production") {

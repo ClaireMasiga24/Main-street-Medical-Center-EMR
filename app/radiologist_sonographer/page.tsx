@@ -165,6 +165,7 @@ export default function RadiologyDashboard() {
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [measurementValues, setMeasurementValues] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState("");
+  const [routeToReception, setRouteToReception] = useState(false);
 
   // ── Prescriptions ──────────────────────────────────────────────────────
   const [rxDrafts, setRxDrafts] = useState<{ medication: string; dosage: string; instructions: string }[]>([]);
@@ -273,6 +274,7 @@ export default function RadiologyDashboard() {
     setRadiologistNotes(req.radiologistNotes ?? "");
     setImageUrls([]);
     setSuccessMessage("");
+    setRouteToReception(false);
 
     // Pre-fill findings template if empty
     if (!req.findings) {
@@ -345,6 +347,7 @@ export default function RadiologyDashboard() {
       };
       if (finalize) {
         payload.status = "REPORTED";
+        payload.routeToReception = routeToReception;
       } else if (!selectedRequest.findings && findings) {
         payload.status = "AWAITING_INTERPRETATION";
       }
@@ -360,19 +363,22 @@ export default function RadiologyDashboard() {
       setRequests(prev => prev.map(r => r.id === selectedRequest.id ? { ...r, ...updated } : r));
       setSelectedRequest(prev => prev ? { ...prev, ...updated } : null);
       if (finalize) {
-        // Notify the referring doctor department
+        // Notify the relevant department based on routing choice
+        const notifyDept = routeToReception ? "Reception" : "DOCTOR";
         try {
           await fetch("/api/imaging", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               id: selectedRequest.id,
-              notifyDepartment: "DOCTOR",
-              notifyMessage: `Imaging report ready: ${studyTypeLabel(selectedRequest.studyType)} for ${selectedRequest.Patient.firstName} ${selectedRequest.Patient.lastName}`,
+              notifyDepartment: notifyDept,
+              notifyMessage: `Imaging report ready: ${studyTypeLabel(selectedRequest.studyType)} for ${selectedRequest.Patient.firstName} ${selectedRequest.Patient.lastName}.\nPatient routed to ${routeToReception ? "Reception for billing" : "Doctor"}.`,
             }),
           });
         } catch { /* silent */ }
-        setSuccessMessage("Report finalized and sent to referring clinician");
+        setSuccessMessage(routeToReception
+          ? "Report finalized and sent. Patient routed to Reception for billing."
+          : "Report finalized and sent to referring clinician");
       } else {
         setSuccessMessage("Draft saved.");
       }
@@ -1267,6 +1273,19 @@ export default function RadiologyDashboard() {
                           rows={2} style={{ ...inputStyle(), resize: "vertical" }} />
                       </div>
                     </div>
+                  </div>
+
+                  {/* ── Route to option ──────────────────────────────────────── */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "16px", padding: "12px 16px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "12px" }}>
+                    <span style={{ fontSize: "12px", fontWeight: "bold", color: "#475569" }}>Route patient to:</span>
+                    <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "12px", color: "#1e293b" }}>
+                      <input type="radio" name="radRoute" checked={!routeToReception} onChange={() => setRouteToReception(false)} />
+                      Doctor (for clinical review)
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "12px", color: "#1e293b" }}>
+                      <input type="radio" name="radRoute" checked={routeToReception} onChange={() => setRouteToReception(true)} />
+                      Reception (awaiting cashier / billing)
+                    </label>
                   </div>
 
                   {/* ── Action Buttons ────────────────────────────────────────── */}

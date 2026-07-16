@@ -14,6 +14,9 @@ import {
   Pencil, Package,
 } from "lucide-react";
 import { FULL_SERVICE_CATALOG, CatalogItemWithCategory } from "./servicePriceCatalog";
+import { LAB_TEST_CATALOG, type LabTestCatalogItem } from "../lib/labTestCatalog";
+import { LabOrderModal } from "../components/LabOrderModal";
+import ResultsModal from "../components/ResultsModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +26,7 @@ interface Patient {
   firstName: string;
   lastName: string;
   age: number;
+  ageUnit: string;
   dob: string | null;
   gender: string;
   phone: string | null;
@@ -179,35 +183,10 @@ const ROUTE_OPTIONS: RouteOption[] = [
 const formatUGX = (n: number) =>
   "UGX " + Math.round(n).toLocaleString("en-UG");
 
-// ─── Lab Test Price List ────────────────────────────────────────────────────────
+const formatAge = (age: number, unit: string) =>
+  `${age} ${unit === "months" ? "mo" : "yrs"}`;
 
-interface LabTestItem {
-  code: string;
-  name: string;
-  defaultPrice: number;
-}
-
-const LAB_TESTS: LabTestItem[] = [
-  { code: "LAB003", name: "Blood Group", defaultPrice: 10000 },
-  { code: "LAB004", name: "Brucella Agglutination Test", defaultPrice: 15000 },
-  { code: "LAB009", name: "Complete Blood Count / CBC", defaultPrice: 20000 },
-  { code: "T002",   name: "ESR", defaultPrice: 15000 },
-  { code: "LAB050", name: "Fasting Blood Sugar / FBS", defaultPrice: 5000 },
-  { code: "T001",   name: "Full Haemogram / CBC", defaultPrice: 15000 },
-  { code: "LAB007", name: "H. Pylori Antigen", defaultPrice: 20000 },
-  { code: "LAB012", name: "Hepatitis B SAg", defaultPrice: 15000 },
-  { code: "LAB031", name: "HIV 1/2", defaultPrice: 5000 },
-  { code: "T019",   name: "Malaria BS × MPS", defaultPrice: 5000 },
-  { code: "LAB001", name: "Malaria MRDT", defaultPrice: 5000 },
-  { code: "LAB035", name: "Post BS", defaultPrice: 10000 },
-  { code: "LAB011", name: "Pregnancy Urine Test", defaultPrice: 5000 },
-  { code: "LAB051", name: "Random Blood Sugar / RBS", defaultPrice: 5000 },
-  { code: "LAB023", name: "Sickling Test MHS", defaultPrice: 20000 },
-  { code: "LAB027", name: "Stool Analysis", defaultPrice: 10000 },
-  { code: "LAB028", name: "Syphilis TPHA", defaultPrice: 10000 },
-  { code: "LAB002", name: "Typhoid", defaultPrice: 5000 },
-  { code: "LAB030", name: "Urinalysis", defaultPrice: 10000 },
-];
+// ─── Lab Test Price List — now using shared LAB_TEST_CATALOG ─────────────────
 
 const SERVICE_PRICE_KEY = "MSMC_SERVICE_PRICES";
 
@@ -232,15 +211,6 @@ function setServicePrice(code: string, price: number) {
     prices[code] = price;
     localStorage.setItem(SERVICE_PRICE_KEY, JSON.stringify(prices));
   } catch {}
-}
-
-/* Legacy lab-price helpers — delegate to the catalog-wide system */
-function getLabPrice(code: string): number {
-  const test = LAB_TESTS.find((t) => t.code === code);
-  return getServicePrice(code, test?.defaultPrice ?? 0);
-}
-function setLabPrice(code: string, price: number) {
-  setServicePrice(code, price);
 }
 
 // ─── StaffAttendancePanel ──────────────────────────────────────────────────────
@@ -859,7 +829,7 @@ function AppointmentsPanel({ staffId, patients }: { staffId: string | null; pati
                           <span className="font-extrabold text-[#00703C] font-mono">{p.patientNumber}</span>
                           <span className="text-slate-700 font-semibold">{p.lastName}, {p.firstName}</span>
                         </div>
-                        <span className="text-slate-400">{p.age} yrs · {p.gender}</span>
+                        <span className="text-slate-400">{formatAge(p.age, p.ageUnit)} · {p.gender}</span>
                       </button>
                     ))}
                   </div>
@@ -1301,9 +1271,373 @@ function QuickAddPanel({ setBillLines, setInvoiceConfirmed }: {
   );
 }
 
+// ─── BillingHistory (Receipts Tab) ─────────────────────────────────────────────
+
+function BillingHistory() {
+  const [records, setRecords] = useState<any[]>([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [selectedRecord, setSelectedRecord] = useState<any>(null);
+  const [receiptVisible, setReceiptVisible] = useState(false);
+  const printFrameRef = useRef<HTMLIFrameElement>(null);
+
+  const fetchBilled = useCallback(async (q: string) => {
+    setLoading(true);
+    try {
+      const url = `/api/receptionist?billed=true${q ? `&search=${encodeURIComponent(q)}` : ""}`;
+      const res = await fetch(url);
+      if (res.ok) setRecords(await res.json());
+    } catch {} finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => fetchBilled(search), 300);
+    return () => clearTimeout(timer);
+  }, [search, fetchBilled]);
+
+  const formatDate = (d: string) => {
+    const dt = new Date(d);
+    return dt.toLocaleDateString("en-UG", { day: "2-digit", month: "short", year: "numeric" });
+  };
+
+  const buildReceiptHtmlFromRecord = (record: any) => {
+    const dt = new Date(record.billing.createdAt);
+    const dateStr = dt.toLocaleDateString("en-UG", { day: "2-digit", month: "short", year: "numeric" });
+    const timeStr = dt.toLocaleTimeString("en-UG", { hour: "2-digit", minute: "2-digit" });
+    const linesHtml = (record.billing.lines || [])
+      .map(
+        (l: any) =>
+          `<tr>
+            <td style="padding:3px 4px;font-size:10px;line-height:1.4">${l.description}</td>
+            <td style="padding:3px 4px;font-size:10px;text-align:center">${l.qty}</td>
+            <td style="padding:3px 4px;font-size:10px;text-align:right">${formatUGX(l.unitPrice)}</td>
+            <td style="padding:3px 4px;font-size:10px;text-align:right;font-weight:600">${formatUGX(l.subtotal)}</td>
+          </tr>`
+      )
+      .join("");
+
+    const pm = record.billing.paymentMethod;
+    const totalAmt = record.billing.amount;
+    const paidAmt = record.billing.amountPaid;
+    let pmtHtml = "";
+    if (pm === "CASH") {
+      const chg = paidAmt - totalAmt;
+      pmtHtml = `
+        <tr><td style="color:#334155;padding:2px 4px;font-size:10px">Tendered</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:600">${formatUGX(paidAmt)}</td></tr>
+        <tr><td style="color:#334155;padding:2px 4px;font-size:10px">Change</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:700;color:#059669">${formatUGX(Math.max(0, chg))}</td></tr>`;
+    }
+    if (record.billing.paymentRef && (pm === "MOBILE_MONEY" || pm === "CARD")) {
+      pmtHtml += `<tr><td colspan="2" style="padding:2px 4px;font-size:9px;color:#475569">Ref: ${record.billing.paymentRef}</td></tr>`;
+    }
+    if (pm === "INSURANCE" && record.billing.insuranceProvider) {
+      pmtHtml += `<tr><td colspan="2" style="padding:2px 4px;font-size:9px;color:#475569">Provider: ${record.billing.insuranceProvider}${record.billing.insurancePolicyNumber ? ` &middot; Policy: ${record.billing.insurancePolicyNumber}` : ""}</td></tr>`;
+    }
+
+    return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Receipt - ${record.billing.invoiceNumber}</title>
+    <style>
+      @page { margin: 12mm; }
+      body { margin:0; padding:0; font-family:'Courier New',monospace; color:#0f172a; print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+      .watermark { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:-1; opacity:0.1; }
+      .watermark img { width:50%; height:auto; max-width:400px; }
+      .header { text-align:center; margin-bottom:16px; padding-bottom:12px; border-bottom:2px dashed #64748b; }
+      .header h1 { font-size:16px; font-weight:800; margin:0; text-transform:uppercase; letter-spacing:1px; }
+      .header p { font-size:9px; color:#334155; margin:2px 0 0 0; }
+      .title { text-align:center; margin-bottom:12px; }
+      .title h2 { font-size:14px; font-weight:800; margin:0; text-transform:uppercase; letter-spacing:1.5px; color:#00703C; }
+      table.info { width:100%; font-size:10px; margin-bottom:8px; border-collapse:collapse; }
+      table.info td { padding:2px 4px; }
+      table.info td:first-child { color:#475569; white-space:nowrap; }
+      table.info td:last-child { font-weight:700; text-align:right; }
+      .items-header { border-top:1px solid #cbd5e1; border-bottom:2px solid #0f172a; margin:8px 0; padding:4px 0; }
+      .items-header table { width:100%; border-collapse:collapse; }
+      .items-header th { font-size:9px; color:#334155; text-transform:uppercase; padding:4px; }
+      table.items { width:100%; border-collapse:collapse; }
+      table.items td { border-bottom:1px dotted #cbd5e1; }
+      table.totals { width:100%; font-size:11px; margin-top:4px; border-collapse:collapse; }
+      table.totals td { padding:3px 4px; }
+      .footer { border-top:2px dashed #64748b; margin-top:16px; padding-top:8px; text-align:center; font-size:8px; color:#475569; }
+      .footer p { margin:2px 0; }
+    </style></head>
+<body>
+  <div class="watermark"><img src="/Images/LOGO.jpg" alt="" /></div>
+  <div class="header">
+    <h1>Main Street Medical Center</h1>
+    <p>Commitment to Good Health</p>
+    <p>P.O. Box &mdash; Kampala, Uganda</p>
+  </div>
+  <div class="title"><h2>Payment Receipt</h2></div>
+  <table class="info">
+    <tr><td>Invoice:</td><td>${record.billing.invoiceNumber}</td></tr>
+    <tr><td>Patient:</td><td>${record.lastName}, ${record.firstName}</td></tr>
+    <tr><td>ID:</td><td style="color:#00703C">${record.patientNumber}</td></tr>
+    <tr><td>Date:</td><td>${dateStr}</td></tr>
+    <tr><td>Time:</td><td>${timeStr}</td></tr>
+    <tr><td>Method:</td><td>${pm.replace("_", " ")}</td></tr>
+  </table>
+  <div class="items-header"><table><tr>
+    <th style="text-align:left;width:45%">Item</th>
+    <th style="text-align:center;width:12%">Qty</th>
+    <th style="text-align:right;width:20%">Price</th>
+    <th style="text-align:right;width:23%">Total</th>
+  </tr></table></div>
+  <table class="items">${linesHtml}</table>
+  <table class="totals">
+    <tr><td style="font-weight:800;text-transform:uppercase;font-size:13px">Total Due</td><td style="font-weight:800;text-align:right;font-size:13px;color:#00703C">${formatUGX(totalAmt)}</td></tr>
+    ${pmtHtml}
+  </table>
+  <div class="footer">
+    <p>Thank you for choosing Main Street Medical Center</p>
+    <p>This is a computer-generated receipt</p>
+  </div>
+</body></html>`;
+  };
+
+  const handlePrintFromHistory = (record: any) => {
+    const html = buildReceiptHtmlFromRecord(record);
+    if (!html || !printFrameRef.current) return;
+    const iframe = printFrameRef.current;
+    iframe.srcdoc = html;
+    iframe.onload = () => {
+      setTimeout(() => {
+        try { iframe.contentWindow?.print(); } catch { alert("Print failed. Try Download instead."); }
+      }, 300);
+    };
+  };
+
+  const handleDownloadFromHistory = (record: any) => {
+    const html = buildReceiptHtmlFromRecord(record);
+    if (!html) return;
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Receipt-${record.billing.invoiceNumber || "receipt"}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="flex flex-col gap-6 lg:grid lg:grid-cols-3">
+      {/* Hidden iframe for printing */}
+      <iframe ref={printFrameRef} style={{ position: "absolute", width: 0, height: 0, border: "none" }} title="print-frame-receipts" />
+
+      {/* Left panel — search + list */}
+      <div className="space-y-4 lg:col-span-2">
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <label className="block text-xs font-bold tracking-wide text-slate-500 uppercase mb-2">
+            <FileText size={13} className="inline mr-1.5 text-teal-500" />
+            Billing Receipts History
+          </label>
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by patient name or ID…"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-9 pr-10 text-sm font-semibold outline-none transition focus:border-[#00703C] focus:bg-white"
+            />
+            {search && (
+              <button onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500">
+                <X size={15} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
+            <Loader2 size={24} className="mx-auto animate-spin text-slate-300 mb-2" />
+            <p className="text-xs font-medium text-slate-400">Loading receipts…</p>
+          </div>
+        ) : records.length === 0 ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-10 text-center">
+            <Receipt size={28} className="mx-auto text-slate-200 mb-2" />
+            <p className="text-sm font-medium text-slate-400">No billed patients found</p>
+            <p className="text-xs text-slate-300 mt-0.5">{search ? "Try a different search term" : "Billed patients will appear here after payments are processed"}</p>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-[600px] overflow-y-auto">
+            {records.map((rec) => (
+              <button
+                key={rec.billing.id}
+                onClick={() => { setSelectedRecord(rec); setReceiptVisible(true); }}
+                className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-3 text-left shadow-sm hover:bg-slate-50 transition"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-800 truncate">{rec.lastName}, {rec.firstName}</span>
+                    <span className="text-[10px] font-mono text-amber-600">{rec.patientNumber}</span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500">
+                    <span className="font-mono text-teal-600 font-bold">{rec.billing.invoiceNumber}</span>
+                    <span>·</span>
+                    <span>{formatDate(rec.billing.createdAt)}</span>
+                    <span>·</span>
+                    <span className="font-bold">{rec.billing.paymentMethod.replace("_", " ")}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                  <span className="text-sm font-extrabold text-[#00703C]">{formatUGX(rec.billing.amount)}</span>
+                  <ArrowRight size={14} className="text-slate-300" />
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Right panel — receipt preview / details */}
+      <div className="lg:col-span-1">
+        {selectedRecord && receiptVisible ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4 sticky top-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Receipt Details</h3>
+              <button onClick={() => { setReceiptVisible(false); setSelectedRecord(null); }}
+                className="text-slate-300 hover:text-rose-500 p-0.5">
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="bg-slate-50 rounded-xl p-4 space-y-2 font-mono text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Invoice</span>
+                <span className="font-bold text-teal-700">{selectedRecord.billing.invoiceNumber}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Patient</span>
+                <span className="font-bold text-slate-800">{selectedRecord.lastName}, {selectedRecord.firstName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">ID</span>
+                <span className="font-bold text-[#00703C]">{selectedRecord.patientNumber}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Date</span>
+                <span>{formatDate(selectedRecord.billing.createdAt)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Method</span>
+                <span className="font-bold">{selectedRecord.billing.paymentMethod.replace("_", " ")}</span>
+              </div>
+              <div className="border-t border-dashed border-slate-200 pt-2 space-y-1">
+                <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Items</div>
+                {(selectedRecord.billing.lines || []).map((line: any, i: number) => (
+                  <div key={i} className="flex justify-between text-[10px]">
+                    <span className="truncate text-slate-600">{line.description}</span>
+                    <span className="font-bold text-slate-700 flex-shrink-0 ml-2">{formatUGX(line.subtotal)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="border-t border-slate-200 pt-2 flex justify-between font-extrabold text-base">
+                <span>Total</span><span className="text-[#00703C]">{formatUGX(selectedRecord.billing.amount)}</span>
+              </div>
+              {selectedRecord.billing.paymentMethod === "CASH" && selectedRecord.billing.amountPaid > selectedRecord.billing.amount && (
+                <div className="flex justify-between text-[10px]">
+                  <span className="text-slate-500">Change</span>
+                  <span className="font-bold text-emerald-600">{formatUGX(selectedRecord.billing.amountPaid - selectedRecord.billing.amount)}</span>
+                </div>
+              )}
+              {selectedRecord.billing.paymentRef && (
+                <div className="text-[9px] text-slate-400 text-center pt-1">Ref: {selectedRecord.billing.paymentRef}</div>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <button onClick={() => handlePrintFromHistory(selectedRecord)}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50 transition">
+                <Printer size={12} /> Print
+              </button>
+              <button onClick={() => handleDownloadFromHistory(selectedRecord)}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-3 text-[10px] font-extrabold uppercase tracking-wider text-[#00703C] hover:bg-emerald-50 transition">
+                <FileText size={12} /> Download
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+            <FileText size={24} className="mx-auto text-slate-200 mb-2" />
+            <p className="text-xs font-medium text-slate-400">Select a receipt</p>
+            <p className="text-[10px] text-slate-300 mt-0.5">Click a billed patient to view full receipt details</p>
+          </div>
+        )}
+      </div>
+
+      {/* Full-screen receipt modal (alternative view) */}
+      {selectedRecord && receiptVisible && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm p-4 sm:items-center">
+          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl overflow-hidden">
+            <div className="bg-[#00703C] px-6 py-5 text-center text-white">
+              <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-white/20">
+                <CheckCircle2 size={24} className="text-white" />
+              </div>
+              <h3 className="text-sm font-extrabold uppercase tracking-widest">Receipt</h3>
+              <p className="text-[10px] mt-0.5 text-emerald-100">Main Street Medical Center</p>
+            </div>
+            <div className="px-6 py-4 space-y-2 font-mono text-xs text-slate-700">
+              <div className="flex justify-between text-[10px] text-slate-400 uppercase tracking-wider">
+                <span>Invoice</span><span>{selectedRecord.billing.invoiceNumber}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Patient</span>
+                <span className="font-bold">{selectedRecord.lastName}, {selectedRecord.firstName}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">ID</span>
+                <span className="font-bold text-[#00703C]">{selectedRecord.patientNumber}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Date</span>
+                <span>{formatDate(selectedRecord.billing.createdAt)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Method</span>
+                <span className="font-bold">{selectedRecord.billing.paymentMethod.replace("_", " ")}</span>
+              </div>
+              <div className="border-t border-dashed border-slate-200 pt-3 space-y-1.5">
+                <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400 mb-1">Items</div>
+                {(selectedRecord.billing.lines || []).map((line: any, i: number) => (
+                  <div key={i} className="flex justify-between text-[10px]">
+                    <span className="truncate text-slate-600">{line.description}</span>
+                    <span className="font-bold text-slate-700 flex-shrink-0 ml-2">{formatUGX(line.subtotal)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="border-t border-slate-200 pt-2 flex justify-between font-extrabold text-lg">
+                <span>TOTAL BILL</span><span className="text-[#00703C]">{formatUGX(selectedRecord.billing.amount)}</span>
+              </div>
+            </div>
+            <div className="flex gap-2 px-6 pb-5">
+              <button onClick={() => handlePrintFromHistory(selectedRecord)}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-50 transition">
+                <Printer size={12} /> Print Receipt
+              </button>
+              <button onClick={() => handleDownloadFromHistory(selectedRecord)}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-3 text-[10px] font-extrabold uppercase tracking-wider text-[#00703C] hover:bg-emerald-50 transition">
+                <FileText size={12} /> Download
+              </button>
+              <button onClick={() => { setReceiptVisible(false); setSelectedRecord(null); }}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-slate-100 py-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-600 hover:bg-slate-200 transition">
+                <X size={12} /> Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── CashierPOS ───────────────────────────────────────────────────────────────
 
-function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; directBillPatient?: Patient | null }) {
+function CashierPOS({ patients, directBillPatient, onBillingComplete }: { patients: Patient[]; directBillPatient?: Patient | null; onBillingComplete?: () => void }) {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [patientSearch, setPatientSearch] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
@@ -1324,6 +1658,11 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
   const [isProcessing, setIsProcessing] = useState(false);
   const [receiptVisible, setReceiptVisible] = useState(false);
   const [savedInvoiceNumber, setSavedInvoiceNumber] = useState("");
+
+  // ── Results modal state ────────────────────────────────────────────────
+  const [resultsModalPatient, setResultsModalPatient] = useState<{
+    name: string; number: string; age: number; ageUnit: string; gender: string;
+  } | null>(null);
 
   // ── Partial / resume-bill state ──────────────────────────────────────────
   const [isResumeBill, setIsResumeBill] = useState(false);
@@ -1525,10 +1864,10 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
       // Partial payment or resume — show cumulative payment info
       if (existingAmountPaid > 0) {
         paymentExtraHtml += `
-          <tr><td style="color:#64748b;padding:2px 4px;font-size:10px">Previously Paid</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:600">${formatUGX(existingAmountPaid)}</td></tr>`;
+          <tr><td style="color:#334155;padding:2px 4px;font-size:10px">Previously Paid</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:600">${formatUGX(existingAmountPaid)}</td></tr>`;
       }
       paymentExtraHtml += `
-        <tr><td style="color:#64748b;padding:2px 4px;font-size:10px">Amount Paid</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:600">${formatUGX(tendered)}</td></tr>`;
+        <tr><td style="color:#334155;padding:2px 4px;font-size:10px">Amount Paid</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:600">${formatUGX(tendered)}</td></tr>`;
       if (balanceDue > 0) {
         paymentExtraHtml += `
           <tr><td style="color:#dc2626;padding:2px 4px;font-size:10px;font-weight:700">Balance Owing</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:700;color:#dc2626">${formatUGX(balanceDue)}</td></tr>
@@ -1540,8 +1879,8 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
       }
     } else if (paymentMethod === "CASH") {
       paymentExtraHtml = `
-        <tr><td style="color:#64748b;padding:2px 4px;font-size:10px">Tendered</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:600">${formatUGX(tendered)}</td></tr>
-        <tr><td style="color:#64748b;padding:2px 4px;font-size:10px">Change</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:700;color:#059669">${formatUGX(change)}</td></tr>`;
+        <tr><td style="color:#334155;padding:2px 4px;font-size:10px">Tendered</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:600">${formatUGX(tendered)}</td></tr>
+        <tr><td style="color:#334155;padding:2px 4px;font-size:10px">Change</td><td style="padding:2px 4px;text-align:right;font-size:10px;font-weight:700;color:#059669">${formatUGX(change)}</td></tr>`;
     }
     if ((paymentMethod === "MOBILE_MONEY" || paymentMethod === "CARD") && paymentReference) {
       paymentExtraHtml += `<tr><td colspan="2" style="padding:2px 4px;font-size:9px;color:#64748b">Ref: ${paymentReference}</td></tr>`;
@@ -1557,30 +1896,30 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
     return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>Receipt - ${savedInvoiceNumber}</title>
-	<style>
-	  @page { margin: 12mm; }
-	  body { margin:0; padding:0; font-family:'Courier New',monospace; color:#1e293b; print-color-adjust:exact; -webkit-print-color-adjust:exact; }
-	  .watermark { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:-1; opacity:0.1; }
-	  .watermark img { width:50%; height:auto; max-width:400px; }
-	  .header { text-align:center; margin-bottom:16px; padding-bottom:12px; border-bottom:2px dashed #cbd5e1; }
-  .header h1 { font-size:16px; font-weight:800; margin:0; text-transform:uppercase; letter-spacing:1px; }
-  .header p { font-size:9px; color:#64748b; margin:2px 0 0 0; }
-  .title { text-align:center; margin-bottom:12px; }
-  .title h2 { font-size:14px; font-weight:800; margin:0; text-transform:uppercase; letter-spacing:1.5px; color:#00703C; }
-  table.info { width:100%; font-size:10px; margin-bottom:8px; border-collapse:collapse; }
-  table.info td { padding:2px 4px; }
-  table.info td:first-child { color:#94a3b8; white-space:nowrap; }
-  table.info td:last-child { font-weight:700; text-align:right; }
-  .items-header { border-top:1px solid #e2e8f0; border-bottom:2px solid #1e293b; margin:8px 0; padding:4px 0; }
-  .items-header table { width:100%; border-collapse:collapse; }
-  .items-header th { font-size:9px; color:#64748b; text-transform:uppercase; padding:4px; }
-  table.items { width:100%; border-collapse:collapse; }
-  table.items td { border-bottom:1px dotted #e2e8f0; }
-  table.totals { width:100%; font-size:11px; margin-top:4px; border-collapse:collapse; }
-  table.totals td { padding:3px 4px; }
-  .footer { border-top:2px dashed #cbd5e1; margin-top:16px; padding-top:8px; text-align:center; font-size:8px; color:#94a3b8; }
-  .footer p { margin:2px 0; }
-</style></head>
+		<style>
+		  @page { margin: 12mm; }
+		  body { margin:0; padding:0; font-family:'Courier New',monospace; color:#0f172a; print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+		  .watermark { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:-1; opacity:0.1; }
+		  .watermark img { width:50%; height:auto; max-width:400px; }
+		  .header { text-align:center; margin-bottom:16px; padding-bottom:12px; border-bottom:2px dashed #64748b; }
+	  .header h1 { font-size:16px; font-weight:800; margin:0; text-transform:uppercase; letter-spacing:1px; }
+	  .header p { font-size:9px; color:#334155; margin:2px 0 0 0; }
+	  .title { text-align:center; margin-bottom:12px; }
+	  .title h2 { font-size:14px; font-weight:800; margin:0; text-transform:uppercase; letter-spacing:1.5px; color:#00703C; }
+	  table.info { width:100%; font-size:10px; margin-bottom:8px; border-collapse:collapse; }
+	  table.info td { padding:2px 4px; }
+	  table.info td:first-child { color:#475569; white-space:nowrap; }
+	  table.info td:last-child { font-weight:700; text-align:right; }
+	  .items-header { border-top:1px solid #cbd5e1; border-bottom:2px solid #0f172a; margin:8px 0; padding:4px 0; }
+	  .items-header table { width:100%; border-collapse:collapse; }
+	  .items-header th { font-size:9px; color:#334155; text-transform:uppercase; padding:4px; }
+	  table.items { width:100%; border-collapse:collapse; }
+	  table.items td { border-bottom:1px dotted #cbd5e1; }
+	  table.totals { width:100%; font-size:11px; margin-top:4px; border-collapse:collapse; }
+	  table.totals td { padding:3px 4px; }
+	  .footer { border-top:2px dashed #64748b; margin-top:16px; padding-top:8px; text-align:center; font-size:8px; color:#475569; }
+	  .footer p { margin:2px 0; }
+	</style></head>
 <body>
   <div class="watermark"><img src="/Images/LOGO.jpg" alt="" /></div>
   <div class="header">
@@ -1648,13 +1987,14 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
     URL.revokeObjectURL(url);
   };
 
-  const handleNewBill = () => {
+  const handleNewBill = async () => {
     setSelectedPatient(null); setPatientSearch(""); setBillLines([]);
     setNewDesc(""); setNewQty("1"); setNewPrice("");
     setPaymentMethod("CASH"); setAmountTendered(""); setPaymentReference("");
     setInsuranceProvider(""); setInsurancePolicyNumber("");
     setInvoiceConfirmed(false); setReceiptVisible(false); setSavedInvoiceNumber("");
     setIsResumeBill(false); setResumeBillId(null); setExistingAmountPaid(0);
+    onBillingComplete?.();
   };
 
   // ── Resume a partial bill: restore lines from saved bill ────────────────
@@ -1709,6 +2049,7 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
         firstName: p.firstName,
         lastName: p.lastName,
         age: p.age,
+        ageUnit: "years",
         gender: p.gender,
         dob: null as string | null,
         phone: null as string | null,
@@ -1770,11 +2111,40 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
                       )}
                       <span className="font-mono text-amber-600">{p.patientNumber}</span>
                       <span className="mx-1">·</span>
-                      {p.age} yrs · {p.gender}
+                      {formatAge(p.age, (p as any).ageUnit || "years")} · {p.gender}
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                <div className="flex items-center gap-1.5 flex-shrink-0 ml-3">
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setResultsModalPatient({
+                          name: `${p.lastName}, ${p.firstName}`,
+                          number: p.patientNumber,
+                          age: p.age,
+                          ageUnit: (p as any).ageUnit || "years",
+                          gender: p.gender,
+                        });
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.stopPropagation();
+                          setResultsModalPatient({
+                            name: `${p.lastName}, ${p.firstName}`,
+                            number: p.patientNumber,
+                            age: p.age,
+                            ageUnit: (p as any).ageUnit || "years",
+                            gender: p.gender,
+                          });
+                        }
+                      }}
+                      className="text-[9px] font-extrabold uppercase tracking-wider text-blue-600 bg-blue-50 border border-blue-100 hover:bg-blue-100 px-2 py-1 rounded-lg transition-colors flex-shrink-0 cursor-pointer"
+                    >
+                      <FileText size={10} className="inline mr-0.5" /> Results
+                    </span>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
                     p.queueType === "partial"
                       ? "text-rose-700 bg-rose-50 border border-rose-100"
@@ -1843,7 +2213,7 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
                       <span className="font-extrabold text-[#00703C] font-mono">{p.patientNumber}</span>
                       <span className="text-slate-700 font-semibold">{p.lastName}, {p.firstName}</span>
                     </div>
-                    <span className="text-slate-400">{p.age} yrs</span>
+                    <span className="text-slate-400">{formatAge(p.age, p.ageUnit)}</span>
                   </button>
                 ))}
               </div>
@@ -1852,13 +2222,25 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
           {selectedPatient && (
             <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-semibold">
               <span className="rounded bg-emerald-50 border border-emerald-100 text-emerald-700 px-2 py-0.5 font-mono">{selectedPatient.patientNumber}</span>
-              <span className="text-slate-500">{selectedPatient.gender} · {selectedPatient.age} yrs</span>
+              <span className="text-slate-500">{selectedPatient.gender} · {formatAge(selectedPatient.age, selectedPatient.ageUnit)}</span>
               {selectedPatient.phone && <span className="text-slate-500"><Phone size={10} className="inline mr-0.5" />{selectedPatient.phone}</span>}
               {selectedPatient.isEmergency && (
                 <span className="rounded bg-rose-50 border border-rose-100 text-rose-600 px-2 py-0.5 flex items-center gap-1">
                   <ShieldAlert size={10} /> Emergency
                 </span>
               )}
+              <button
+                onClick={() => setResultsModalPatient({
+                  name: `${selectedPatient.lastName}, ${selectedPatient.firstName}`,
+                  number: selectedPatient.patientNumber,
+                  age: selectedPatient.age,
+                  ageUnit: selectedPatient.ageUnit,
+                  gender: selectedPatient.gender,
+                })}
+                className="ml-auto rounded-lg bg-blue-50 border border-blue-100 text-blue-600 hover:bg-blue-100 px-2.5 py-1 flex items-center gap-1 font-extrabold uppercase tracking-wider transition-colors"
+              >
+                <FileText size={10} /> Print Results
+              </button>
             </div>
           )}
         </div>
@@ -1875,7 +2257,7 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
                 type="text" value={newDesc}
                 onChange={(e) => setNewDesc(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleAddLine()}
-                placeholder="e.g., General Consultation, Malaria RDT, Wound Dressing…"
+                placeholder="e.g., Consultation, Lab test, Pharmacy…"
                 className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium outline-none transition focus:border-[#00703C]"
               />
             </div>
@@ -2160,15 +2542,26 @@ function CashierPOS({ patients, directBillPatient }: { patients: Patient[]; dire
               </button>
               <button onClick={handleNewBill}
                 className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#00703C] py-3 text-[10px] font-extrabold uppercase tracking-wider text-white hover:bg-emerald-800 transition">
-                <Receipt size={12} /> New Bill
+                <CheckCircle2 size={12} /> Complete Billing
               </button>
             </div>
           </div>
         </div>
 		      )}
 
+		      {/* ── Results Modal ── */}
+		      {resultsModalPatient && (
+		        <ResultsModal
+		          patientName={resultsModalPatient.name}
+		          patientNumber={resultsModalPatient.number}
+		          patientAge={resultsModalPatient.age}
+		          patientAgeUnit={resultsModalPatient.ageUnit}
+		          patientGender={resultsModalPatient.gender}
+		          onClose={() => setResultsModalPatient(null)}
+		        />
+		      )}
 
-			      {/* ── Hidden iframe for seamless receipt printing ── */}
+		      {/* ── Hidden iframe for seamless receipt printing ── */}
 			      <iframe ref={iframeRef} style={{ position: "absolute", width: 0, height: 0, border: "none" }} title="print-frame" />
 
 			    </div>
@@ -2182,20 +2575,22 @@ export default function ReceptionistPage() {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
   const [recordsSearch, setRecordsSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<"search" | "register" | "cashier" | "attendance" | "schedule">("search");
+  const [activeTab, setActiveTab] = useState<"search" | "register" | "cashier" | "attendance" | "schedule" | "receipts">("search");
   const [registrationMode, setRegistrationMode] = useState<"normal" | "emergency">("normal");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [isRouting, setIsRouting] = useState(false);
   const [isDischarging, setIsDischarging] = useState(false);
+  const [labOrderTarget, setLabOrderTarget] = useState<Patient | null>(null);
+  const [isOrdering, setIsOrdering] = useState(false);
   const [billPatient, setBillPatient] = useState<Patient | null>(null);
   const [directBillKey, setDirectBillKey] = useState(0);
 
   const [staffId, setStaffId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
-    firstName: "", lastName: "", age: "", gender: "",
+    firstName: "", lastName: "", age: "", ageUnit: "years", gender: "",
     phone: "", address: "", chiefComplaint: "",
   });
 
@@ -2230,7 +2625,7 @@ export default function ReceptionistPage() {
   const normalFields = [
     { id: "firstName", label: "First Name", type: "text", required: true, placeholder: "e.g., John" },
     { id: "lastName", label: "Last Name", type: "text", required: true, placeholder: "e.g., Okello" },
-    { id: "age", label: "Age", type: "number", required: true, placeholder: "Years" },
+    { id: "age", label: "Age", type: "number", required: true, placeholder: "" },
     { id: "gender", label: "Gender", type: "select", required: true, options: ["MALE", "FEMALE", "OTHER"], placeholder: "" },
     { id: "phone", label: "Phone Number", type: "tel", required: true, placeholder: "e.g., 0770000000" },
     { id: "address", label: "Residential Address", type: "textarea", required: true, colSpan: "md:col-span-2", placeholder: "Village, District details..." },
@@ -2240,7 +2635,7 @@ export default function ReceptionistPage() {
   const emergencyFields = [
     { id: "firstName", label: "First Name / Alias", type: "text", required: true, placeholder: "Use 'Unknown' if unresponsive" },
     { id: "lastName", label: "Last Name", type: "text", required: true, placeholder: "e.g., Trauma Male Alpha" },
-    { id: "age", label: "Estimated Age", type: "number", required: true, placeholder: "Estimated Years" },
+    { id: "age", label: "Estimated Age", type: "number", required: true, placeholder: "" },
     { id: "gender", label: "Gender", type: "select", required: true, options: ["MALE", "FEMALE", "OTHER"], placeholder: "" },
     { id: "chiefComplaint", label: "Emergency Presentation Details", type: "textarea", required: true, colSpan: "md:col-span-2", placeholder: "Describe presentation: RTA, severe bleeding..." },
   ];
@@ -2265,6 +2660,7 @@ export default function ReceptionistPage() {
             firstName: formData.firstName,
             lastName: formData.lastName,
             age: formData.age,
+            ageUnit: formData.ageUnit,
             gender: formData.gender,
             phone: registrationMode === "normal" ? formData.phone : null,
             address: registrationMode === "normal" ? formData.address : null,
@@ -2281,7 +2677,7 @@ export default function ReceptionistPage() {
 
       await fetchActiveRegistry();
       setActiveTab("search");
-      setFormData({ firstName: "", lastName: "", age: "", gender: "", phone: "", address: "", chiefComplaint: "" });
+      setFormData({ firstName: "", lastName: "", age: "", ageUnit: "years", gender: "", phone: "", address: "", chiefComplaint: "" });
       setSelectedPatient(null);
     } catch (err: any) {
       console.error(err);
@@ -2412,28 +2808,28 @@ export default function ReceptionistPage() {
       {/* NAV */}
       <nav className="border-b border-slate-200 bg-white px-4 py-3 shadow-sm md:px-8">
         <div className="mx-auto flex max-w-7xl items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="relative h-12 w-12 overflow-hidden rounded-xl border border-slate-100 md:h-14 md:w-14">
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="relative h-10 w-10 overflow-hidden rounded-xl border border-slate-100 md:h-14 md:w-14">
               <Image src="/Images/LOGO.jpg" alt="Main Street Medical Center Logo" fill priority sizes="56px" className="object-contain" />
             </div>
-            <div>
-              <h1 className="text-base font-extrabold tracking-tight text-slate-900 uppercase md:text-xl">Main Street Medical Center</h1>
-              <p className="text-[10px] font-semibold tracking-wide text-rose-600 md:text-xs">Commitment to Good Health</p>
+            <div className="min-w-0">
+              <h1 className="truncate text-[11px] font-extrabold leading-tight tracking-tight text-slate-900 uppercase md:text-xl">Main Street Medical Center</h1>
+              <p className="text-[8px] font-semibold tracking-wide text-rose-600 md:text-xs">Commitment to Good Health</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 md:gap-4">
+          <div className="flex items-center gap-1 md:gap-4">
             <div className="hidden items-center gap-2 rounded-full bg-emerald-50 px-4 py-1.5 border border-emerald-100 md:flex">
               <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
               <span className="text-xs font-bold text-emerald-800 tracking-wide uppercase">Receptionist Desk Active</span>
             </div>
-            <NotificationInbox department="Reception" />
-            <StaffMessaging />
+            <NotificationInbox department="Reception" showTitle={false} />
+            <StaffMessaging showTitle={false} />
             <button
               onClick={async () => { try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: u.id, username: u.username }) }); } } catch {} router.push("/"); }}
               className="flex items-center gap-2 rounded-full bg-red-50 px-4 py-1.5 border border-red-100 text-red-600 hover:bg-red-100 transition-all"
             >
               <LogOut size={14} />
-              <span className="text-xs font-bold tracking-wide uppercase">Logout</span>
+              <span className="hidden text-xs font-bold tracking-wide uppercase md:inline">Logout</span>
             </button>
           </div>
         </div>
@@ -2449,11 +2845,12 @@ export default function ReceptionistPage() {
             { key: "cashier",  label: "Cashier & Billing", icon: <Receipt size={15} />, color: "border-amber-500 text-amber-600" },
             { key: "attendance", label: "Staff Attendance", icon: <Clock size={15} />, color: "border-blue-500 text-blue-600" },
             { key: "schedule", label: "Appointments", icon: <Calendar size={15} />, color: "border-purple-500 text-purple-600" },
+            { key: "receipts", label: "Receipts", icon: <FileText size={15} />, color: "border-teal-500 text-teal-600" },
           ] as const).map((tab) => (
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`flex flex-shrink-0 items-center gap-1.5 border-b-2 px-4 py-3 text-xs font-bold transition-all md:px-6 md:text-sm ${
+              className={`flex flex-shrink-0 items-center gap-1.5 border-b-2 px-3 py-3 text-xs font-bold transition-all md:px-6 md:text-sm ${
                 activeTab === tab.key ? tab.color : "border-transparent text-slate-500 hover:text-slate-900"
               }`}
             >
@@ -2474,7 +2871,7 @@ export default function ReceptionistPage() {
                   <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search by Unique ID, First Name, or Last Name..."
+                    placeholder="Search by name or ID…"
                     className="w-full rounded-xl border border-slate-200 bg-slate-50/50 py-3 pl-12 pr-4 text-sm font-medium outline-none transition focus:border-[#00703C] focus:bg-white"
                   />
                 </div>
@@ -2516,7 +2913,7 @@ export default function ReceptionistPage() {
                             )}
                           </div>
                           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                            <span><strong>Age/Sex:</strong> {patient.age} Yrs ({patient.gender})</span>
+                            <span><strong>Age/Sex:</strong> {formatAge(patient.age, patient.ageUnit)} ({patient.gender})</span>
                             <span>•</span>
                             {statusBadge(patient.status)}
                           </div>
@@ -2577,8 +2974,14 @@ export default function ReceptionistPage() {
                         {ROUTE_OPTIONS.map((opt) => (
                           <button
                             key={opt.status + opt.label}
-                            disabled={isRouting || selectedPatient.status === opt.status}
-                            onClick={() => handleDispatchPipeline(selectedPatient.id, opt.status, opt.label)}
+                            disabled={isRouting || isOrdering || selectedPatient.status === opt.status}
+                            onClick={() => {
+                              if (opt.label === "Laboratory") {
+                                setLabOrderTarget(selectedPatient);
+                              } else {
+                                handleDispatchPipeline(selectedPatient.id, opt.status, opt.label);
+                              }
+                            }}
                             className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 px-2 min-h-[44px] text-[10px] font-extrabold uppercase tracking-wide text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed ${opt.color} ${
                               selectedPatient.status === opt.status ? "ring-2 ring-offset-1 " + opt.ringColor : ""
                             }`}
@@ -2631,6 +3034,64 @@ export default function ReceptionistPage() {
                     Select a patient from the registry to route them.
                   </div>
                 )}
+
+                {/* ── Lab Order Modal ────────────────────────────────────── */}
+                {labOrderTarget && (
+                  <LabOrderModal
+                    patientName={`${labOrderTarget.firstName} ${labOrderTarget.lastName}`}
+                    onClose={() => { if (!isOrdering) setLabOrderTarget(null); }}
+                    onConfirm={async (selectedTests) => {
+                      setIsOrdering(true);
+                      try {
+                        // Resolve the current user's Staff id so the lab request
+                        // records the correct requesting staff member (not a fallback).
+                        let requestingStaffId: number | null = null;
+                        try {
+                          const staffRes = await fetch("/api/staffcreate");
+                          if (staffRes.ok) {
+                            const staffData = await staffRes.json();
+                            if (staffData.success && Array.isArray(staffData.staff)) {
+                              const userData = JSON.parse(
+                                sessionStorage.getItem("user") ||
+                                localStorage.getItem("user") ||
+                                "{}"
+                              );
+                              const myStaff = staffData.staff.find(
+                                (s: any) => s.userId === userData.id
+                              );
+                              if (myStaff?.id) requestingStaffId = myStaff.id;
+                            }
+                          }
+                        } catch { /* staff lookup failed */ }
+
+                        const res = await fetch("/api/receptionist", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            action: "CREATE_LAB_ORDER",
+                            payload: {
+                              patientId: labOrderTarget.id,
+                              tests: selectedTests.map(t => ({ code: t.code, name: t.name })),
+                              requestedById: requestingStaffId,
+                            },
+                          }),
+                        });
+                        if (!res.ok) {
+                          const err = await res.json();
+                          throw new Error(err.error || "Failed to create lab order");
+                        }
+                        // Only route if CREATE_LAB_ORDER succeeded
+                        await handleDispatchPipeline(labOrderTarget.id, "AWAITING_LAB", "Laboratory");
+                        setLabOrderTarget(null);
+                      } catch (err: any) {
+                        alert(err.message || "Failed to order lab tests. Patient was NOT routed.");
+                      } finally {
+                        setIsOrdering(false);
+                      }
+                    }}
+                  />
+                )}
+
               </div>
 
               {/* ── PATIENT RECORDS ──────────────────────────────────────────── */}
@@ -2689,7 +3150,7 @@ export default function ReceptionistPage() {
                               {patient.lastName}, {patient.firstName}
                             </div>
                             <div className="text-[9px] text-slate-400 font-mono truncate">
-                              {patient.patientNumber} · {patient.age}yrs {patient.gender}
+                              {patient.patientNumber} · {formatAge(patient.age, patient.ageUnit)} {patient.gender}
                             </div>
                           </div>
                         </div>
@@ -2727,7 +3188,35 @@ export default function ReceptionistPage() {
                   <label className="mb-1 block text-xs font-bold text-slate-600 tracking-wide">
                     {field.label} {field.required && <span className="text-rose-500">*</span>}
                   </label>
-                  {field.type === "select" ? (
+                  {field.id === "age" ? (
+                    <div className="flex gap-2">
+                      <input type="number" name="age" required={field.required}
+                        min={0} max={formData.ageUnit === "years" ? 150 : 60}
+                        placeholder={formData.ageUnit === "years" ? "e.g., 25" : "e.g., 8"}
+                        value={formData.age} onChange={handleInputChange}
+                        className="flex-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-medium outline-none transition focus:border-[#00703C]" />
+                      <div className="flex rounded-xl border border-slate-200 overflow-hidden flex-shrink-0">
+                        <button type="button"
+                          onClick={() => setFormData((p) => ({ ...p, ageUnit: "years", age: p.ageUnit === "months" ? "" : p.age }))}
+                          className={`px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                            formData.ageUnit === "years"
+                              ? "bg-[#00703C] text-white"
+                              : "bg-white text-slate-500 hover:bg-slate-50"
+                          }`}>
+                          Years
+                        </button>
+                        <button type="button"
+                          onClick={() => setFormData((p) => ({ ...p, ageUnit: "months", age: p.ageUnit === "years" ? "" : p.age }))}
+                          className={`px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                            formData.ageUnit === "months"
+                              ? "bg-[#00703C] text-white"
+                              : "bg-white text-slate-500 hover:bg-slate-50"
+                          }`}>
+                          Months
+                        </button>
+                      </div>
+                    </div>
+                  ) : field.type === "select" ? (
                     <select name={field.id} required={field.required} value={(formData as any)[field.id]} onChange={handleInputChange}
                       className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-medium outline-none bg-white transition focus:border-[#00703C]">
                       <option value="">Select Option</option>
@@ -2760,13 +3249,16 @@ export default function ReceptionistPage() {
         )}
 
         {/* ── CASHIER TAB ───────────────────────────────────────────────────── */}
-        {activeTab === "cashier" && <CashierPOS key={directBillKey} patients={patients} directBillPatient={billPatient} />}
+        {activeTab === "cashier" && <CashierPOS key={directBillKey} patients={patients} directBillPatient={billPatient} onBillingComplete={fetchActiveRegistry} />}
 
         {/* ── STAFF ATTENDANCE TAB ──────────────────────────────────────────── */}
         {activeTab === "attendance" && <StaffAttendancePanel />}
 
         {/* ── APPOINTMENTS TAB ──────────────────────────────────────────────── */}
         {activeTab === "schedule" && <AppointmentsPanel staffId={staffId} patients={patients} />}
+
+        {/* ── RECEIPTS TAB ─────────────────────────────────────────────────── */}
+        {activeTab === "receipts" && <BillingHistory />}
 
       </div>
     </main>

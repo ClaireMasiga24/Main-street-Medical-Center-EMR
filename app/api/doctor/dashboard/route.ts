@@ -18,7 +18,9 @@ export async function GET(req: NextRequest) {
     const whereStatus: any = { currentStatus: { in: statuses } };
     if (statusFilter) whereStatus.currentStatus = statusFilter;
 
-    const patients = await prisma.patient.findMany({
+    // Fetch patients (heavy query with includes) outside the transaction to avoid timeout.
+    // Only the lightweight count queries run inside a fast transaction for consistency.
+    const patientsPromise = prisma.patient.findMany({
       where: whereStatus,
       orderBy: [{ isEmergency: "desc" }, { updatedAt: "asc" }],
       include: {
@@ -30,6 +32,20 @@ export async function GET(req: NextRequest) {
       },
     });
 
+    const notificationsPromise = prisma.notification.findMany({
+      where: { department: "Doctor", createdAt: { gte: twentyFourHoursAgo } },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+    });
+
+    // Run the heavy patient query first, but DON'T batch it with count queries in Promise.all.
+    // With Prisma pool connection_limit=1 (set in DATABASE_URL for pgBouncer compat),
+    // only ONE query can execute at a time. Parallelizing queries just makes them all
+    // queue up and timeout waiting for the connection. Sequential awaits are actually
+    // faster here — each query acquires and releases the connection in order.
+    const patients = await patientsPromise;
+    const recentNotifications = await notificationsPromise;
+
     const awaitingDoctor = await prisma.patient.count({ where: { currentStatus: "AWAITING_DOCTOR" } });
     const inConsultation = await prisma.patient.count({ where: { currentStatus: "IN_CONSULTATION" } });
     const completedToday = await prisma.visit.count({ where: { createdAt: { gte: today, lt: todayEnd }, diagnosis: { not: null }, ...(doctorId ? { doctorId } : {}) } });
@@ -37,12 +53,6 @@ export async function GET(req: NextRequest) {
     const pendingRadiology = await prisma.imagingRequest.count({ where: { status: { notIn: ["REPORTED", "CANCELLED"] }, Patient: { currentStatus: { in: ["AWAITING_DOCTOR", "IN_CONSULTATION"] } } } });
     const todayAppointments = await prisma.appointment.count({ where: { appointmentDate: { gte: today, lt: todayEnd }, department: "Doctor", status: { not: "CANCELLED" } } });
     const admittedPatients = await prisma.patient.count({ where: { currentStatus: "ADMITTED" } });
-
-    const recentNotifications = await prisma.notification.findMany({
-      where: { department: "Doctor", createdAt: { gte: twentyFourHoursAgo } },
-      orderBy: { createdAt: "desc" },
-      take: 10,
-    });
 
     const enrichedPatients = patients.map((p) => {
       const triage = p.Triage?.[0];

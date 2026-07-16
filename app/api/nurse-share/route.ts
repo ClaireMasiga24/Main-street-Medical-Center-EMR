@@ -49,12 +49,26 @@ export async function POST(request: Request) {
       },
     });
 
+    // Map each share target to the correct patient status
+    const NURSE_DEPT_TO_STATUS: Record<string, string> = {
+      doctor: "AWAITING_DOCTOR",
+      lab: "AWAITING_LAB",
+      radiology: "AWAITING_RADIOLOGY",
+      pharmacy: "AWAITING_PHARMACY",
+      cashier: "AWAITING_CASHIER",
+      reception: "AWAITING_CASHIER",
+      dental: "AWAITING_DENTIST",
+      nurse: "AWAITING_TRIAGE",
+      triage: "AWAITING_TRIAGE",
+    };
+
     // Build update payload
     const updateData: any = { lastSharedFromDept: source || "Nurse/Midwife" };
 
-    // If sharing to pharmacy, also update patient status so they appear in pharmacy queue
-    if (targetDept.toLowerCase() === "pharmacy") {
-      updateData.currentStatus = "AWAITING_PHARMACY";
+    // Update patient status based on where they're being sent
+    const mappedStatus = NURSE_DEPT_TO_STATUS[targetDept.toLowerCase()];
+    if (mappedStatus) {
+      updateData.currentStatus = mappedStatus as any;
     }
 
     await prisma.patient.update({

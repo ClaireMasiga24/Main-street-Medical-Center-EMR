@@ -51,8 +51,9 @@ export async function GET() {
 	        lengthOfStay: admittedDays > 0
 	          ? `${admittedDays}d ${admittedHours}h`
 	          : `${admittedHours}h`,
-	        diagnosis: latestVisit?.diagnosis || "",
-	        assessment: latestVisit?.assessment || "",
+        diagnosis: latestVisit?.diagnosis || "",
+        historyOfPresentIllness: latestVisit?.historyOfPresentIllness || "",
+        assessment: latestVisit?.assessment || "",
 	        treatmentPlan: latestVisit?.treatmentPlan || "",
 	        chiefComplaint: latestTriage?.chiefComplaint || latestVisit?.symptoms || "",
 	        admittingDoctor: latestVisit?.notes || "",

@@ -70,10 +70,12 @@ export default function StaffMessaging({
   currentUserName,
   currentUserDept,
   sidebar = false,
+  showTitle = true,
 }: {
   currentUserName?: string;
   currentUserDept?: string;
   sidebar?: boolean;
+  showTitle?: boolean;
 }) {
   const [messages, setMessages] = useState<StaffMsg[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -196,7 +198,7 @@ export default function StaffMessaging({
         }`}
       >
         <MessageSquareText size={sidebar ? 14 : 15} />
-        <span className="text-xs">Messages</span>
+        {showTitle && <span className="text-xs">Messages</span>}
         {unreadCount > 0 && (
           <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
             {unreadCount > 9 ? "9+" : unreadCount}

@@ -189,6 +189,32 @@ export async function PATCH(request: Request) {
 		      }).catch((e: any) => console.error("[Imaging] routeToDoctor timeline error", e));
 		    }
 
+		    // Route patient back to reception (awaiting cashier/billing)
+		    if (updates.routeToReception && updated.patientId) {
+		      const dept = updated.studyType?.toUpperCase().includes("ULTRASOUND") ? "Sonography" : "Radiology";
+		      await prisma.patient.update({
+		        where: { id: updated.patientId },
+		        data: { currentStatus: "AWAITING_CASHIER", lastSharedFromDept: dept },
+		      });
+		      await createNotification({
+		        department: "Reception",
+		        title: `${dept} Report Ready — Patient Routed to Reception`,
+		        message: updates.notifyMessage || `Imaging report finalized. Patient routed to Reception for billing.`,
+		        type: "RESULT_READY",
+		        patientId: updated.patientId,
+		      }).catch((e: any) => console.error("[Imaging] routeToReception notify error", e));
+		      await prisma.patientTimeline.create({
+		        data: {
+		          patientId: updated.patientId,
+		          action: "TRANSFER",
+		          fromDepartment: dept,
+		          toDepartment: "Reception",
+		          description: `${dept} report completed. Patient routed to Reception for billing.`,
+		          performedBy: updates.reportedById ? "Imaging Staff" : "System",
+		        },
+		      }).catch((e: any) => console.error("[Imaging] routeToReception timeline error", e));
+		    }
+
 	    return NextResponse.json(updated);
   } catch (err: any) {
     console.error("[Imaging PATCH]", err);

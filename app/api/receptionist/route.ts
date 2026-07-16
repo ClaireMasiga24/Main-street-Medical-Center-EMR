@@ -11,13 +11,180 @@ async function generatePatientNumber(): Promise<string> {
   return `MSMC-${year}-${random}${suffix}`;
 }
 
-// ─── GET — fetch patients for Tracking Desk OR billing records ────────────
+// ─── GET — fetch patients for Tracking Desk OR billing records OR results ──
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = req.nextUrl;
     const patientId = searchParams.get("patientId");
     const statusFilter = searchParams.get("status");
+    const action = searchParams.get("action");
+
+    // ── Patient clinical results (for Cashier ResultsModal) ──────────────
+    if (action === "patient_results" && patientId) {
+      const pid = parseInt(patientId, 10);
+
+      // -- Vitals (latest triage + nurse action flags) --
+      const triage = await prisma.triage.findFirst({
+        where: { patientId: pid },
+        orderBy: { createdAt: "desc" },
+        select: {
+          temperature: true, bpSystolic: true, bpDiastolic: true,
+          heartRate: true, respiratoryRate: true, spo2: true,
+          weight: true, height: true, painLevel: true, painLocation: true,
+          allergies: true, triageOutcome: true, createdAt: true,
+        },
+      });
+
+      // -- Lab tests (completed or with results) --
+      const labResults = await prisma.labRequest.findMany({
+        where: { patientId: pid, results: { not: null } },
+        orderBy: { resultEnteredAt: "desc" },
+        select: {
+          id: true, testName: true, testPanel: true, results: true,
+          isCritical: true, criticalNote: true, enteredByName: true,
+          resultEnteredAt: true, validatedByName: true, validatedAt: true,
+          analyzerResults: true, analyzerType: true, analyzerModel: true,
+          specimenType: true, specimenId: true, attachments: true,
+          clinicalNotes: true, status: true, createdAt: true,
+        },
+      });
+
+      // -- Imaging (radiology & sonography with findings) --
+      const imagingResults = await prisma.imagingRequest.findMany({
+        where: { patientId: pid, findings: { not: null } },
+        orderBy: { reportedAt: "desc" },
+        select: {
+          id: true, studyType: true, findings: true, impression: true,
+          conclusion: true, clinicalNotes: true, clinicalHistory: true,
+          radiologistNotes: true, reportedAt: true, reportedById: true,
+          isCritical: true, criticalNote: true, createdAt: true,
+        },
+      });
+
+      // -- Diagnosis (latest visit) --
+      const latestVisit = await prisma.visit.findFirst({
+        where: { patientId: pid },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true, symptoms: true, diagnosis: true, assessment: true,
+          differentialDiagnosis: true, treatmentPlan: true, notes: true,
+          doctorName: true, createdAt: true,
+        },
+      });
+
+      // -- Doctor review (PatientReview) --
+      const latestReview = await prisma.patientReview.findFirst({
+        where: { patientId: pid },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true, diagnosis: true, treatmentPlan: true,
+          examinationFindings: true, followUpNotes: true,
+          doctorName: true, createdAt: true,
+        },
+      });
+
+      // -- Prescriptions --
+      const prescriptions = await prisma.prescription.findMany({
+        where: { patientId: pid },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true, medication: true, dosage: true, instructions: true,
+          status: true, createdAt: true,
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        patientId: pid,
+        vitals: triage ?? null,
+        labTests: labResults,
+        imaging: imagingResults,
+        diagnosis: latestVisit ?? null,
+        doctorReview: latestReview ?? null,
+        prescriptions,
+      });
+    }
+
+    // ── Billed patient history (for Receipts tab) ───────────────────────────
+    if (searchParams.get("billed") === "true") {
+      const search = searchParams.get("search")?.trim() || "";
+
+      const where: any = {
+        currentStatus: "DISCHARGED",
+        Billing: { some: { status: "PAID" } },
+      };
+
+      if (search) {
+        where.OR = [
+          { firstName: { contains: search, mode: "insensitive" } },
+          { lastName: { contains: search, mode: "insensitive" } },
+          { patientNumber: { contains: search } },
+        ];
+      }
+
+      const patients = await prisma.patient.findMany({
+        where,
+        include: {
+          Billing: {
+            where: { status: "PAID" },
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 200,
+      });
+
+      const result = patients.map((p) => {
+        let lines: any[] = [];
+        let paymentMethod = "CASH";
+        let paymentRef = "";
+        let insuranceProv = "";
+        let insurancePolicy = "";
+        try {
+          const desc = JSON.parse(p.Billing[0].description || "{}");
+          lines = desc.lines || [];
+          const payments = desc.payments || [];
+          if (payments.length > 0) {
+            paymentMethod = payments[0].paymentMethod || "CASH";
+            paymentRef = payments[0].reference || "";
+            insuranceProv = payments[0].insuranceProvider || "";
+            insurancePolicy = payments[0].insurancePolicyNumber || "";
+          } else if (desc.paymentMethod) {
+            // Old format — flat fields before payments[] migration
+            paymentMethod = desc.paymentMethod || "CASH";
+            paymentRef = desc.reference || "";
+            insuranceProv = desc.insuranceProvider || "";
+            insurancePolicy = desc.insurancePolicyNumber || "";
+          }
+        } catch {}
+        return {
+          id: p.id,
+          patientNumber: p.patientNumber,
+          firstName: p.firstName,
+          lastName: p.lastName,
+          age: p.age,
+          ageUnit: p.ageUnit,
+          gender: p.gender,
+          billing: {
+            id: p.Billing[0].id,
+            invoiceNumber: p.Billing[0].invoiceNumber,
+            amount: p.Billing[0].amount,
+            amountPaid: p.Billing[0].amountPaid,
+            balanceDue: p.Billing[0].balanceDue,
+            createdAt: p.Billing[0].createdAt,
+            lines,
+            paymentMethod,
+            paymentRef,
+            insuranceProvider: insuranceProv,
+            insurancePolicyNumber: insurancePolicy,
+          },
+        };
+      });
+
+      return NextResponse.json(result);
+    }
 
     // ── Billing queries ──────────────────────────────────────────────────
     if (patientId || statusFilter) {
@@ -87,6 +254,7 @@ export async function GET(req: NextRequest) {
       firstName: p.firstName,
       lastName: p.lastName,
       age: p.age,
+      ageUnit: p.ageUnit,
       dob: p.dateOfBirth ? p.dateOfBirth.toISOString() : null,
       gender: p.gender,
       phone: p.phoneNumber ?? null,
@@ -121,6 +289,7 @@ export async function POST(req: Request) {
           firstName,
           lastName,
           age,
+          ageUnit,
           gender,
           phone,        // may be null for emergency
           address,      // may be null for emergency
@@ -145,6 +314,7 @@ export async function POST(req: Request) {
             firstName,
             lastName,
             age: parseInt(age, 10),
+            ageUnit: ageUnit || "years",
             gender,                          // "MALE" | "FEMALE" | "OTHER"
             phoneNumber: phone ?? null,
             address: address ?? null,
@@ -224,19 +394,35 @@ export async function POST(req: Request) {
             if (!staffId) {
               console.error("[RECEPTIONIST_ROUTE] No staff record exists at all — cannot create LabRequest");
             } else {
-              const labRequest = await prisma.labRequest.create({
-                data: {
+              // Guard: if the CREATE_LAB_ORDER action was already called for this
+              // patient (specific test rows exist with referralSource "RECEPTION"),
+              // skip creating the generic "Pending Lab Workup" to avoid duplicates.
+              const existingOrders = await prisma.labRequest.findMany({
+                where: {
                   patientId,
-                  visitId: patientRecord?.Visit[0]?.id ?? null,
-                  requestedById: staffId,
-                  testName: "Pending Lab Workup",
-                  priority: patientRecord?.isEmergency ? "STAT" : "ROUTINE",
                   referralSource: "RECEPTION",
-                  clinicalNotes: patientRecord?.Visit[0]?.symptoms ?? null,
                   status: "PENDING",
                 },
+                take: 1,
               });
-              console.log("[RECEPTIONIST_ROUTE] LabRequest created successfully, id:", labRequest.id);
+
+              if (existingOrders.length > 0) {
+                console.log("[RECEPTIONIST_ROUTE] Specific lab orders already exist for patient", patientId, "- skipping generic LabRequest");
+              } else {
+                const labRequest = await prisma.labRequest.create({
+                  data: {
+                    patientId,
+                    visitId: patientRecord?.Visit[0]?.id ?? null,
+                    requestedById: staffId,
+                    testName: "Pending Lab Workup",
+                    priority: patientRecord?.isEmergency ? "STAT" : "ROUTINE",
+                    referralSource: "RECEPTION",
+                    clinicalNotes: patientRecord?.Visit[0]?.symptoms ?? null,
+                    status: "PENDING",
+                  },
+                });
+                console.log("[RECEPTIONIST_ROUTE] LabRequest created successfully, id:", labRequest.id);
+              }
             }
           }
         }
@@ -309,7 +495,14 @@ export async function POST(req: Request) {
           data: { invoiceNumber },
         });
 
-        // Note: billing does NOT change Patient.status — discharge is a separate explicit action.
+        // Auto-discharge patient when fully paid
+        if (!isPartial) {
+          await prisma.patient.update({
+            where: { id: patientId },
+            data: { currentStatus: "DISCHARGED" },
+          });
+        }
+
         return NextResponse.json({ ...billing, invoiceNumber, isPartial });
       }
 
@@ -317,6 +510,59 @@ export async function POST(req: Request) {
       case "CREATE_VISIT": {
         const visit = await prisma.visit.create({ data: payload });
         return NextResponse.json(visit);
+      }
+
+      // ── Create a specific lab order from the receptionist test picker ─────
+      case "CREATE_LAB_ORDER": {
+        const { patientId, tests, requestedById } = payload;
+
+        if (!patientId || !tests || tests.length === 0) {
+          return NextResponse.json(
+            { error: "patientId and tests[] are required" },
+            { status: 400 }
+          );
+        }
+
+        // Resolve staff ID — check payload first, fallback to earliest staff record
+        let staffId = requestedById;
+        if (!staffId) {
+          const fallbackStaff = await prisma.staff.findFirst({ orderBy: { id: "asc" } });
+          staffId = fallbackStaff?.id;
+        }
+        if (!staffId) {
+          return NextResponse.json(
+            { error: "No staff record found — cannot create lab request. Add staff members first." },
+            { status: 500 }
+          );
+        }
+
+        // Get the patient's latest visit (created at registration)
+        const patientRecord = await prisma.patient.findUnique({
+          where: { id: patientId },
+          include: { Visit: { orderBy: { createdAt: "desc" }, take: 1 } },
+        });
+
+        // Create one LabRequest row per selected test
+        const created = [];
+        for (const test of tests) {
+          const lab = await prisma.labRequest.create({
+            data: {
+              patientId,
+              visitId: patientRecord?.Visit[0]?.id ?? null,
+              requestedById: staffId,
+              testCode: test.code,
+              testName: test.name,
+              orderedBy: "RECEPTION",
+              status: "PENDING",
+              referralSource: "RECEPTION",
+              priority: patientRecord?.isEmergency ? "STAT" : "ROUTINE",
+              clinicalNotes: patientRecord?.Visit[0]?.symptoms ?? null,
+            },
+          });
+          created.push(lab);
+        }
+
+        return NextResponse.json(created, { status: 201 });
       }
 
       // ── Lab ─────────────────────────────────────────────────────────────────
@@ -455,7 +701,14 @@ export async function POST(req: Request) {
           },
         });
 
-        // Note: ADD_PAYMENT does NOT change Patient.status — discharge is a separate explicit action.
+        // Auto-discharge patient when fully paid after follow-up payment
+        if (isNowPaid) {
+          await prisma.patient.update({
+            where: { id: existing.patientId },
+            data: { currentStatus: "DISCHARGED" },
+          });
+        }
+
         return NextResponse.json({
           ...updated,
           invoiceNumber: existing.invoiceNumber,
