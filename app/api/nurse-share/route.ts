@@ -71,9 +71,41 @@ export async function POST(request: Request) {
       updateData.currentStatus = mappedStatus as any;
     }
 
-    await prisma.patient.update({
-      where: { id: pid },
-      data: updateData,
+    await prisma.$transaction(async (tx: any) => {
+      await tx.patient.update({
+        where: { id: pid },
+        data: updateData,
+      });
+
+      // If routing to lab, also create a LabRequest so the lab can see this patient
+      // (otherwise they'd show as "Awaiting Lab" on tracking desk but never appear
+      // in the laboratory view).
+      if (mappedStatus === "AWAITING_LAB") {
+        // Check if any PENDING LabRequest already exists for this patient
+        // (prevents "Pending Lab Workup" duplicates across departments).
+        const existingOrders = await tx.labRequest.findMany({
+          where: {
+            patientId: pid,
+            status: "PENDING",
+          },
+          take: 1,
+        });
+        if (existingOrders.length === 0) {
+          const fallbackStaff = await tx.staff.findFirst({ orderBy: { id: "asc" } });
+          if (fallbackStaff?.id) {
+            await tx.labRequest.create({
+              data: {
+                patientId: pid,
+                requestedById: fallbackStaff.id,
+                testName: "Pending Lab Workup",
+                priority: "ROUTINE",
+                referralSource: "NURSE",
+                status: "PENDING",
+              },
+            });
+          }
+        }
+      }
     });
 
     return NextResponse.json({ success: true, message: `Patient shared with ${targetDepartment}` });

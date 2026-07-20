@@ -152,18 +152,7 @@ export async function PATCH(request: Request) {
         });
       }
 
-      // 5. Check remaining PENDING prescriptions
-      const remainingPending = await tx.prescription.count({
-        where: { patientId: prescription.patientId, status: "PENDING" },
-      });
-
-      if (remainingPending === 0) {
-        await tx.patient.update({
-          where: { id: prescription.patientId },
-          data: { currentStatus: "ADMITTED" },
-        });
-      }
-    });
+	    });
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

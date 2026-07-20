@@ -17,6 +17,7 @@ import { FULL_SERVICE_CATALOG, CatalogItemWithCategory } from "./servicePriceCat
 import { LAB_TEST_CATALOG, type LabTestCatalogItem } from "../lib/labTestCatalog";
 import { LabOrderModal } from "../components/LabOrderModal";
 import ResultsModal from "../components/ResultsModal";
+import PatientFileModal from "../components/PatientFileModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -177,8 +178,9 @@ const ROUTE_OPTIONS: RouteOption[] = [
   IN_CONSULTATION:     { label: "In Consultation",      color: "text-rose-700 bg-rose-50 border-rose-200" },
   AWAITING_PHARMACY:   { label: "Awaiting Pharmacy",    color: "text-teal-700 bg-teal-50 border-teal-200" },
   AWAITING_CASHIER:    { label: "Awaiting Cashier",     color: "text-orange-700 bg-orange-50 border-orange-200" },
-  DISCHARGED:          { label: "Discharged",           color: "text-slate-500 bg-slate-50 border-slate-200" },
-};
+	  DISCHARGED:          { label: "Discharged",           color: "text-slate-500 bg-slate-50 border-slate-200" },
+	  LAB_REJECTED:        { label: "Rejected by Lab",      color: "text-red-700 bg-red-50 border-red-200" },
+	};
 
 const formatUGX = (n: number) =>
   "UGX " + Math.round(n).toLocaleString("en-UG");
@@ -2574,7 +2576,6 @@ function CashierPOS({ patients, directBillPatient, onBillingComplete }: { patien
 export default function ReceptionistPage() {
   const router = useRouter();
   const [searchTerm, setSearchTerm] = useState("");
-  const [recordsSearch, setRecordsSearch] = useState("");
   const [activeTab, setActiveTab] = useState<"search" | "register" | "cashier" | "attendance" | "schedule" | "receipts">("search");
   const [registrationMode, setRegistrationMode] = useState<"normal" | "emergency">("normal");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -2586,6 +2587,13 @@ export default function ReceptionistPage() {
   const [isOrdering, setIsOrdering] = useState(false);
   const [billPatient, setBillPatient] = useState<Patient | null>(null);
   const [directBillKey, setDirectBillKey] = useState(0);
+
+  // ── Universal patient search (for Patient File panel) ─────────────────────
+  const [universalSearchQuery, setUniversalSearchQuery] = useState("");
+  const [universalSearchResults, setUniversalSearchResults] = useState<Patient[]>([]);
+  const [universalSearchLoading, setUniversalSearchLoading] = useState(false);
+  const [patientFilePatient, setPatientFilePatient] = useState<Patient | null>(null);
+  const [patientFileOpen, setPatientFileOpen] = useState(false);
 
   const [staffId, setStaffId] = useState<string | null>(null);
 
@@ -2603,6 +2611,32 @@ export default function ReceptionistPage() {
       console.error("Registry sync failure:", err);
     }
   };
+
+  // ── Universal patient search (across all patients including discharged) ──
+  const fetchUniversalSearch = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setUniversalSearchResults([]);
+      setUniversalSearchLoading(false);
+      return;
+    }
+    setUniversalSearchLoading(true);
+    try {
+      const res = await fetch(`/api/receptionist?scope=all&search=${encodeURIComponent(query.trim())}`);
+      if (res.ok) setUniversalSearchResults(await res.json());
+    } catch {
+      setUniversalSearchResults([]);
+    } finally {
+      setUniversalSearchLoading(false);
+    }
+  }, []);
+
+  // ── Debounced universal search ──────────────────────────────────────────
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchUniversalSearch(universalSearchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [universalSearchQuery, fetchUniversalSearch]);
 
   useEffect(() => {
     fetchActiveRegistry();
@@ -2629,7 +2663,7 @@ export default function ReceptionistPage() {
     { id: "gender", label: "Gender", type: "select", required: true, options: ["MALE", "FEMALE", "OTHER"], placeholder: "" },
     { id: "phone", label: "Phone Number", type: "tel", required: true, placeholder: "e.g., 0770000000" },
     { id: "address", label: "Residential Address", type: "textarea", required: true, colSpan: "md:col-span-2", placeholder: "Village, District details..." },
-    { id: "chiefComplaint", label: "Chief Complaint", type: "textarea", required: true, colSpan: "md:col-span-2", placeholder: "Reason for visit..." },
+	    { id: "chiefComplaint", label: "Chief Complaint (optional)", type: "textarea", required: false, colSpan: "md:col-span-2", placeholder: "Reason for visit..." },
   ];
 
   const emergencyFields = [
@@ -2784,14 +2818,6 @@ export default function ReceptionistPage() {
     p.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.patientNumber.toLowerCase().includes(searchTerm.toLowerCase())
   );
-
-  const recordsFilteredPatients = recordsSearch.trim()
-    ? patients.filter((p) =>
-        p.firstName.toLowerCase().includes(recordsSearch.toLowerCase()) ||
-        p.lastName.toLowerCase().includes(recordsSearch.toLowerCase()) ||
-        p.patientNumber.toLowerCase().includes(recordsSearch.toLowerCase())
-      )
-    : patients;
 
   const statusBadge = (status: string) => {
     const s = STATUS_LABELS[status] ?? { label: status.replace(/_/g, " "), color: "text-slate-500 bg-slate-50 border-slate-200" };
@@ -3094,71 +3120,96 @@ export default function ReceptionistPage() {
 
               </div>
 
-              {/* ── PATIENT RECORDS ──────────────────────────────────────────── */}
+              {/* ── PATIENT FILE & SEARCH (universal) ────────────────────────────── */}
               <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                 <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <FileText size={15} className="text-[#00703C]" />
                     <span className="text-xs font-extrabold uppercase tracking-widest text-slate-500">
-                      Patient Records
+                      Patient File &amp; Search
                     </span>
                   </div>
-                  {selectedPatient && (
-                    <button onClick={() => setSelectedPatient(null)}
-                      className="text-slate-400 hover:text-rose-500 transition flex-shrink-0 ml-2"
-                      title="Deselect patient">
-                      <X size={15} />
-                    </button>
-                  )}
                   <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-                    {patients.length} total
+                    {universalSearchResults.length > 0 ? `${universalSearchResults.length} found` : "Search all..."}
                   </span>
                 </div>
                 <div className="px-4 py-2.5 border-b border-slate-50">
                   <div className="relative">
                     <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input type="text" value={recordsSearch} onChange={(e) => setRecordsSearch(e.target.value)}
-                      placeholder="Search all patient records..."
+                    <input type="text" value={universalSearchQuery} onChange={(e) => setUniversalSearchQuery(e.target.value)}
+                      placeholder="Search ALL patients (incl. discharged) by name or ID..."
                       className="w-full rounded-lg border border-slate-200 bg-slate-50 pl-8 pr-3 py-2 text-[11px] font-medium outline-none focus:border-[#00703C] focus:bg-white transition" />
+                    {universalSearchQuery && (
+                      <button onClick={() => { setUniversalSearchQuery(""); setUniversalSearchResults([]); }}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-rose-500">
+                        <X size={13} />
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="max-h-72 overflow-y-auto divide-y divide-slate-50">
-                  {recordsFilteredPatients.length === 0 ? (
+                  {universalSearchLoading ? (
+                    <div className="flex items-center justify-center py-8 text-slate-300">
+                      <Loader2 size={18} className="animate-spin mr-2" />
+                      <span className="text-[10px] font-medium">Searching...</span>
+                    </div>
+                  ) : !universalSearchQuery.trim() ? (
                     <div className="flex flex-col items-center justify-center py-8 text-slate-300">
                       <FileText size={28} />
-                      <p className="mt-2 text-[10px] font-bold uppercase tracking-wide">
-                        {recordsSearch.trim() ? "No matching records" : "No records found"}
-                      </p>
+                      <p className="mt-2 text-[10px] font-bold uppercase tracking-wide">Search all patient records</p>
+                      <p className="text-[9px] text-slate-400 mt-0.5">Type name or ID above to find any patient in the system</p>
+                    </div>
+                  ) : universalSearchResults.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-slate-300">
+                      <Search size={28} />
+                      <p className="mt-2 text-[10px] font-bold uppercase tracking-wide">No matching records</p>
+                      <p className="text-[9px] text-slate-400 mt-0.5">Try a different search term</p>
                     </div>
                   ) : (
-                    recordsFilteredPatients.map((patient) => (
-                      <div
-                        key={patient.id}
-                        onClick={() => {
-                          setSelectedPatient(patient);
-                        }}
-                        className={`flex items-center justify-between px-4 py-2.5 transition-all cursor-pointer hover:bg-slate-50/80 ${
-                          selectedPatient?.id === patient.id ? "bg-emerald-50/40 border-l-4 border-[#00703C]" : ""
-                        }`}
+                    universalSearchResults.map((patient) => (
+                      <div key={patient.id}
+                        className="flex items-center justify-between px-4 py-2.5 transition-all hover:bg-slate-50/80"
                       >
-                        <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
                           <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-[9px] font-bold text-slate-600 flex-shrink-0">
                             {patient.firstName[0]}{patient.lastName[0]}
                           </div>
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <div className="text-[11px] font-semibold text-slate-800 truncate leading-tight">
                               {patient.lastName}, {patient.firstName}
                             </div>
-                            <div className="text-[9px] text-slate-400 font-mono truncate">
-                              {patient.patientNumber} · {formatAge(patient.age, patient.ageUnit)} {patient.gender}
+                            <div className="flex items-center gap-1.5 text-[9px] text-slate-400 font-mono truncate flex-wrap">
+                              <span>{patient.patientNumber}</span>
+                              <span>·</span>
+                              <span>{formatAge(patient.age, patient.ageUnit)} {patient.gender}</span>
+                              <span className={`inline-flex items-center rounded-full border px-1.5 py-0 text-[8px] font-extrabold uppercase tracking-wider ${
+                                patient.status === "DISCHARGED"
+                                  ? "text-slate-500 bg-slate-50 border-slate-200"
+                                  : "text-emerald-700 bg-emerald-50 border-emerald-200"
+                              }`}>
+                                {patient.status === "DISCHARGED" ? "Discharged" : "Active"}
+                              </span>
                             </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
-                          {patient.isEmergency && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                          )}
-                          <ArrowRight size={12} className="text-slate-300" />
+                          <button
+                            onClick={() => { setPatientFilePatient(patient); setPatientFileOpen(true); }}
+                            className="text-[9px] font-extrabold uppercase tracking-wider text-blue-600 bg-blue-50 border border-blue-100 hover:bg-blue-100 px-2 py-1 rounded-lg transition-colors"
+                          >
+                            <FileText size={10} className="inline mr-0.5" /> View File
+                          </button>
+                          <button
+                            onClick={() => { setSelectedPatient(patient); }}
+                            className={`text-[9px] font-extrabold uppercase tracking-wider px-2 py-1 rounded-lg transition-colors ${
+                              patient.status === "DISCHARGED"
+                                ? "text-amber-600 bg-amber-50 border border-amber-100 hover:bg-amber-100"
+                                : "text-emerald-700 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100"
+                            }`}
+                          >
+                            <UserRound size={10} className="inline mr-0.5" />
+                            {patient.status === "DISCHARGED" ? "Re-admit" : "Select"}
+                          </button>
                         </div>
                       </div>
                     ))
@@ -3167,7 +3218,16 @@ export default function ReceptionistPage() {
               </div>
             </div>
           </div>
-        )}
+          )}
+
+          {/* ── PATIENT FILE MODAL ────────────────────────────────────────────── */}
+          {patientFileOpen && patientFilePatient && (
+            <PatientFileModal
+              patient={patientFilePatient}
+              onClose={() => { setPatientFileOpen(false); setPatientFilePatient(null); }}
+              onRoutePatient={(p) => { setSelectedPatient(p); setPatientFileOpen(false); }}
+            />
+          )}
 
         {/* ── REGISTER TAB ──────────────────────────────────────────────────── */}
         {activeTab === "register" && (

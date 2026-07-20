@@ -180,6 +180,39 @@ export async function POST(req: NextRequest) {
         },
       });
 
+      // If routing to LAB, create a LabRequest so the lab can see this patient
+      // (otherwise they'd show as "Awaiting Lab" on tracking desk but never appear
+      // in the laboratory view).
+      if (routeTo === "LAB") {
+        // Resolve the staff ID — use the one from request body, or fallback
+        let dentistStaffId = staffId;
+        if (!dentistStaffId) {
+          const fallbackStaff = await tx.staff.findFirst({ orderBy: { id: "asc" } });
+          dentistStaffId = fallbackStaff?.id;
+        }
+        if (dentistStaffId) {
+          // Check if any PENDING LabRequest already exists for this patient
+          // (prevents "Pending Lab Workup" duplicates across departments).
+          const existingOrders = await tx.labRequest.findMany({
+            where: { patientId, status: "PENDING" },
+            take: 1,
+          });
+          if (existingOrders.length === 0) {
+            await tx.labRequest.create({
+              data: {
+                patientId,
+                visitId: visit.id,
+                requestedById: dentistStaffId,
+                testName: "Pending Lab Workup",
+                priority: "ROUTINE",
+                referralSource: "DENTIST",
+                status: "PENDING",
+              },
+            });
+          }
+        }
+      }
+
       // Create timeline entry
       await tx.patientTimeline.create({
         data: {

@@ -106,6 +106,48 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // ── Universal patient search (includes discharged) ───────────────────────
+    if (searchParams.get("scope") === "all") {
+      const search = searchParams.get("search")?.trim() || "";
+      if (!search) return NextResponse.json([]);
+
+      const where: any = {
+        OR: [
+          { firstName: { contains: search, mode: "insensitive" } },
+          { lastName: { contains: search, mode: "insensitive" } },
+          { patientNumber: { contains: search } },
+        ],
+      };
+
+      const patients = await prisma.patient.findMany({
+        where,
+        include: {
+          Visit: { orderBy: { createdAt: "desc" }, take: 1 },
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 200,
+      });
+
+      const shaped = patients.map((p) => ({
+        id: p.id,
+        patientNumber: p.patientNumber,
+        firstName: p.firstName,
+        lastName: p.lastName,
+        age: p.age,
+        ageUnit: p.ageUnit,
+        dob: p.dateOfBirth ? p.dateOfBirth.toISOString() : null,
+        gender: p.gender,
+        phone: p.phoneNumber ?? null,
+        address: p.address ?? null,
+        chiefComplaint: p.Visit[0]?.symptoms ?? "Not recorded",
+        isEmergency: p.isEmergency,
+        status: p.currentStatus,
+        createdAt: p.createdAt.toISOString(),
+      }));
+
+      return NextResponse.json(shaped);
+    }
+
     // ── Billed patient history (for Receipts tab) ───────────────────────────
     if (searchParams.get("billed") === "true") {
       const search = searchParams.get("search")?.trim() || "";
@@ -235,7 +277,7 @@ export async function GET(req: NextRequest) {
     const patients = await prisma.patient.findMany({
       where: {
         currentStatus: {
-          not: "DISCHARGED",
+          notIn: ["DISCHARGED", "LAB_REJECTED"],
         },
       },
       include: {
@@ -297,13 +339,13 @@ export async function POST(req: Request) {
           isEmergency,
         } = payload;
 
-        // Validate required fields
-        if (!firstName || !lastName || !age || !gender || !chiefComplaint) {
-          return NextResponse.json(
-            { error: "Missing required fields: firstName, lastName, age, gender, chiefComplaint" },
-            { status: 400 }
-          );
-        }
+	        // Validate required fields (chiefComplaint is optional for normal registration)
+	        if (!firstName || !lastName || !age || !gender) {
+	          return NextResponse.json(
+	            { error: "Missing required fields: firstName, lastName, age, gender" },
+	            { status: 400 }
+	          );
+	        }
 
         const patientNumber = await generatePatientNumber();
 
@@ -345,89 +387,119 @@ export async function POST(req: Request) {
           );
         }
 
-        const updated = await prisma.patient.update({
-          where: { id: patientId },
-          data: { currentStatus: nextStatus },
-        });
-
-        // If routing to radiology/sonography, create an imaging request automatically
-        if (nextStatus === "AWAITING_RADIOLOGY" || nextStatus === "AWAITING_SONOGRAPHY") {
-          const studyType = nextStatus === "AWAITING_SONOGRAPHY" ? "ULTRASOUND" : "X_RAY";
-          const patientRecord = await prisma.patient.findUnique({
+        // Use a transaction to atomically update status AND create any follow-on
+        // records (imaging request / lab request). This prevents the patient's
+        // currentStatus from being set without the corresponding department row
+        // being created — which would make them invisible in that department's view.
+        const result = await prisma.$transaction(async (tx: any) => {
+          const updated = await tx.patient.update({
             where: { id: patientId },
-            include: { Visit: { orderBy: { createdAt: "desc" }, take: 1 } },
+            data: { currentStatus: nextStatus },
           });
 
-          await prisma.imagingRequest.create({
-            data: {
-              patientId,
-              visitId: patientRecord?.Visit[0]?.id ?? null,
-              studyType,
-              priority: patientRecord?.isEmergency ? "STAT" : "ROUTINE",
-              referralSource: "RECEPTION",
-              clinicalNotes: patientRecord?.Visit[0]?.symptoms ?? null,
-              status: "ORDERED",
-            },
-          });
-        }
+          // If routing to radiology/sonography, create an imaging request automatically
+          if (nextStatus === "AWAITING_RADIOLOGY" || nextStatus === "AWAITING_SONOGRAPHY") {
+            const studyType = nextStatus === "AWAITING_SONOGRAPHY" ? "ULTRASOUND" : "X_RAY";
+            const patientRecord = await tx.patient.findUnique({
+              where: { id: patientId },
+              include: { Visit: { orderBy: { createdAt: "desc" }, take: 1 } },
+            });
 
-        // If routing to lab, create a lab request automatically so the lab tech can see it
-        if (nextStatus === "AWAITING_LAB") {
-          console.log("[RECEPTIONIST_ROUTE] Routing patient to LAB, patientId:", patientId);
+            await tx.imagingRequest.create({
+              data: {
+                patientId,
+                visitId: patientRecord?.Visit[0]?.id ?? null,
+                studyType,
+                priority: patientRecord?.isEmergency ? "STAT" : "ROUTINE",
+                referralSource: "RECEPTION",
+                clinicalNotes: patientRecord?.Visit[0]?.symptoms ?? null,
+                status: "ORDERED",
+              },
+            });
+          }
 
-          const patientRecord = await prisma.patient.findUnique({
-            where: { id: patientId },
-            include: { Visit: { orderBy: { createdAt: "desc" }, take: 1 } },
-          });
+          // If routing to lab, create a lab request automatically so the lab tech can see it
+          if (nextStatus === "AWAITING_LAB") {
+            console.log("[RECEPTIONIST_ROUTE] Routing patient to LAB, patientId:", patientId);
 
-          if (!patientRecord) {
-            console.error("[RECEPTIONIST_ROUTE] Patient not found for id:", patientId);
-          } else {
-            // Resolve a staff ID — check payload first, fallback to earliest staff record
-            let staffId = payload.requestedById;
-            if (!staffId) {
-              const fallbackStaff = await prisma.staff.findFirst({ orderBy: { id: "asc" } });
-              staffId = fallbackStaff?.id;
-              console.log("[RECEPTIONIST_ROUTE] No staffId in payload, fallback found:", staffId);
-            }
+            const patientRecord = await tx.patient.findUnique({
+              where: { id: patientId },
+              include: { Visit: { orderBy: { createdAt: "desc" }, take: 1 } },
+            });
 
-            if (!staffId) {
-              console.error("[RECEPTIONIST_ROUTE] No staff record exists at all — cannot create LabRequest");
+            if (!patientRecord) {
+              console.error("[RECEPTIONIST_ROUTE] Patient not found for id:", patientId);
             } else {
-              // Guard: if the CREATE_LAB_ORDER action was already called for this
-              // patient (specific test rows exist with referralSource "RECEPTION"),
-              // skip creating the generic "Pending Lab Workup" to avoid duplicates.
-              const existingOrders = await prisma.labRequest.findMany({
-                where: {
-                  patientId,
-                  referralSource: "RECEPTION",
-                  status: "PENDING",
-                },
-                take: 1,
-              });
+              // Resolve a staff ID — check payload first, fallback to earliest staff record
+              let staffId = payload.requestedById;
+              if (!staffId) {
+                const fallbackStaff = await tx.staff.findFirst({ orderBy: { id: "asc" } });
+                staffId = fallbackStaff?.id;
+                console.log("[RECEPTIONIST_ROUTE] No staffId in payload, fallback found:", staffId);
+              }
 
-              if (existingOrders.length > 0) {
-                console.log("[RECEPTIONIST_ROUTE] Specific lab orders already exist for patient", patientId, "- skipping generic LabRequest");
+              if (!staffId) {
+                console.error("[RECEPTIONIST_ROUTE] No staff record exists at all — cannot create LabRequest");
               } else {
-                const labRequest = await prisma.labRequest.create({
-                  data: {
+                // Guard: if the CREATE_LAB_ORDER action was already called for this
+                // patient (specific test rows exist with referralSource "RECEPTION"),
+                // skip creating the generic "Pending Lab Workup" to avoid duplicates.
+                const existingOrders = await tx.labRequest.findMany({
+                  where: {
                     patientId,
-                    visitId: patientRecord?.Visit[0]?.id ?? null,
-                    requestedById: staffId,
-                    testName: "Pending Lab Workup",
-                    priority: patientRecord?.isEmergency ? "STAT" : "ROUTINE",
-                    referralSource: "RECEPTION",
-                    clinicalNotes: patientRecord?.Visit[0]?.symptoms ?? null,
                     status: "PENDING",
                   },
+                  take: 1,
                 });
-                console.log("[RECEPTIONIST_ROUTE] LabRequest created successfully, id:", labRequest.id);
+
+                if (existingOrders.length > 0) {
+                  console.log("[RECEPTIONIST_ROUTE] PENDING LabRequest already exists for patient", patientId, "- skipping generic LabRequest");
+                } else {
+                  const labRequest = await tx.labRequest.create({
+                    data: {
+                      patientId,
+                      visitId: patientRecord?.Visit[0]?.id ?? null,
+                      requestedById: staffId,
+                      testName: "Pending Lab Workup",
+                      priority: patientRecord?.isEmergency ? "STAT" : "ROUTINE",
+                      referralSource: "RECEPTION",
+                      clinicalNotes: patientRecord?.Visit[0]?.symptoms ?? null,
+                      status: "PENDING",
+                    },
+                  });
+                  console.log("[RECEPTIONIST_ROUTE] LabRequest created successfully, id:", labRequest.id);
+                }
               }
             }
           }
-        }
 
-        return NextResponse.json(updated);
+          // Log to patient timeline
+          const statusToDept: Record<string, string> = {
+            AWAITING_TRIAGE: "Triage",
+            AWAITING_DOCTOR: "Doctor",
+            AWAITING_DENTIST: "Dentist",
+            AWAITING_SONOGRAPHY: "Sonography",
+            AWAITING_RADIOLOGY: "Radiology",
+            AWAITING_LAB: "Laboratory",
+            AWAITING_PHARMACY: "Pharmacy",
+            AWAITING_CASHIER: "Cashier",
+            IN_CONSULTATION: "Consultation",
+            ADMITTED: "Admission",
+          };
+          await tx.patientTimeline.create({
+            data: {
+              patientId,
+              action: "ROUTED",
+              fromDepartment: "Reception",
+              toDepartment: statusToDept[nextStatus] || nextStatus,
+              description: `Routed from Reception to ${statusToDept[nextStatus] || (nextStatus === "MIDWIFE_ANC" ? "Midwife (ANC)" : nextStatus)}`,
+            },
+          });
+
+          return updated;
+        });
+
+        return NextResponse.json(result);
       }
 
       // ── Cashier: process payment and create a billing record ────────────────
@@ -743,12 +815,54 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const updated = await prisma.patient.update({
-      where: { id },
-      data: { currentStatus: status },
+    const result = await prisma.$transaction(async (tx: any) => {
+      const updated = await tx.patient.update({
+        where: { id },
+        data: { currentStatus: status },
+      });
+
+      // If routing to lab via legacy PATCH, also create a LabRequest so the
+      // patient appears in the laboratory view (preventing orphan AWAITING_LAB).
+      if (status === "AWAITING_LAB") {
+        const patientRecord = await tx.patient.findUnique({
+          where: { id },
+          include: { Visit: { orderBy: { createdAt: "desc" }, take: 1 } },
+        });
+
+        if (patientRecord) {
+          // Check if any RECEPTION PENDING LabRequest already exists (guard)
+          const existingOrders = await tx.labRequest.findMany({
+            where: {
+              patientId: id,
+              status: "PENDING",
+            },
+            take: 1,
+          });
+
+          if (existingOrders.length === 0) {
+            const fallbackStaff = await tx.staff.findFirst({ orderBy: { id: "asc" } });
+            if (fallbackStaff?.id) {
+              await tx.labRequest.create({
+                data: {
+                  patientId: id,
+                  visitId: patientRecord?.Visit[0]?.id ?? null,
+                  requestedById: fallbackStaff.id,
+                  testName: "Pending Lab Workup",
+                  priority: patientRecord?.isEmergency ? "STAT" : "ROUTINE",
+                  referralSource: "RECEPTION",
+                  clinicalNotes: patientRecord?.Visit[0]?.symptoms ?? null,
+                  status: "PENDING",
+                },
+              });
+            }
+          }
+        }
+      }
+
+      return updated;
     });
 
-    return NextResponse.json(updated);
+    return NextResponse.json(result);
   } catch (err: any) {
     return NextResponse.json(
       { error: err.message || "Server error" },

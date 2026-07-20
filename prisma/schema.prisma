@@ -704,6 +704,7 @@ enum PatientStatus {
   AWAITING_DOCTOR
   AWAITING_DENTIST
   ADMITTED
+  LAB_REJECTED
 }
 
 enum AppointmentStatus {

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Bell, XCircle, CheckCircle, MessageSquare, FlaskConical, Send, AlertTriangle, RefreshCw, FileText, ExternalLink, Stethoscope } from "lucide-react";
+import { Bell, XCircle, CheckCircle, MessageSquare, FlaskConical, Send, AlertTriangle, Ban, RefreshCw, FileText, ExternalLink, Stethoscope } from "lucide-react";
 
 interface LabRequestData {
   testName: string;
@@ -44,6 +44,7 @@ const NOTIF_ICONS: Record<string, any> = {
   RESULT_SHARED: Send,
   COMMUNICATION: MessageSquare,
   REPEAT_REQUEST: XCircle,
+  LAB_REJECTED: Ban,
   GENERAL: Bell,
 };
 
@@ -53,6 +54,7 @@ const NOTIF_COLORS: Record<string, string> = {
   RESULT_SHARED: "bg-blue-50 border-blue-200 text-blue-700",
   COMMUNICATION: "bg-purple-50 border-purple-200 text-purple-700",
   REPEAT_REQUEST: "bg-orange-50 border-orange-200 text-orange-700",
+  LAB_REJECTED: "bg-red-50 border-red-200 text-red-700",
   GENERAL: "bg-slate-50 border-slate-200 text-slate-700",
 };
 

@@ -107,6 +107,37 @@ export async function POST(request: Request) {
       });
     }
 
+    // If the outcome is LABORATORY, create a LabRequest automatically so the lab
+    // can see this patient (otherwise they show as "Awaiting Lab" on tracking desk
+    // but never appear in the laboratory view).
+    if (triageOutcome === "LABORATORY") {
+      const fallbackStaff = await prisma.staff.findFirst({ orderBy: { id: "asc" } });
+      if (fallbackStaff?.id) {
+        // Check if any PENDING LabRequest already exists for this patient
+        // (prevents creating duplicate "Pending Lab Workup" if another
+        // department already ordered specific tests).
+        const existingOrders = await prisma.labRequest.findMany({
+          where: { patientId: parseInt(patientId), status: "PENDING" },
+          take: 1,
+        });
+        if (existingOrders.length === 0) {
+          await prisma.labRequest.create({
+            data: {
+              patientId: parseInt(patientId),
+              visitId: visitId ? parseInt(visitId) : null,
+              requestedById: fallbackStaff.id,
+              testName: "Pending Lab Workup",
+              status: "PENDING",
+              referralSource: "TRIAGE",
+              priority: "ROUTINE",
+            },
+          });
+        }
+      } else {
+        console.error("[Triage] No staff record exists — cannot create LabRequest");
+      }
+    }
+
     // If the outcome is RADIOLOGY, create an imaging request automatically
     if (triageOutcome === "RADIOLOGY") {
       const studyTypeValue = studyType || "ULTRASOUND";

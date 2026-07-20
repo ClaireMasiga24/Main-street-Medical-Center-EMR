@@ -137,6 +137,35 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      // If routing to LAB but no specific lab tests were ordered, create a
+      // fallback "Pending Lab Workup" so the patient appears in the lab view.
+      if (effectiveRoute === "LAB" && (!labRequests?.length || !staffId)) {
+        let docStaffId = staffId;
+        if (!docStaffId) {
+          const fallbackStaff = await tx.staff.findFirst({ orderBy: { id: "asc" } });
+          docStaffId = fallbackStaff?.id;
+        }
+        if (docStaffId) {
+          // Guard: check if any PENDING LabRequest already exists for this patient
+          const existingOrders = await tx.labRequest.findMany({
+            where: { patientId, status: "PENDING" },
+            take: 1,
+          });
+          if (existingOrders.length === 0) {
+            await tx.labRequest.create({
+              data: {
+                patientId,
+                visitId: visit.id,
+                requestedById: docStaffId,
+                testName: "Pending Lab Workup",
+                referralSource: "Doctor",
+                status: "PENDING",
+              },
+            });
+          }
+        }
+      }
+
       // Create imaging request if routing to SONOGRAPHY or RADIOLOGY
       if (effectiveRoute === "SONOGRAPHY" || effectiveRoute === "RADIOLOGY") {
         await tx.imagingRequest.create({

@@ -107,7 +107,7 @@ export async function GET(req: Request) {
     const where: Prisma.LabRequestWhereInput = {};
     if (status) where.status = status as any;
 
-    const requests = await prisma.labRequest.findMany({
+    let requests = await prisma.labRequest.findMany({
       take: allParam === "true" ? undefined : 500,
       where,
       include: {
@@ -116,6 +116,49 @@ export async function GET(req: Request) {
       },
       orderBy: [{ isCritical: "desc" }, { createdAt: "desc" }],
     });
+
+    // ── Self-heal orphan AWAITING_LAB patients ───────────────────────────
+    // Safety net: any patient whose currentStatus is AWAITING_LAB but who has
+    // NO LabRequest record will be invisible in the laboratory view. This
+    // auto-creates a "Pending Lab Workup" entry so they appear. Covers edge
+    // cases from triage, dental, nurse-share, or any other path that may have
+    // set the status without creating the corresponding LabRequest.
+    if (!status && !action) {
+      const orphanPatients = await prisma.patient.findMany({
+        where: {
+          currentStatus: "AWAITING_LAB",
+          LabRequest: { none: {} },
+        },
+        select: { id: true },
+        take: 20,
+      });
+      if (orphanPatients.length > 0) {
+        const fallbackStaff = await prisma.staff.findFirst({ orderBy: { id: "asc" } });
+        if (fallbackStaff?.id) {
+          await prisma.labRequest.createMany({
+            data: orphanPatients.map(p => ({
+              patientId: p.id,
+              requestedById: fallbackStaff.id,
+              testName: "Pending Lab Workup",
+              priority: "ROUTINE",
+              referralSource: "SYSTEM_HEAL",
+              status: "PENDING",
+            })),
+            skipDuplicates: true,
+          });
+        }
+        // Re-fetch requests to include the newly created LabRequests
+        requests = await prisma.labRequest.findMany({
+          take: allParam === "true" ? undefined : 500,
+          where,
+          include: {
+            Patient: { select: { id: true, patientNumber: true, firstName: true, lastName: true, age: true, ageUnit: true, gender: true, isEmergency: true } },
+            Staff: { select: { fullName: true, department: true } },
+          },
+          orderBy: [{ isCritical: "desc" }, { createdAt: "desc" }],
+        });
+      }
+    }
 
     const shaped = requests.map((r) => ({
       id: r.id, patientId: r.Patient.id, patientNumber: r.Patient.patientNumber, firstName: r.Patient.firstName,
@@ -228,6 +271,14 @@ export async function POST(req: Request) {
           referenceId: labReq.id,
           referenceType: "lab_request",
           patientId: labReq.Patient.id,
+        });
+
+        // Additionally: update the patient's currentStatus so the receptionist
+        // correctly sees "Rejected by Lab" (or the patient is excluded from the
+        // Live Admissions panel when the status is LAB_REJECTED).
+        await prisma.patient.update({
+          where: { id: labReq.Patient.id },
+          data: { currentStatus: "LAB_REJECTED" },
         });
 
         return NextResponse.json(updated);

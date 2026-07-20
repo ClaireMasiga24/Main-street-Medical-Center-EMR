@@ -1,0 +1,24 @@
+{
+  "version": "5.2",
+  "steps": [
+    {
+      "tag": "AlterEnum",
+      "enum": "PatientStatus",
+      "values": [
+        "REGISTERED",
+        "AWAITING_TRIAGE",
+        "AWAITING_SONOGRAPHY",
+        "AWAITING_RADIOLOGY",
+        "AWAITING_LAB",
+        "IN_CONSULTATION",
+        "AWAITING_PHARMACY",
+        "AWAITING_CASHIER",
+        "DISCHARGED",
+        "AWAITING_DOCTOR",
+        "AWAITING_DENTIST",
+        "ADMITTED",
+        "LAB_REJECTED"
+      ]
+    }
+  ]
+}
