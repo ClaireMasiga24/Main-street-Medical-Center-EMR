@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
 import { PatientStatus, Prisma } from "@prisma/client";
 import { createNotification } from "../../lib/notifications";
+import {
+  ROUTE_TO_ENCOUNTER,
+  routeEncounterToDept,
+  closeEncounter,
+} from "../../lib/encounterUtils";
 
 const ROUTE_TO_STATUS: Record<string, PatientStatus> = {
   LAB:         "AWAITING_LAB",
@@ -15,10 +20,10 @@ const ROUTE_TO_STATUS: Record<string, PatientStatus> = {
   DENTIST:     "AWAITING_DENTIST",
   TREATMENT:   "ADMITTED",
   SEND_ORDERS: "IN_CONSULTATION",
+  SHARE:       "IN_CONSULTATION", // share doesn't change status
 };
 
 // GET — fetch patients waiting for the doctor or already in consultation
-// Optimized for performance: only loads the latest visit (without heavy nested relations)
 export async function GET() {
   try {
     const patients = await prisma.patient.findMany({
@@ -30,7 +35,7 @@ export async function GET() {
       include: {
         Visit: {
           orderBy: { createdAt: "desc" },
-          take: 1, // only the most recent visit is needed for the queue list
+          take: 1,
         },
       },
     });
@@ -41,17 +46,36 @@ export async function GET() {
   }
 }
 
-// POST — complete consultation: save Visit, Prescriptions, LabRequests, timeline, update status
+// POST — complete consultation
 export async function POST(req: NextRequest) {
   try {
     const {
-      patientId, staffId, staffName,
-      symptoms, historyOfPresentIllness, pastMedicalHistory,
+      patientId,
+      encounterId, // new: optional encounter ID
+      staffId,
+      staffName,
+      symptoms,
+      historyOfPresentIllness,
+      pastMedicalHistory,
       reviewOfOtherSystems,
-      physicalExamination, diagnosis, differentialDiagnosis,
-      assessment, treatmentPlan, notes, doctorSignature,
-      prescriptions, labRequests, routeTo, action,
-      procedureName, procedureNotes, treatmentFollowUp, performedBy,
+      physicalExamination,
+      diagnosis,
+      differentialDiagnosis,
+      assessment,
+      treatmentPlan,
+      notes,
+      doctorSignature,
+      prescriptions,
+      labRequests,
+      imagingOrders,
+      routeTo,
+      action,
+      procedureName,
+      procedureNotes,
+      treatmentFollowUp,
+      performedBy,
+      // Share-specific fields
+      shareTargets,
     } = await req.json();
 
     // ── SAVE_PROCEDURE action ──
@@ -78,9 +102,6 @@ export async function POST(req: NextRequest) {
     const performerName = staffName || "Doctor";
 
     // ── Admitted patient routing ──
-    // If a patient is ADMITTED, sending them to any department (Lab, Radiology,
-    // Treatment, Pharmacy, etc.) should NOT change their status away from ADMITTED.
-    // Only DISCHARGE removes them from the doctor's Admitted Patients list.
     let effectiveRoute = routeTo;
     const patient = await prisma.patient.findUnique({
       where: { id: patientId },
@@ -88,7 +109,6 @@ export async function POST(req: NextRequest) {
     });
 
     if (patient?.currentStatus === "ADMITTED" && routeTo !== "DISCHARGE") {
-      // Redirect NURSE → TREATMENT for admitted patients
       if (routeTo === "NURSE") effectiveRoute = "TREATMENT";
     }
 
@@ -112,14 +132,58 @@ export async function POST(req: NextRequest) {
         },
       });
 
+      // ── Upsert ClinicalNote if encounterId is provided ──
+      if (encounterId && staffId && staffName) {
+        await tx.clinicalNote.upsert({
+          where: {
+            encounterId_authorStaffId: {
+              encounterId,
+              authorStaffId: staffId,
+            },
+          },
+          create: {
+            encounterId,
+            authorStaffId: staffId,
+            authorName: staffName,
+            historyOfPresentIllness: historyOfPresentIllness || null,
+            reviewOfOtherSystems: reviewOfOtherSystems || null,
+            pastMedicalHistory: pastMedicalHistory || null,
+            physicalExamination: physicalExamination || null,
+            diagnosis: diagnosis || null,
+            differentialDiagnosis: differentialDiagnosis || null,
+            assessment: assessment || null,
+            treatmentPlan: treatmentPlan || null,
+            notes: notes || null,
+            signature: doctorSignature || null,
+          },
+          update: {
+            historyOfPresentIllness: historyOfPresentIllness || null,
+            reviewOfOtherSystems: reviewOfOtherSystems || null,
+            pastMedicalHistory: pastMedicalHistory || null,
+            physicalExamination: physicalExamination || null,
+            diagnosis: diagnosis || null,
+            differentialDiagnosis: differentialDiagnosis || null,
+            assessment: assessment || null,
+            treatmentPlan: treatmentPlan || null,
+            notes: notes || null,
+            signature: doctorSignature || null,
+            editedAt: new Date(),
+          },
+        });
+      }
+
       if (prescriptions?.length) {
         await tx.prescription.createMany({
-          data: prescriptions.map((p: { medication: string; dosage: string; instructions: string }) => ({
+          data: prescriptions.map((p: { medication: string; dosage: string; instructions: string; route?: string; frequency?: string; givenAt?: string; nextDose?: string }) => ({
             patientId,
             visitId:      visit.id,
             medication:   p.medication,
             dosage:       p.dosage,
             instructions: p.instructions,
+            route:        p.route || null,
+            frequency:    p.frequency || null,
+            givenAt:      p.givenAt || null,
+            nextDose:     p.nextDose || null,
           })),
         });
       }
@@ -128,6 +192,7 @@ export async function POST(req: NextRequest) {
         await tx.labRequest.createMany({
           data: labRequests.map((l: { testName: string }) => ({
             patientId,
+            encounterId: encounterId || null,
             visitId:       visit.id,
             requestedById: staffId,
             testName:      l.testName,
@@ -137,8 +202,7 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // If routing to LAB but no specific lab tests were ordered, create a
-      // fallback "Pending Lab Workup" so the patient appears in the lab view.
+      // Fallback "Pending Lab Workup"
       if (effectiveRoute === "LAB" && (!labRequests?.length || !staffId)) {
         let docStaffId = staffId;
         if (!docStaffId) {
@@ -146,7 +210,6 @@ export async function POST(req: NextRequest) {
           docStaffId = fallbackStaff?.id;
         }
         if (docStaffId) {
-          // Guard: check if any PENDING LabRequest already exists for this patient
           const existingOrders = await tx.labRequest.findMany({
             where: { patientId, status: "PENDING" },
             take: 1,
@@ -155,6 +218,7 @@ export async function POST(req: NextRequest) {
             await tx.labRequest.create({
               data: {
                 patientId,
+                encounterId: encounterId || null,
                 visitId: visit.id,
                 requestedById: docStaffId,
                 testName: "Pending Lab Workup",
@@ -171,6 +235,7 @@ export async function POST(req: NextRequest) {
         await tx.imagingRequest.create({
           data: {
             patientId,
+            encounterId: encounterId || null,
             visitId:        visit.id,
             requestedById:  staffId ?? undefined,
             studyType:      effectiveRoute === "SONOGRAPHY" ? "ULTRASOUND" : "X_RAY",
@@ -192,7 +257,6 @@ export async function POST(req: NextRequest) {
           ? `${patientInfo.firstName} ${patientInfo.lastName} (${patientInfo.patientNumber})`
           : `Patient #${patientId}`;
 
-        // Notify Lab
         if (labRequests?.length) {
           await tx.notification.create({
             data: {
@@ -205,7 +269,6 @@ export async function POST(req: NextRequest) {
           });
         }
 
-        // Notify Pharmacy
         if (prescriptions?.length) {
           await tx.notification.create({
             data: {
@@ -217,27 +280,89 @@ export async function POST(req: NextRequest) {
             },
           });
         }
+
+        // Create imaging/sonography orders without routing patient away
+        if (imagingOrders?.length && staffId) {
+          await tx.imagingRequest.create({
+            data: {
+              patientId,
+              encounterId: encounterId || null,
+              visitId: visit.id,
+              requestedById: staffId,
+              studyType: imagingOrders[0] || "ULTRASOUND",
+              priority: "ROUTINE",
+              referralSource: "DOCTOR",
+              clinicalNotes: symptoms || null,
+              status: "ORDERED",
+            },
+          });
+          await tx.notification.create({
+            data: {
+              department: "Sonography",
+              title: "New Sonography Order",
+              message: `Dr. ${performerName} ordered ${imagingOrders.length} scan(s) for ${patName}`,
+              type: "IMAGING_ORDER",
+              patientId,
+            },
+          });
+        }
+      }
+
+      // ── SHARE action: send to share targets (no status change) ──
+      if (effectiveRoute === "SHARE" && shareTargets?.length) {
+        for (const target of shareTargets) {
+          const deptMap: Record<string, string> = {
+            RECEPTION: "Reception",
+            NURSE: "Nurse/Midwife",
+            SONOGRAPHY: "Sonography",
+          };
+          await tx.notification.create({
+            data: {
+              department: deptMap[target] || target,
+              title: "Clinical Results Shared",
+              message: `Dr. ${performerName} shared consultation results.`,
+              type: "RESULT_SHARED",
+              patientId,
+            },
+          });
+        }
       }
 
       // ── Determine what status to set ──
-      // Admitted patients keep their ADMITTED status unless discharged,
-      // so they stay on the doctor's Admitted Patients dashboard.
       const isAdmitted = patient?.currentStatus === "ADMITTED";
       const newStatus = isAdmitted
         ? (effectiveRoute === "DISCHARGE" ? "DISCHARGED" : "ADMITTED" as PatientStatus)
         : ROUTE_TO_STATUS[effectiveRoute];
 
-      // Determine if we need to flag for Treatment Room
       const goingToTreatment = effectiveRoute === "TREATMENT" || (isAdmitted && effectiveRoute === "NURSE");
+      const beingAdmitted = effectiveRoute === "ADMIT";
       const beingDischarged = effectiveRoute === "DISCHARGE";
       const updateData: any = { currentStatus: newStatus };
       if (goingToTreatment) updateData.sentToTreatmentRoom = true;
       if (beingDischarged) updateData.sentToTreatmentRoom = false;
+      if (beingAdmitted) {
+        updateData.admittingDoctorName = staffName || "Doctor";
+        updateData.admittingDoctorId = staffId || null;
+      }
 
       await tx.patient.update({
         where: { id: patientId },
         data:  updateData,
       });
+
+      // ── Update Encounter if encounterId is provided and not SHARE ──
+      if (encounterId) {
+        if (effectiveRoute === "ADMIT" || effectiveRoute === "DISCHARGE") {
+          await closeEncounter(encounterId, tx);
+        } else if (effectiveRoute === "SHARE") {
+          // Share doesn't change encounter state
+        } else {
+          const encounterRoute = ROUTE_TO_ENCOUNTER[effectiveRoute];
+          if (encounterRoute) {
+            await routeEncounterToDept(encounterId, encounterRoute.dept, encounterRoute.status, tx);
+          }
+        }
+      }
 
       // ── Log to PatientTimeline ──
       const actionLabel =
@@ -246,7 +371,7 @@ export async function POST(req: NextRequest) {
         effectiveRoute === "DISCHARGE" ? "DISCHARGED" :
         effectiveRoute === "TREATMENT" ? "SENT TO TREATMENT ROOM" :
         effectiveRoute === "SEND_ORDERS" ? "ORDERS_SENT" :
-        "REFERRED";
+        effectiveRoute === "SHARE" ? "SHARED" : "REFERRED";
 
       await tx.patientTimeline.create({
         data: {
@@ -258,24 +383,28 @@ export async function POST(req: NextRequest) {
                           effectiveRoute === "DISCHARGE" ? "DISCHARGE" :
                           effectiveRoute === "TREATMENT" ? "TREATMENT_ROOM" :
                           effectiveRoute === "SEND_ORDERS" ? "MULTIPLE" :
+                          effectiveRoute === "SHARE" ? "SHARE" :
                           effectiveRoute === "REFERRAL" && labRequests?.length ? "LAB" : effectiveRoute,
           description:   effectiveRoute === "SEND_ORDERS"
             ? `Orders sent — ${labRequests?.length || 0} lab test(s), ${prescriptions?.length || 0} prescription(s). Diagnosis: ${diagnosis || "N/A"}`
-            : `Consultation completed — ${actionLabel}. Diagnosis: ${diagnosis || "Not yet diagnosed"}`,
+            : effectiveRoute === "SHARE"
+              ? `Results shared with ${(shareTargets || []).join(", ") || "departments"}`
+              : `Consultation completed — ${actionLabel}. Diagnosis: ${diagnosis || "Not yet diagnosed"}`,
           metadata:      JSON.stringify({
             visitId:       visit.id,
+            encounterId,
             diagnosis,
             treatmentPlan,
             prescriptionCount: prescriptions?.length || 0,
             labCount:          labRequests?.length || 0,
             routeTo: effectiveRoute,
+            shareTargets: shareTargets || [],
           }),
           performedBy:   performerName,
           performedById: staffId || null,
         },
       });
 
-      // Also log consultation start if it wasn't logged earlier
       await tx.patientTimeline.create({
         data: {
           patientId,
@@ -296,20 +425,29 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// PATCH — begin consultation: move a patient from AWAITING_DOCTOR to IN_CONSULTATION
+// PATCH — begin consultation
 export async function PATCH(req: NextRequest) {
   try {
-    const { patientId } = await req.json();
+    const { patientId, encounterId } = await req.json();
     if (!patientId) {
       return NextResponse.json({ error: "patientId is required" }, { status: 400 });
     }
 
-    const updated = await prisma.patient.update({
+    // Update Patient status (backward compat)
+    await prisma.patient.update({
       where: { id: patientId },
       data:  { currentStatus: "IN_CONSULTATION" },
     });
 
-    return NextResponse.json(updated);
+    // Update Encounter status if encounterId provided
+    if (encounterId) {
+      await prisma.encounter.update({
+        where: { id: encounterId },
+        data:  { currentStatus: "IN_CONSULTATION" },
+      });
+    }
+
+    return NextResponse.json({ success: true });
   } catch (err) {
     console.error("[doctor PATCH]", err);
     return NextResponse.json({ error: "Failed to start consultation." }, { status: 500 });

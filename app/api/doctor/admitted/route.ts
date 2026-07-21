@@ -56,7 +56,7 @@ export async function GET() {
         assessment: latestVisit?.assessment || "",
 	        treatmentPlan: latestVisit?.treatmentPlan || "",
 	        chiefComplaint: latestTriage?.chiefComplaint || latestVisit?.symptoms || "",
-	        admittingDoctor: latestVisit?.notes || "",
+		        admittingDoctor: p.admittingDoctorName || latestVisit?.doctorName || "",
 	      };
     });
 

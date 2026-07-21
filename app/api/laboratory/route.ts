@@ -325,25 +325,36 @@ export async function POST(req: Request) {
             status: "AWAITING_VALIDATION",
           },
         });
-        // Advance patient out of lab-holding status so the receptionist no longer
-        // shows them as "awaiting lab" — even if the lab tech never completes
-        // Step 3 (Share/Validate Results), entering results is the meaningful
-        // "lab work is done" milestone.
+        // Advance patient out of lab-holding status
         const labReqForStatus = await prisma.labRequest.findUnique({
-          where: { id: parseInt(id) }, include: { Patient: true },
+          where: { id: parseInt(id) }, include: { Patient: true, Encounter: true },
         });
         if (labReqForStatus) {
           const ps = labReqForStatus.Patient.currentStatus;
-	          if (ps === "AWAITING_LAB") {
-	            await prisma.patient.update({
-	              where: { id: labReqForStatus.Patient.id },
-	              data: { currentStatus: "AWAITING_DOCTOR", lastSharedFromDept: "Lab" },
-	            });
-	          } else if (ps === "ADMITTED") {
+          const encId = labReqForStatus.encounterId;
+
+          if (ps === "AWAITING_LAB") {
+            await prisma.patient.update({
+              where: { id: labReqForStatus.Patient.id },
+              data: { currentStatus: "AWAITING_DOCTOR", lastSharedFromDept: "Lab" },
+            });
+            // Route encounter back to doctor if present and patient not admitted
+            if (encId) {
+              const { returnEncounterToDoctor } = await import("../../lib/encounterUtils");
+              await returnEncounterToDoctor(encId, "Lab");
+            }
+          } else if (ps === "ADMITTED") {
             await prisma.patient.update({
               where: { id: labReqForStatus.Patient.id },
               data: { lastSharedFromDept: "Lab" },
             });
+            await createNotification({
+              department: "Doctor",
+              title: "Lab Result Entered",
+              message: `Lab results entered for ${labReqForStatus.Patient.firstName} ${labReqForStatus.Patient.lastName} (admitted patient)`,
+              type: "LAB_RESULT",
+              patientId: labReqForStatus.Patient.id,
+            }).catch((e: any) => console.error("[Lab] clinical update error", e));
           }
         }
         return NextResponse.json(updated);
@@ -357,34 +368,36 @@ export async function POST(req: Request) {
           data: { validatedByName, validatedAt: new Date(), status: "COMPLETED" },
         });
         const labReq = await prisma.labRequest.findUnique({
-          where: { id: parseInt(id) }, include: { Patient: true },
+          where: { id: parseInt(id) }, include: { Patient: true, Encounter: true },
         });
         if (labReq) {
-          // Move patient out of lab-related holding statuses so the
-          // receptionist / doctor dashboard no longer shows them as
-          // "awaiting lab" after results are validated.
           const ps = labReq.Patient.currentStatus;
-	          if (ps === "AWAITING_LAB") {
-	            // Non-admitted patient → route to doctor for review
-	            await prisma.patient.update({
-	              where: { id: labReq.Patient.id },
-	              data: { currentStatus: "AWAITING_DOCTOR", lastSharedFromDept: "Lab" },
-	            });
-	          } else if (ps === "ADMITTED") {
-	            // Admitted patient — stays admitted; flag that lab results are
-	            // back so the doctor dashboard surfaces them.
-	            await prisma.patient.update({
-	              where: { id: labReq.Patient.id },
-	              data: { lastSharedFromDept: "Lab" },
-	            });
-	          } else {
-	            // Patient is at some other status — still flag that lab
-	            // results were shared from this department for traceability.
-	            await prisma.patient.update({
-	              where: { id: labReq.Patient.id },
-	              data: { lastSharedFromDept: "Lab" },
-	            });
-	          }
+          const encId = labReq.encounterId;
+
+          if (ps === "AWAITING_LAB") {
+            await prisma.patient.update({
+              where: { id: labReq.Patient.id },
+              data: { currentStatus: "AWAITING_DOCTOR", lastSharedFromDept: "Lab" },
+            });
+            if (encId) {
+              const { returnEncounterToDoctor } = await import("../../lib/encounterUtils");
+              await returnEncounterToDoctor(encId, "Lab");
+            }
+          } else if (ps === "ADMITTED") {
+            await prisma.patient.update({
+              where: { id: labReq.Patient.id },
+              data: { lastSharedFromDept: "Lab" },
+            });
+          } else {
+            await prisma.patient.update({
+              where: { id: labReq.Patient.id },
+              data: { lastSharedFromDept: "Lab" },
+            });
+            if (encId) {
+              const { returnEncounterToDoctor } = await import("../../lib/encounterUtils");
+              await returnEncounterToDoctor(encId, "Lab");
+            }
+          }
           await createNotification({
             department: labReq.referralSource || "GENERAL",
             title: "Lab Results Ready",
@@ -523,34 +536,68 @@ export async function POST(req: Request) {
 	            includeReport: includeReport !== false, note: note || null,
 	          },
 	        });
-	        // 2. Route patient to the status corresponding to targetDept
-	        const mappedStatus = DEPT_TO_STATUS[targetDept] || "AWAITING_DOCTOR";
-	        await prisma.patient.update({
-	          where: { id: parseInt(patientId) },
-	          data: { currentStatus: mappedStatus as any, lastSharedFromDept: "Lab" },
+		        // 2. Fetch patient info and lab request info before routing
+		        const [patientStatus, labReqInfo] = await Promise.all([
+		          prisma.patient.findUnique({
+		            where: { id: parseInt(patientId) },
+		            select: { currentStatus: true, firstName: true, lastName: true },
+		          }),
+		          prisma.labRequest.findUnique({
+		            where: { id: parseInt(labRequestId) },
+		            select: { testName: true },
+		          }),
+		        ]);
+		        const isAdmitted = patientStatus?.currentStatus === "ADMITTED";
+		        if (isAdmitted) {
+		          // Admitted patient — stays admitted; flag that results are back + create clinical update
+		          await prisma.patient.update({
+		            where: { id: parseInt(patientId) },
+		            data: { lastSharedFromDept: "Lab" },
+		          });
+		          await createNotification({
+		            department: "Doctor",
+		            title: "New Lab Result",
+		            message: `Lab has completed ${labReqInfo?.testName || "a test"} for ${patientStatus?.firstName} ${patientStatus?.lastName}`,
+		            type: "LAB_RESULT",
+		            patientId: parseInt(patientId),
+		          });
+		          // Log to timeline
+		          await prisma.patientTimeline.create({
+		            data: {
+		              patientId: parseInt(patientId),
+		              action: "TRANSFER",
+		              fromDepartment: "Laboratory",
+		              toDepartment: "Ward",
+		              description: `Lab results shared for ${labReqInfo?.testName || "test"} (admitted patient)`,
+		              performedBy: sharedByName,
+		            },
+		          }).catch(() => {});
+		        } else {
+		          // Non-admitted — route to the status corresponding to targetDept
+		          const mappedStatus = DEPT_TO_STATUS[targetDept] || "AWAITING_DOCTOR";
+		          await prisma.patient.update({
+		            where: { id: parseInt(patientId) },
+		            data: { currentStatus: mappedStatus as any, lastSharedFromDept: "Lab" },
+		          });
+		          // Log to timeline
+		          await prisma.patientTimeline.create({
+		            data: {
+		              patientId: parseInt(patientId),
+		              action: "TRANSFER",
+		              fromDepartment: "Laboratory",
+		              toDepartment: "Doctor",
+		              description: `Lab results shared for ${labReqInfo?.testName || "test"}. Patient routed back to Doctor.`,
+		              performedBy: sharedByName,
+		            },
+		          });
+		        }
+	        // 3. Notify the doctor
+	        await createNotification({
+	          department: "Doctor",
+	          title: isAdmitted ? "Lab Results Ready (Admitted Patient)" : "Lab Results Shared — Patient Returned",
+	          message: `${sharedByName} shared lab results for ${patientStatus?.firstName || ""} ${patientStatus?.lastName || ""}${note ? `: ${note}` : ""}`,
+	          type: "RESULT_SHARED", referenceId: parseInt(labRequestId), referenceType: "lab_request", patientId: parseInt(patientId),
 	        });
-        // 3. Notify the doctor
-        await createNotification({
-          department: "Doctor",
-          title: "Lab Results Shared — Patient Returned",
-          message: `${sharedByName} shared lab results and sent patient back to doctor${note ? `: ${note}` : ""}`,
-          type: "RESULT_SHARED", referenceId: parseInt(labRequestId), referenceType: "lab_request", patientId: parseInt(patientId),
-        });
-        // 4. Log to timeline
-        const labReqInfo = await prisma.labRequest.findUnique({
-          where: { id: parseInt(labRequestId) },
-          select: { testName: true },
-        });
-        await prisma.patientTimeline.create({
-          data: {
-            patientId: parseInt(patientId),
-            action: "TRANSFER",
-            fromDepartment: "Laboratory",
-            toDepartment: "Doctor",
-            description: `Lab results shared for ${labReqInfo?.testName || "test"}. Patient routed back to Doctor.`,
-            performedBy: sharedByName,
-          },
-        });
         return NextResponse.json(shareResult, { status: 201 });
       }
 

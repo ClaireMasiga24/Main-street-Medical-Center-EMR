@@ -42,6 +42,15 @@ export async function GET(req: NextRequest) {
   }
 }
 
+// ─── Notification department name map ──────────────────────────────────────
+const DEPT_NOTIFICATION_MAP: Record<string, string> = {
+  LAB: "Laboratory",
+  NURSE: "Nurse/Midwife",
+  RADIOLOGY: "Radiology",
+  SONOGRAPHY: "Sonography",
+  DENTIST: "Dentist",
+};
+
 // POST — create a new review for a patient
 export async function POST(req: NextRequest) {
   try {
@@ -50,7 +59,10 @@ export async function POST(req: NextRequest) {
       followUpNotes, examinationFindings, historyOfPresentIllness,
       diagnosis, treatmentPlan,
       labOrders, imagingOrders,
+      testCode,
       notifyDepartment,
+      dentistReferral,
+      dentistNotes,
     } = await req.json();
 
     if (!patientId || !doctorId || !doctorName) {
@@ -58,32 +70,37 @@ export async function POST(req: NextRequest) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Create the review
-      const review = await tx.patientReview.create({
-        data: {
-          patientId,
-          doctorId,
-          doctorName,
-          followUpNotes: followUpNotes || null,
-          examinationFindings: examinationFindings || null,
-          historyOfPresentIllness: historyOfPresentIllness || null,
-          diagnosis: diagnosis || null,
-          treatmentPlan: treatmentPlan || null,
-          labOrders: labOrders?.length ? JSON.stringify(labOrders) : null,
-          imagingOrders: imagingOrders?.length ? JSON.stringify(imagingOrders) : null,
-        },
-      });
+      // 1. Create the review (skip if this is purely a referral with no clinical fields)
+      const hasClinicalFields = followUpNotes || examinationFindings || historyOfPresentIllness || diagnosis || treatmentPlan;
+      let review: any = null;
+      if (hasClinicalFields || labOrders?.length || imagingOrders?.length || dentistReferral) {
+        review = await tx.patientReview.create({
+          data: {
+            patientId,
+            doctorId,
+            doctorName,
+            followUpNotes: followUpNotes || null,
+            examinationFindings: examinationFindings || null,
+            historyOfPresentIllness: historyOfPresentIllness || null,
+            diagnosis: diagnosis || null,
+            treatmentPlan: treatmentPlan || null,
+            labOrders: labOrders?.length ? JSON.stringify(labOrders) : null,
+            imagingOrders: imagingOrders?.length ? JSON.stringify(imagingOrders) : null,
+          },
+        });
+      }
 
       // 2. Create LabRequest records for each ordered lab test
       const createdLabRequests: any[] = [];
       if (labOrders?.length) {
-        for (const testName of labOrders) {
+        for (let i = 0; i < labOrders.length; i++) {
           const lab = await tx.labRequest.create({
             data: {
               patientId,
               requestedById: doctorId,
-              testName,
-              priority: "URGENT",
+              testName: labOrders[i],
+              testCode: testCode?.[i] || null,
+              priority: "ROUTINE",
               referralSource: "Doctor",
               clinicalNotes: followUpNotes || null,
               status: "PENDING",
@@ -107,7 +124,7 @@ export async function POST(req: NextRequest) {
               patientId,
               requestedById: doctorId,
               studyType: mappedStudy,
-              priority: "URGENT",
+              priority: "ROUTINE",
               referralSource: "Doctor",
               clinicalNotes: followUpNotes || null,
               status: "ORDERED",
@@ -122,6 +139,7 @@ export async function POST(req: NextRequest) {
         await tx.notification.create({
           data: {
             department: "Laboratory",
+            patientId,
             title: "New Lab Orders from Doctor",
             message: `Dr. ${doctorName} ordered ${createdLabRequests.length} test(s) for patient`,
             type: "RESULT_READY",
@@ -129,9 +147,13 @@ export async function POST(req: NextRequest) {
         });
       }
       if (createdImagingRequests.length > 0) {
+        const imgDept = notifyDepartment && DEPT_NOTIFICATION_MAP[notifyDepartment]
+          ? DEPT_NOTIFICATION_MAP[notifyDepartment]
+          : "Radiology";
         await tx.notification.create({
           data: {
-            department: "Radiology",
+            department: imgDept,
+            patientId,
             title: "New Imaging Orders from Doctor",
             message: `Dr. ${doctorName} ordered ${createdImagingRequests.length} study/studies for patient`,
             type: "RESULT_READY",
@@ -139,36 +161,74 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // 5. Create notification for the target department (e.g. Nurse/Midwife)
+      // 5. Create notification for the target department (e.g. Lab, Nurse, Dentist)
       if (notifyDepartment) {
-        const deptName = notifyDepartment === "NURSE" ? "Nurse/Midwife" : notifyDepartment;
+        const deptName = DEPT_NOTIFICATION_MAP[notifyDepartment] || notifyDepartment;
+        let title = "Patient referred";
+        let message = followUpNotes || `Dr. ${doctorName} sent patient to ${deptName}`;
+
+        if (notifyDepartment === "LAB") {
+          title = "New Lab Orders";
+        } else if (notifyDepartment === "RADIOLOGY" || notifyDepartment === "SONOGRAPHY") {
+          title = "New Imaging Orders";
+        } else if (notifyDepartment === "DENTIST") {
+          title = "Dental Referral";
+          message = dentistNotes || followUpNotes || `Dr. ${doctorName} referred patient to Dentist`;
+        } else if (notifyDepartment === "NURSE") {
+          title = "Patient sent for monitoring";
+        }
+
         await tx.notification.create({
           data: {
             department: deptName,
             patientId,
-            title: "Patient sent for monitoring",
-            message: `${followUpNotes || `Dr. ${doctorName} sent patient for monitoring`}`,
+            title,
+            message,
             type: "RESULT_READY",
           },
         });
       }
 
       // 6. Log to timeline
-      const timelineDesc = notifyDepartment === "NURSE"
-        ? `Dr. ${doctorName} sent patient to Nurse/Midwife for monitoring`
-        : `Dr. ${doctorName} performed a review — ${createdLabRequests.length} lab(s), ${createdImagingRequests.length} imaging(s) ordered`;
+      let timelineAction = "PROCEDURE";
+      let timelineDesc = `Dr. ${doctorName} performed a review`;
+
+      if (createdLabRequests.length > 0) {
+        timelineAction = "LAB_ORDER";
+        timelineDesc = `Dr. ${doctorName} ordered ${createdLabRequests.length} lab test(s)`;
+      }
+      if (createdImagingRequests.length > 0) {
+        timelineAction = "IMAGING_ORDER";
+        timelineDesc = `Dr. ${doctorName} ordered ${createdImagingRequests.length} imaging study/studies`;
+      }
+      if (dentistReferral || notifyDepartment === "DENTIST") {
+        timelineAction = "REFERRAL";
+        timelineDesc = `Dr. ${doctorName} referred patient to Dentist`;
+      }
+      if (notifyDepartment === "NURSE" && createdLabRequests.length === 0 && createdImagingRequests.length === 0 && !dentistReferral) {
+        timelineAction = "REFERRAL";
+        timelineDesc = `Dr. ${doctorName} sent patient to Nurse/Midwife for monitoring`;
+      }
 
       await tx.patientTimeline.create({
         data: {
           patientId,
-          action: notifyDepartment === "NURSE" ? "REFERRAL" : "PROCEDURE",
+          action: timelineAction,
           fromDepartment: "DOCTOR",
+          toDepartment: notifyDepartment
+            ? (notifyDepartment === "LAB" ? "LAB" :
+               notifyDepartment === "RADIOLOGY" ? "RADIOLOGY" :
+               notifyDepartment === "SONOGRAPHY" ? "SONOGRAPHY" :
+               notifyDepartment === "DENTIST" ? "DENTIST" :
+               notifyDepartment === "NURSE" ? "NURSE" : notifyDepartment)
+            : null,
           description: timelineDesc,
           metadata: JSON.stringify({
-            reviewId: review.id,
+            reviewId: review?.id || null,
             labCount: createdLabRequests.length,
             imagingCount: createdImagingRequests.length,
             notifyDepartment: notifyDepartment || null,
+            dentistReferral: dentistReferral || false,
           }),
           performedBy: doctorName,
           performedById: doctorId,

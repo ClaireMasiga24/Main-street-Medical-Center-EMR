@@ -1,0 +1,4 @@
+ALTER TABLE "Prescription" ADD COLUMN IF NOT EXISTS "route" TEXT;
+ALTER TABLE "Prescription" ADD COLUMN IF NOT EXISTS "frequency" TEXT;
+ALTER TABLE "Prescription" ADD COLUMN IF NOT EXISTS "givenAt" TEXT;
+ALTER TABLE "Prescription" ADD COLUMN IF NOT EXISTS "nextDose" TEXT;

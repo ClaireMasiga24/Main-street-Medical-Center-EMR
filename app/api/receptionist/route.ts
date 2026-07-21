@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
+import { createEncounter, closeEncounter } from "../../lib/encounterUtils";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -373,6 +374,16 @@ export async function POST(req: Request) {
           },
         });
 
+        // Create an encounter for tracking this visit
+        await createEncounter({
+          patientId: patient.id,
+          source: isEmergency ? "Emergency" : "Triage",
+          isEmergency: isEmergency ?? false,
+          currentStatus: "REGISTERED",
+          currentOwnerDept: "RECEPTION",
+          chiefComplaint: chiefComplaint || null,
+        });
+
         return NextResponse.json(patient, { status: 201 });
       }
 
@@ -495,6 +506,35 @@ export async function POST(req: Request) {
               description: `Routed from Reception to ${statusToDept[nextStatus] || (nextStatus === "MIDWIFE_ANC" ? "Midwife (ANC)" : nextStatus)}`,
             },
           });
+
+          // Update or create encounter for this patient
+          const existingEnc = await tx.encounter.findFirst({
+            where: { patientId, status: "ACTIVE" },
+            select: { id: true, currentOwnerDept: true },
+          });
+          const targetOwnerDept = statusToDept[nextStatus]
+            ? statusToDept[nextStatus].toUpperCase().replace(/[\s\/]/g, "_")
+            : nextStatus;
+          if (existingEnc) {
+            await tx.encounter.update({
+              where: { id: existingEnc.id },
+              data: {
+                currentStatus: nextStatus,
+                currentOwnerDept: targetOwnerDept,
+              },
+            });
+          } else {
+            await tx.encounter.create({
+              data: {
+                patientId,
+                status: "ACTIVE",
+                currentStatus: nextStatus,
+                currentOwnerDept: targetOwnerDept,
+                source: "Triage",
+                isEmergency: false,
+              },
+            });
+          }
 
           return updated;
         });

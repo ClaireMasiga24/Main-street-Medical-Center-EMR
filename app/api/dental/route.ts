@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
 import { createNotification } from "../../lib/notifications";
 import { PatientStatus } from "@prisma/client";
+import { returnEncounterToDoctor, routeEncounterToDept } from "../../lib/encounterUtils";
 
 // ─── Routing ────────────────────────────────────────────────────────────
 const ROUTE_TO_STATUS: Record<string, PatientStatus> = {
@@ -179,6 +180,24 @@ export async function POST(req: NextRequest) {
           updatedAt: new Date(),
         },
       });
+
+      // Update encounter routing
+      const activeEncounter = await tx.encounter.findFirst({
+        where: { patientId, status: "ACTIVE" },
+        select: { id: true },
+      });
+      if (activeEncounter) {
+        if (routeTo === "DOCTOR" || routeTo === "SPECIALIST") {
+          await returnEncounterToDoctor(activeEncounter.id, "Dentist", tx);
+        } else if (routeTo in ROUTE_TO_STATUS && routeTo !== "DISCHARGE") {
+          await routeEncounterToDept(
+            activeEncounter.id,
+            routeTo,
+            ROUTE_TO_STATUS[routeTo],
+            tx
+          );
+        }
+      }
 
       // If routing to LAB, create a LabRequest so the lab can see this patient
       // (otherwise they'd show as "Awaiting Lab" on tracking desk but never appear

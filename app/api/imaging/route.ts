@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
 import { createNotification } from "../../lib/notifications";
+import { returnEncounterToDoctor, routeEncounterToDept } from "../../lib/encounterUtils";
 
 // ─── GET — list imaging requests with powerful filtering ──────────────
 export async function GET(request: Request) {
@@ -144,9 +145,10 @@ export async function PATCH(request: Request) {
     const updated = await prisma.imagingRequest.update({
       where: { id: parseInt(id) },
       data,
-      include: {
-        Patient: { select: { id: true, patientNumber: true, firstName: true, lastName: true, age: true, gender: true } },
-      },
+		      include: {
+		        Patient: { select: { id: true, patientNumber: true, firstName: true, lastName: true, age: true, gender: true, currentStatus: true } },
+		        Encounter: { select: { id: true } },
+		      },
     });
 
 	    // If the patient's currentStatus is AWAITING_RADIOLOGY/SONOGRAPHY and the report
@@ -163,57 +165,106 @@ export async function PATCH(request: Request) {
 		      }).catch((e: any) => console.error("[Imaging] notify error", e));
 		    }
 
-		    // Route patient back to doctor and record which department shared
-		    if (updates.routeToDoctor && updated.patientId) {
-		      const dept = updated.studyType?.toUpperCase().includes("ULTRASOUND") ? "Sonography" : "Radiology";
-		      await prisma.patient.update({
-		        where: { id: updated.patientId },
-		        data: { currentStatus: "AWAITING_DOCTOR", lastSharedFromDept: dept },
-		      });
-		      await createNotification({
-		        department: "Doctor",
-		        title: `${dept} Report Ready — Patient Returned`,
-		        message: updates.notifyMessage || `Imaging report finalized. Patient routed back to Doctor.`,
-		        type: "RESULT_READY",
-		        patientId: updated.patientId,
-		      }).catch((e: any) => console.error("[Imaging] routeToDoctor notify error", e));
-		      await prisma.patientTimeline.create({
-		        data: {
-		          patientId: updated.patientId,
-		          action: "TRANSFER",
-		          fromDepartment: dept,
-		          toDepartment: "Doctor",
-		          description: `${dept} report completed. Patient routed back to Doctor.`,
-		          performedBy: updates.reportedById ? "Imaging Staff" : "System",
-		        },
-		      }).catch((e: any) => console.error("[Imaging] routeToDoctor timeline error", e));
-		    }
+				    // Route patient back to doctor and record which department shared
+				    if (updates.routeToDoctor && updated.patientId) {
+				      const dept = updated.studyType?.toUpperCase().includes("ULTRASOUND") ? "Sonography" : "Radiology";
+				      const encId = (updated as any).Encounter?.id;
+				      const isAdmitted = updated.Patient?.currentStatus === "ADMITTED";
+				      if (isAdmitted) {
+				        // Admitted patient — stays admitted; flag results back + create clinical update
+				        await prisma.patient.update({
+				          where: { id: updated.patientId },
+				          data: { lastSharedFromDept: dept },
+				        });
+				        await createNotification({
+				          department: "Doctor",
+				          title: "New Imaging Result",
+				          message: `${dept} completed a study for ${updated.Patient?.firstName || ""} ${updated.Patient?.lastName || ""}`,
+				          type: "RADIOLOGY_REPORT",
+				          patientId: updated.patientId,
+				        }).catch((e: any) => console.error("[Imaging] notify error", e));
+				        await prisma.patientTimeline.create({
+				          data: {
+				            patientId: updated.patientId,
+				            action: "TRANSFER",
+				            fromDepartment: dept,
+				            toDepartment: "Ward",
+				            description: `${dept} report completed for admitted patient.`,
+				            performedBy: updates.reportedById ? "Imaging Staff" : "System",
+				          },
+				        }).catch((e: any) => console.error("[Imaging] routeToDoctor timeline error", e));
+				      } else {
+				        await prisma.patient.update({
+				          where: { id: updated.patientId },
+				          data: { currentStatus: "AWAITING_DOCTOR", lastSharedFromDept: dept },
+				        });
+				        if (encId) {
+				          await returnEncounterToDoctor(encId, dept);
+				        }
+				        await createNotification({
+				          department: "Doctor",
+				          title: `${dept} Report Ready — Patient Returned`,
+				          message: updates.notifyMessage || `Imaging report finalized. Patient routed back to Doctor.`,
+				          type: "RESULT_READY",
+				          patientId: updated.patientId,
+				        }).catch((e: any) => console.error("[Imaging] routeToDoctor notify error", e));
+				        await prisma.patientTimeline.create({
+				          data: {
+				            patientId: updated.patientId,
+				            action: "TRANSFER",
+				            fromDepartment: dept,
+				            toDepartment: "Doctor",
+				            description: `${dept} report completed. Patient routed back to Doctor.`,
+				            performedBy: updates.reportedById ? "Imaging Staff" : "System",
+				          },
+				        }).catch((e: any) => console.error("[Imaging] routeToDoctor timeline error", e));
+				      }
+				    }
 
-		    // Route patient back to reception (awaiting cashier/billing)
-		    if (updates.routeToReception && updated.patientId) {
-		      const dept = updated.studyType?.toUpperCase().includes("ULTRASOUND") ? "Sonography" : "Radiology";
-		      await prisma.patient.update({
-		        where: { id: updated.patientId },
-		        data: { currentStatus: "AWAITING_CASHIER", lastSharedFromDept: dept },
-		      });
-		      await createNotification({
-		        department: "Reception",
-		        title: `${dept} Report Ready — Patient Routed to Reception`,
-		        message: updates.notifyMessage || `Imaging report finalized. Patient routed to Reception for billing.`,
-		        type: "RESULT_READY",
-		        patientId: updated.patientId,
-		      }).catch((e: any) => console.error("[Imaging] routeToReception notify error", e));
-		      await prisma.patientTimeline.create({
-		        data: {
-		          patientId: updated.patientId,
-		          action: "TRANSFER",
-		          fromDepartment: dept,
-		          toDepartment: "Reception",
-		          description: `${dept} report completed. Patient routed to Reception for billing.`,
-		          performedBy: updates.reportedById ? "Imaging Staff" : "System",
-		        },
-		      }).catch((e: any) => console.error("[Imaging] routeToReception timeline error", e));
-		    }
+				    // Route patient back to reception (awaiting cashier/billing)
+				    if (updates.routeToReception && updated.patientId) {
+				      const dept = updated.studyType?.toUpperCase().includes("ULTRASOUND") ? "Sonography" : "Radiology";
+				      const encId = (updated as any).Encounter?.id;
+				      const isAdmitted = updated.Patient?.currentStatus === "ADMITTED";
+				      if (isAdmitted) {
+				        await prisma.patient.update({
+				          where: { id: updated.patientId },
+				          data: { lastSharedFromDept: dept },
+				        });
+				        await createNotification({
+				          department: "Doctor",
+				          title: "New Imaging Result",
+				          message: `${dept} completed a study for ${updated.Patient?.firstName || ""} ${updated.Patient?.lastName || ""}`,
+				          type: "RADIOLOGY_REPORT",
+				          patientId: updated.patientId,
+				        }).catch((e: any) => console.error("[Imaging] notify error", e));
+				      } else {
+				        await prisma.patient.update({
+				          where: { id: updated.patientId },
+				          data: { currentStatus: "AWAITING_CASHIER", lastSharedFromDept: dept },
+				        });
+				        if (encId) {
+				          await routeEncounterToDept(encId, "CASHIER", "AWAITING_CASHIER");
+				        }
+				        await createNotification({
+				          department: "Reception",
+				          title: `${dept} Report Ready — Patient Routed to Reception`,
+				          message: updates.notifyMessage || `Imaging report finalized. Patient routed to Reception for billing.`,
+				          type: "RESULT_READY",
+				          patientId: updated.patientId,
+				        }).catch((e: any) => console.error("[Imaging] routeToReception notify error", e));
+				        await prisma.patientTimeline.create({
+				          data: {
+				            patientId: updated.patientId,
+				            action: "TRANSFER",
+				            fromDepartment: dept,
+				            toDepartment: "Reception",
+				            description: `${dept} report completed. Patient routed to Reception for billing.`,
+				            performedBy: updates.reportedById ? "Imaging Staff" : "System",
+				          },
+				        }).catch((e: any) => console.error("[Imaging] routeToReception timeline error", e));
+				      }
+				    }
 
 	    return NextResponse.json(updated);
   } catch (err: any) {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
 import { createNotification, getDepartmentEmails } from "../../lib/notifications";
+import { returnEncounterToDoctor, routeEncounterToDept, createEncounter } from "../../lib/encounterUtils";
 
 export async function POST(request: Request) {
   try {
@@ -76,6 +77,30 @@ export async function POST(request: Request) {
         where: { id: pid },
         data: updateData,
       });
+
+      // Update encounter routing if an active encounter exists
+      const activeEncounter = await tx.encounter.findFirst({
+        where: { patientId: pid, status: "ACTIVE" },
+        select: { id: true },
+      });
+      if (activeEncounter) {
+        if (targetDept.toLowerCase() === "doctor") {
+          await returnEncounterToDoctor(activeEncounter.id, source || "Nurse/Midwife", tx);
+        } else if (mappedStatus) {
+          // Map nurse dept to encounter dept
+          const DEPT_MAP: Record<string, string> = {
+            AWAITING_LAB: "LAB",
+            AWAITING_RADIOLOGY: "RADIOLOGY",
+            AWAITING_SONOGRAPHY: "SONOGRAPHY",
+            AWAITING_DENTIST: "DENTIST",
+            AWAITING_PHARMACY: "PHARMACY",
+            AWAITING_CASHIER: "CASHIER",
+            AWAITING_TRIAGE: "NURSE",
+          };
+          const encounterDept = DEPT_MAP[mappedStatus] || targetDept.toUpperCase();
+          await routeEncounterToDept(activeEncounter.id, encounterDept, mappedStatus, tx);
+        }
+      }
 
       // If routing to lab, also create a LabRequest so the lab can see this patient
       // (otherwise they'd show as "Awaiting Lab" on tracking desk but never appear

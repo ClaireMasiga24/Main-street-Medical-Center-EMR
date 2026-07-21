@@ -37,6 +37,10 @@ export async function POST(request: Request) {
       medication: rx.medication.trim(),
       dosage: (rx.dosage || "").trim(),
       instructions: (rx.instructions || "").trim(),
+      route: (rx.route || "").trim() || null,
+      frequency: (rx.frequency || "").trim() || null,
+      givenAt: (rx.givenAt || "").trim() || null,
+      nextDose: (rx.nextDose || "").trim() || null,
     }));
 
     const performerName = prescriberName || prescriberRole || "Unknown";
@@ -64,6 +68,10 @@ export async function POST(request: Request) {
           medication: rx.medication,
           dosage: rx.dosage,
           instructions: rx.instructions,
+          route: rx.route,
+          frequency: rx.frequency,
+          givenAt: rx.givenAt,
+          nextDose: rx.nextDose,
           status: "PENDING",
         })),
       });

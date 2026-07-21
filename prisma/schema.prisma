@@ -38,6 +38,8 @@ model Patient {
   isEmergency           Boolean                @default(false)
   currentStatus         PatientStatus          @default(AWAITING_TRIAGE)
   lastSharedFromDept    String?
+  admittingDoctorName   String?
+  admittingDoctorId     Int?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   sentToTreatmentRoom   Boolean                @default(false)
@@ -61,8 +63,57 @@ model Patient {
   ResultShares          ResultShare[]
   Triage                Triage[]
   Visit                 Visit[]
+  Encounter             Encounter[]
 
   @@index([currentStatus])
+}
+
+model Encounter {
+  id                 Int       @id @default(autoincrement())
+  patientId          Int
+  patient            Patient   @relation(fields: [patientId], references: [id])
+  status             String    @default("ACTIVE")       // ACTIVE | CLOSED | CANCELLED
+  currentStatus      String    @default("AWAITING_DOCTOR")
+  currentOwnerDept   String    @default("DOCTOR")       // DOCTOR | LAB | RADIOLOGY | SONOGRAPHY | DENTIST | NURSE | CASHIER | PHARMACY
+  source             String    @default("Triage")       // Triage | Emergency | Appointment | Follow-up
+  lastSharedFromDept String?
+  isEmergency        Boolean   @default(false)
+  chiefComplaint     String?
+  esiLevel           Int?
+  triageCompletedAt  DateTime?
+  openedAt           DateTime  @default(now())
+  closedAt           DateTime?
+  updatedAt          DateTime  @updatedAt
+
+  clinicalNotes      ClinicalNote[]
+  LabRequest         LabRequest[]
+  ImagingRequest     ImagingRequest[]
+
+  @@index([patientId])
+  @@index([currentOwnerDept, currentStatus, status])
+}
+
+model ClinicalNote {
+  id                       Int       @id @default(autoincrement())
+  encounterId              Int
+  encounter                Encounter @relation(fields: [encounterId], references: [id])
+  authorStaffId            Int
+  authorName               String
+  historyOfPresentIllness  String?
+  reviewOfOtherSystems     String?
+  pastMedicalHistory       String?
+  physicalExamination      String?
+  diagnosis                String?
+  differentialDiagnosis    String?
+  assessment               String?
+  treatmentPlan            String?
+  notes                    String?
+  signature                String?
+  createdAt                DateTime  @default(now())
+  editedAt                 DateTime?
+
+  @@unique([encounterId, authorStaffId])
+  @@index([encounterId])
 }
 
 model Visit {
@@ -131,6 +182,7 @@ model Triage {
 model ImagingRequest {
   id               Int       @id @default(autoincrement())
   patientId        Int
+  encounterId      Int?
   visitId          Int?
   requestedById    Int?
   studyType        String
@@ -155,12 +207,14 @@ model ImagingRequest {
   machineModel     String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
-  Patient          Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  Staff            Staff?    @relation(fields: [requestedById], references: [id])
-  Visit            Visit?    @relation(fields: [visitId], references: [id])
+  Patient          Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Encounter        Encounter?  @relation(fields: [encounterId], references: [id])
+  Staff            Staff?      @relation(fields: [requestedById], references: [id])
+  Visit            Visit?      @relation(fields: [visitId], references: [id])
 
   @@index([status])
   @@index([patientId])
+  @@index([encounterId])
 }
 
 model DentalRecord {
@@ -445,6 +499,7 @@ model StaffAttendance {
 model LabRequest {
   id                    Int                    @id @default(autoincrement())
   patientId             Int
+  encounterId           Int?
   visitId               Int?
   requestedById         Int
   testName              String
@@ -486,12 +541,14 @@ model LabRequest {
   CriticalNotifications CriticalNotification[]
   LabCommunications     LabCommunication[]
   Patient               Patient                @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Encounter             Encounter?             @relation(fields: [encounterId], references: [id])
   Staff                 Staff                  @relation(fields: [requestedById], references: [id])
   Visit                 Visit?                 @relation(fields: [visitId], references: [id])
   ResultShares          ResultShare[]
 
   @@index([status])
   @@index([patientId])
+  @@index([encounterId])
 }
 
 model CriticalNotification {
@@ -570,6 +627,10 @@ model Prescription {
   medication   String
   dosage       String
   instructions String
+  route        String?
+  frequency    String?
+  givenAt      String?
+  nextDose     String?
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
   status       PrescriptionStatus @default(PENDING)

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
+import { createEncounter } from "../../lib/encounterUtils";
 
 export async function GET(request: Request) {
   try {
@@ -93,6 +94,49 @@ export async function POST(request: Request) {
           where: { id: parseInt(patientId) },
           data: { currentStatus: nextStatus as any },
         });
+      }
+
+      // Create an encounter for this visit (skip for DISCHARGE)
+      if (triageOutcome !== "DISCHARGE") {
+        const deptMap: Record<string, string> = {
+          SEND_DOCTOR: "DOCTOR",
+          EMERGENCY: "DOCTOR",
+          OBSERVATION: "DOCTOR",
+          SPECIALIST: "DOCTOR",
+          DENTIST: "DENTIST",
+          LABORATORY: "LAB",
+          RADIOLOGY: "RADIOLOGY",
+        };
+        const encounterDept = deptMap[triageOutcome] || "DOCTOR";
+        // Check for existing active encounter (e.g. from reception registration)
+        const existingEnc = await prisma.encounter.findFirst({
+          where: { patientId: parseInt(patientId), status: "ACTIVE" },
+          select: { id: true },
+        });
+        if (existingEnc) {
+          await prisma.encounter.update({
+            where: { id: existingEnc.id },
+            data: {
+              currentStatus: nextStatus || "AWAITING_DOCTOR",
+              currentOwnerDept: encounterDept,
+              source: triageOutcome === "EMERGENCY" ? "Emergency" : "Triage",
+              chiefComplaint: chiefComplaint || null,
+              esiLevel: esiLevel ?? null,
+              triageCompletedAt: new Date(),
+            },
+          });
+        } else {
+          await createEncounter({
+            patientId: parseInt(patientId),
+            source: triageOutcome === "EMERGENCY" ? "Emergency" : "Triage",
+            isEmergency: false,
+            currentStatus: nextStatus || "AWAITING_DOCTOR",
+            currentOwnerDept: encounterDept,
+            chiefComplaint: chiefComplaint || null,
+            esiLevel: esiLevel ?? null,
+            triageCompletedAt: new Date(),
+          });
+        }
       }
     }
 

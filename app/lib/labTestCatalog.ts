@@ -24,6 +24,76 @@ export interface LabTestCatalogItem {
   needsPricing?: boolean;
 }
 
+// ─── Flat test name lists for doctor ordering (checkbox grids) ───────────────
+// These match the old inline LAB_TESTS array in app/Doctors/page.tsx
+
+export const DOCTOR_LAB_TESTS: string[] = [
+  "Full Blood Count (FBC / CBC)",
+  "Blood Smear for Malaria Parasites (MPS)",
+  "Malaria RDT",
+  "Urinalysis",
+  "Urine Microscopy",
+  "Blood Glucose (Random RBS)",
+  "Blood Glucose (Fasting FBS)",
+  "HbA1c",
+  "HIV Screen (1/2)",
+  "Hepatitis B Surface Antigen (HepBSAg)",
+  "Typhoid IgG",
+  "Typhoid IgM Ab Test",
+  "Widal Test",
+  "TPHA (Syphilis)",
+  "H. Pylori Stool Antigen",
+  "H. Pylori Antibody Test",
+  "Liver Function Test (LFT)",
+  "Renal Function Test (RFT)",
+  "Serum Electrolytes",
+  "Lipid Profile",
+  "Thyroid Function Test (TSH/T3/T4)",
+  "Coagulation Profile (PT/INR/APTT)",
+  "ESR",
+  "CD4 Count",
+  "Blood Group & Crossmatch",
+  "Brucella Agglutination Test",
+  "Solubility Test for Sickle Cell",
+  "MHS Sickle Cell Confirmatory Test",
+  "Urine hCG (Pregnancy Test)",
+  "Stool Analysis",
+  "Blood Culture & Sensitivity",
+  "Sputum AFB / GeneXpert TB",
+  "PSA (Prostate Specific Antigen)",
+  "Pap Smear",
+  "Uric Acid",
+  "Complete Blood Count with WBC Differential (3-part)",
+  "MPV (Mean Platelet Volume)",
+  "Post Blood Sugar (Post BS)",
+  "Sickling Test (Solubility)",
+];
+
+export const DOCTOR_RADIOLOGY_TESTS: string[] = [
+  "Chest X-ray",
+  "Abdominal X-ray",
+  "Pelvic X-ray",
+  "Skull X-ray",
+  "Spine X-ray (Cervical / Thoracic / Lumbar)",
+  "Limb X-ray (Upper / Lower)",
+  "CT Scan (Head / Chest / Abdomen / Pelvis)",
+  "MRI (Brain / Spine / Joint)",
+  "Mammography",
+  "Fluoroscopy / Barium Studies",
+  "IVP (Intravenous Pyelogram)",
+];
+
+export const DOCTOR_SONOGRAPHY_TESTS: string[] = [
+  "Abdominal USS",
+  "Pelvic USS",
+  "Obstetric USS",
+  "Musculoskeletal USS",
+  "Fetal Doppler",
+  "Small Parts USS",
+];
+
+// ─── Full structured catalog (for reception / cashier billing) ──────────────
+
 export const LAB_TEST_CATALOG: LabTestCatalogItem[] = [
   // ── HAEMATOLOGY ───────────────────────────────────────────────────────────
   { code: "LAB009", name: "Complete Blood Count / CBC",          specimenType: "BLOOD", section: "Haematology", template: "CBC",        defaultPrice: 20000 },
