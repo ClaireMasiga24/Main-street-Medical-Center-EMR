@@ -50,6 +50,7 @@ model Patient {
   DentalImage           DentalImage[]
   DentalProcedure       DentalProcedure[]
   DentalRecord          DentalRecord[]
+  DischargeSummary      DischargeSummary[]
   ImagingRequest        ImagingRequest[]
   LabCommunications     LabCommunication[]
 	  LabRequest            LabRequest[]
@@ -99,6 +100,7 @@ model ClinicalNote {
   encounter                Encounter @relation(fields: [encounterId], references: [id])
   authorStaffId            Int
   authorName               String
+  symptoms                 String?
   historyOfPresentIllness  String?
   reviewOfOtherSystems     String?
   pastMedicalHistory       String?
@@ -138,6 +140,7 @@ model Visit {
   Billing                 Billing[]
   DentalProcedure         DentalProcedure[]
   DentalRecord            DentalRecord[]
+  DischargeSummary        DischargeSummary[]
   ImagingRequest          ImagingRequest[]
   LabRequest              LabRequest[]
   Prescription            Prescription[]
@@ -454,6 +457,37 @@ model PatientReview {
   doctorName          String
   createdAt           DateTime @default(now())
   Patient             Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([createdAt])
+}
+
+model DischargeSummary {
+  id                      Int       @id @default(autoincrement())
+  patientId               Int
+  patientNumber           String
+  visitId                 Int?
+  doctorId                Int?
+  dateOfDischarge         DateTime  @default(now())
+  reasonForAdmission      String?
+  clinicalSummary         String?
+  examFindingsAtAdmission String?
+  examFindingsAtDischarge String?
+  investigationsSummary   Json?
+  diagnosis               String?
+  treatmentGiven          String?
+  conditionAtDischarge    String?
+  conditionOtherDetail    String?
+  dischargeMedication     String?
+  followUpPlan            String?
+  nextOfKinName           String?
+  nextOfKinSignature      String?
+  nextOfKinDate           DateTime?
+  doctorSignatureName     String?
+  doctorSignedAt          DateTime?
+  createdAt               DateTime  @default(now())
+  Patient                 Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  Visit                   Visit?    @relation(fields: [visitId], references: [id])
 
   @@index([patientId])
   @@index([createdAt])
@@ -794,6 +828,7 @@ enum LabStatus {
   SPECIMEN_COLLECTED
   AWAITING_VALIDATION
   REJECTED
+  CANCELLED
 }
 
 enum PrescriptionStatus {

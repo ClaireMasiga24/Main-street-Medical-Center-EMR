@@ -12,7 +12,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("RECEPTIONIST");
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -42,14 +41,10 @@ export default function LoginPage() {
       const user = data.user;
       const userData = JSON.stringify(user);
 
-      // save session — always clear the other storage to prevent stale data
-      if (rememberMe) {
-        sessionStorage.removeItem("user");
-        localStorage.setItem("user", userData);
-      } else {
-        localStorage.removeItem("user");
-        sessionStorage.setItem("user", userData);
-      }
+      // save session — always persist to localStorage so the user stays
+      // logged in on this device until they press Logout themselves
+      sessionStorage.removeItem("user");
+      localStorage.setItem("user", userData);
 
       // clean role-based routing
       const route = ROLE_ROUTES[user.role];
@@ -164,17 +159,6 @@ export default function LoginPage() {
                 <option value="RADIOLOGIST_SONOGRAPHER">Radiologist/Sonographer</option>
                 <option value="DENTIST">Dentist</option>
               </select>
-            </div>
-
-            {/* REMEMBER */}
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                suppressHydrationWarning
-              />
-              Remember me
             </div>
 
             {/* BUTTON */}

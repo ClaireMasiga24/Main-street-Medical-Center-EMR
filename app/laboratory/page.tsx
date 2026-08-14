@@ -5,15 +5,15 @@ import { useRouter } from "next/navigation";
 import {
   FlaskConical, Search, RefreshCw, LogOut, User, Phone,
   ArrowRight, CheckCircle, XCircle, Save, FileText,
-  Microscope, TestTube, Droplets, Syringe, Beaker,
-  Activity, AlertCircle, Plus, Minus, Trash2,
+  TestTube, Droplets, Syringe, Beaker,
+  AlertCircle, Plus, Minus, Trash2,
   Calendar, ClipboardList, Heart, Send,
   Stethoscope, Building2, Timer, Users,
   Bone, ExternalLink, ChevronLeft, ChevronRight,
   FlaskRound, BadgeCheck, Sigma, Menu, X, Home,
   Archive, Ban, MessageSquareText, Eye, Filter,
   Share2, Printer, Paperclip, Upload,
-  Clock, ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp,
 } from "lucide-react";
 import StaffMessaging from "../components/StaffMessaging";
 import {
@@ -471,6 +471,17 @@ export default function LaboratoryPage() {
   };
 
   // ── Step 3: Share Results ─────────────────────────────────────────────
+  const goBackToStep2 = () => {
+    setResultsSaved(false); // re-enable Save button so the tech can edit & continue
+    setWorkflowStep(2);
+  };
+
+  // ── Workflow navigation ───────────────────────────────────────────────
+  const goBackOneStep = () => {
+    if (workflowStep === 3) goBackToStep2();
+    else if (workflowStep === 2) setWorkflowStep(1);
+  };
+
   const toggleDept = (dept: string) => {
     setSelectedDepts(prev =>
       prev.includes(dept) ? prev.filter(d => d !== dept) : [...prev, dept]
@@ -614,14 +625,6 @@ export default function LaboratoryPage() {
     </button>
   );
 
-  // ── Small info tile for vitals grid ──────────────────────────────────
-  const InfoTile = ({ label, value }: { label: string; value: string }) => (
-    <div className="bg-white rounded-lg border border-gray-100 px-2.5 py-1.5">
-      <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wider">{label}</p>
-      <p className="text-xs font-medium text-gray-700 mt-0.5">{value}</p>
-    </div>
-  );
-
   // ── Render: Loading state ─────────────────────────────────────────────
   if (!isAuthed) return null;
 
@@ -674,34 +677,58 @@ export default function LaboratoryPage() {
 
         {/* Progress Bar */}
         <div className="max-w-4xl mx-auto px-4 pt-6 pb-4">
-          <div className="flex items-center gap-0">
-            {[1, 2, 3].map(step => (
-              <React.Fragment key={step}>
-                <div className="flex items-center gap-2 flex-1">
-                  <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
-                      workflowStep >= step ? "text-white shadow-md" : "bg-gray-200 text-gray-400"
-                    }`}
-                    style={workflowStep >= step ? { backgroundColor: BRAND } : {}}
-                  >
-                    {workflowStep > step ? <CheckCircle className="w-4 h-4" /> : step}
+          <div className="flex items-center gap-3">
+            {/* Back arrow — go to previous step */}
+            {workflowStep > 1 && (
+              <button
+                onClick={goBackOneStep}
+                title="Back to previous step"
+                aria-label="Back to previous step"
+                className="flex-shrink-0 w-9 h-9 rounded-full border border-gray-200 bg-white text-gray-600 hover:text-white flex items-center justify-center shadow-sm transition-all"
+                style={{ borderColor: "#d1d5db" }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = BRAND;
+                  e.currentTarget.style.borderColor = BRAND;
+                  e.currentTarget.style.color = "#fff";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = "#fff";
+                  e.currentTarget.style.borderColor = "#d1d5db";
+                  e.currentTarget.style.color = "#4b5563";
+                }}
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+            )}
+            <div className="flex items-center gap-0 flex-1">
+              {[1, 2, 3].map(step => (
+                <React.Fragment key={step}>
+                  <div className="flex items-center gap-2 flex-1">
+                    <div
+                      className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
+                        workflowStep >= step ? "text-white shadow-md" : "bg-gray-200 text-gray-400"
+                      }`}
+                      style={workflowStep >= step ? { backgroundColor: BRAND } : {}}
+                    >
+                      {workflowStep > step ? <CheckCircle className="w-4 h-4" /> : step}
+                    </div>
+                    <span className={`text-xs font-medium ${workflowStep >= step ? "text-gray-800" : "text-gray-400"}`}>
+                      {step === 1 ? "Sample Collected" : step === 2 ? "Enter Results" : "Share Results"}
+                    </span>
                   </div>
-                  <span className={`text-xs font-medium ${workflowStep >= step ? "text-gray-800" : "text-gray-400"}`}>
-                    {step === 1 ? "Sample Collected" : step === 2 ? "Enter Results" : "Share Results"}
-                  </span>
-                </div>
-                {step < 3 && (
-                  <div className={`flex-1 h-0.5 mx-2 ${workflowStep > step ? "" : "bg-gray-200"}`}
-                    style={workflowStep > step ? { backgroundColor: BRAND } : {}}
-                  />
-                )}
-              </React.Fragment>
-            ))}
+                  {step < 3 && (
+                    <div className={`flex-1 h-0.5 mx-2 ${workflowStep > step ? "" : "bg-gray-200"}`}
+                      style={workflowStep > step ? { backgroundColor: BRAND } : {}}
+                    />
+                  )}
+                </React.Fragment>
+              ))}
+            </div>
           </div>
         </div>
 
 
-        {/* ── Patient History Panel ──────────────────────────────────────── */}
+        {/* ── Clinical Summary Panel ──────────────────────────────────── */}
         <div className="max-w-4xl mx-auto px-4 pb-4">
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             {/* Toggle header */}
@@ -711,20 +738,9 @@ export default function LaboratoryPage() {
             >
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-gray-500" />
-                <span className="text-sm font-semibold text-gray-700">Patient History</span>
+                <span className="text-sm font-semibold text-gray-700">Clinical Summary</span>
                 {historyLoading && (
                   <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-                )}
-                {!historyLoading && patientHistoryData && (
-                  <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                    {[
-                      patientHistoryData.triage ? 1 : 0,
-                      patientHistoryData.visits?.length || 0,
-                      patientHistoryData.imaging?.length || 0,
-                      patientHistoryData.labHistory?.length || 0,
-                      patientHistoryData.prescriptions?.length || 0,
-                    ].reduce((a: number, b: number) => a + b, 0)} entries
-                  </span>
                 )}
               </div>
               {historyOpen ? (
@@ -746,70 +762,35 @@ export default function LaboratoryPage() {
                 )}
 
                 {/* Error / empty state (loaded but nothing found) */}
-                {!historyLoading && !patientHistoryData && (
+                {!historyLoading && !patientHistoryData && !selectedRequest?.clinicalNotes && !selectedRequest?.referralNotes && (
                   <div className="px-5 py-6 text-center text-sm text-gray-400">
-                    No history data available for this patient.
+                    No clinical summary available for this patient.
                   </div>
                 )}
 
-                {/* ── Triage / Nurse Assessment ── */}
-                {!historyLoading && patientHistoryData?.triage && (
+                {/* ── Lab Order Clinical Notes ── */}
+                {(selectedRequest?.clinicalNotes || selectedRequest?.referralNotes) && (
                   <div className="px-5 py-4">
-                    <div className="flex items-center gap-2 mb-3">
+                    <div className="flex items-center gap-2 mb-2">
                       <div className="w-7 h-7 rounded-md bg-blue-100 flex items-center justify-center">
-                        <Activity className="w-3.5 h-3.5 text-blue-600" />
+                        <FileText className="w-3.5 h-3.5 text-blue-600" />
                       </div>
-                      <span className="text-xs font-bold uppercase tracking-wider text-blue-700">Triage Assessment</span>
-                      <span className="text-[10px] text-blue-500 font-medium ml-auto">Nurse Midwife</span>
+                      <span className="text-xs font-bold uppercase tracking-wider text-blue-700">Clinical Notes</span>
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs">
-                      {patientHistoryData.triage.chiefComplaint && (
-                        <div className="col-span-full bg-blue-50/50 rounded-lg px-3 py-2 border border-blue-100">
-                          <span className="font-semibold text-gray-500">Chief Complaint:</span>
-                          <p className="text-gray-700 mt-0.5">{patientHistoryData.triage.chiefComplaint}</p>
-                        </div>
-                      )}
-                      {patientHistoryData.triage.esiLevel && (
-                        <InfoTile label="ESI Level" value={`Level ${patientHistoryData.triage.esiLevel}`} />
-                      )}
-                      {patientHistoryData.triage.temperature && (
-                        <InfoTile label="Temperature" value={`${patientHistoryData.triage.temperature} °C`} />
-                      )}
-                      {patientHistoryData.triage.bpSystolic && (
-                        <InfoTile label="BP" value={`${patientHistoryData.triage.bpSystolic}/${patientHistoryData.triage.bpDiastolic || "—"}`} />
-                      )}
-                      {patientHistoryData.triage.heartRate && (
-                        <InfoTile label="Heart Rate" value={`${patientHistoryData.triage.heartRate} bpm`} />
-                      )}
-                      {patientHistoryData.triage.spo2 && (
-                        <InfoTile label="SpO₂" value={`${patientHistoryData.triage.spo2}%`} />
-                      )}
-                      {patientHistoryData.triage.weight && (
-                        <InfoTile label="Weight" value={`${patientHistoryData.triage.weight} kg`} />
-                      )}
-                      {patientHistoryData.triage.allergies && (
-                        <InfoTile label="Allergies" value={patientHistoryData.triage.allergies} />
-                      )}
-                    </div>
-                    {patientHistoryData.triage.nursingNotes && (
-                      <div className="mt-2 text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
-                        <span className="font-semibold text-gray-400">Nursing Notes:</span> {patientHistoryData.triage.nursingNotes}
-                      </div>
-                    )}
-                    <div className="mt-2 text-[10px] text-gray-400">
-                      {new Date(patientHistoryData.triage.createdAt).toLocaleString()}
-                    </div>
+                    <p className="text-xs text-gray-700 bg-blue-50/50 rounded-lg px-3 py-2 border border-blue-100">
+                      {selectedRequest.clinicalNotes || selectedRequest.referralNotes}
+                    </p>
                   </div>
                 )}
 
-                {/* ── Doctor Consultations ── */}
+                {/* ── Diagnosis & Assessment ── */}
                 {!historyLoading && patientHistoryData?.visits?.length > 0 && (
                   <div className="px-5 py-4">
                     <div className="flex items-center gap-2 mb-3">
                       <div className="w-7 h-7 rounded-md bg-amber-100 flex items-center justify-center">
                         <Stethoscope className="w-3.5 h-3.5 text-amber-600" />
                       </div>
-                      <span className="text-xs font-bold uppercase tracking-wider text-amber-700">Doctor Consultations</span>
+                      <span className="text-xs font-bold uppercase tracking-wider text-amber-700">Diagnosis &amp; Assessment</span>
                       <span className="text-[9px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full ml-auto">
                         {patientHistoryData.visits.length}
                       </span>
@@ -831,163 +812,9 @@ export default function LaboratoryPage() {
                           {v.assessment && (
                             <p className="text-xs mb-0.5"><span className="font-semibold text-gray-500">Assessment:</span> {v.assessment}</p>
                           )}
-                          {v.treatmentPlan && (
-                            <p className="text-xs mb-0.5"><span className="font-semibold text-gray-500">Plan:</span> {v.treatmentPlan}</p>
-                          )}
                           {v.notes && (
-                            <p className="text-xs text-gray-500"><span className="font-semibold text-gray-400">Notes:</span> {v.notes}</p>
+                            <p className="text-xs text-gray-500"><span className="font-semibold text-gray-400">Clinical Notes:</span> {v.notes}</p>
                           )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Imaging / Radiology Reports ── */}
-                {!historyLoading && patientHistoryData?.imaging?.length > 0 && (
-                  <div className="px-5 py-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-7 h-7 rounded-md bg-cyan-100 flex items-center justify-center">
-                        <Microscope className="w-3.5 h-3.5 text-cyan-600" />
-                      </div>
-                      <span className="text-xs font-bold uppercase tracking-wider text-cyan-700">Imaging Reports</span>
-                      <span className="text-[9px] bg-cyan-50 text-cyan-600 px-1.5 py-0.5 rounded-full ml-auto">
-                        {patientHistoryData.imaging.length}
-                      </span>
-                    </div>
-                    <div className="space-y-2">
-                      {patientHistoryData.imaging.map((img: any) => (
-                        <div key={img.id} className="bg-cyan-50/30 rounded-lg border border-cyan-100 px-3 py-2.5">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-semibold text-gray-700">{img.studyType}</span>
-                            <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
-                              img.status === "REPORTED" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
-                            }`}>{img.status}</span>
-                          </div>
-                          {img.Staff && (
-                            <p className="text-[9px] text-gray-400 mb-1">By: {img.Staff.fullName} ({img.Staff.department})</p>
-                          )}
-                          {img.clinicalNotes && (
-                            <p className="text-xs text-gray-600"><span className="font-semibold text-gray-500">Notes:</span> {img.clinicalNotes}</p>
-                          )}
-                          {img.findings && (
-                            <p className="text-xs text-gray-600"><span className="font-semibold text-gray-500">Findings:</span> {img.findings}</p>
-                          )}
-                          {img.impression && (
-                            <p className="text-xs text-gray-600"><span className="font-semibold text-gray-500">Impression:</span> {img.impression}</p>
-                          )}
-                          {img.conclusion && (
-                            <p className="text-xs text-gray-600"><span className="font-semibold text-gray-500">Conclusion:</span> {img.conclusion}</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Lab History ── */}
-                {!historyLoading && patientHistoryData?.labHistory?.length > 0 && (
-                  <div className="px-5 py-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-7 h-7 rounded-md bg-purple-100 flex items-center justify-center">
-                        <FlaskConical className="w-3.5 h-3.5 text-purple-600" />
-                      </div>
-                      <span className="text-xs font-bold uppercase tracking-wider text-purple-700">Previous Lab Results</span>
-                      <span className="text-[9px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded-full ml-auto">
-                        {patientHistoryData.labHistory.length}
-                      </span>
-                    </div>
-                    <div className="space-y-2">
-                      {patientHistoryData.labHistory.map((lab: any) => (
-                        <div key={lab.id} className="bg-purple-50/30 rounded-lg border border-purple-100 px-3 py-2.5 flex items-center justify-between">
-                          <div>
-                            <p className="text-xs font-semibold text-gray-700">{lab.testName}</p>
-                            <p className="text-[10px] text-gray-400">
-                              {lab.Staff?.fullName || "—"} &middot; {new Date(lab.createdAt).toLocaleDateString()}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {lab.results && (
-                              <span className="text-[10px] font-mono bg-white px-2 py-0.5 rounded border border-purple-200 text-purple-700">
-                                Results entered
-                              </span>
-                            )}
-                            <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
-                              lab.status === "COMPLETED" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
-                            }`}>{lab.status}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Prescriptions ── */}
-                {!historyLoading && patientHistoryData?.prescriptions?.length > 0 && (
-                  <div className="px-5 py-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-7 h-7 rounded-md bg-emerald-100 flex items-center justify-center">
-                        <Heart className="w-3.5 h-3.5 text-emerald-600" />
-                      </div>
-                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">Prescriptions</span>
-                      <span className="text-[9px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full ml-auto">
-                        {patientHistoryData.prescriptions.length}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {patientHistoryData.prescriptions.map((rx: any) => (
-                        <div key={rx.id} className="bg-emerald-50/30 rounded-lg border border-emerald-100 px-3 py-2">
-                          <p className="text-xs font-semibold text-gray-700">{rx.medication}</p>
-                          {rx.dosage && <p className="text-[10px] text-gray-500">{rx.dosage}</p>}
-                          {rx.instructions && <p className="text-[10px] text-gray-400">{rx.instructions}</p>}
-                          <div className="flex items-center justify-between mt-1">
-                            <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded-full ${
-                              rx.status === "COMPLETED" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"
-                            }`}>{rx.status}</span>
-                            <span className="text-[9px] text-gray-400">{new Date(rx.createdAt).toLocaleDateString()}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Timeline ── */}
-                {!historyLoading && patientHistoryData?.timeline?.length > 0 && (
-                  <div className="px-5 py-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-7 h-7 rounded-md bg-gray-100 flex items-center justify-center">
-                        <Clock className="w-3.5 h-3.5 text-gray-600" />
-                      </div>
-                      <span className="text-xs font-bold uppercase tracking-wider text-gray-600">Patient Timeline</span>
-                      <span className="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full ml-auto">
-                        {patientHistoryData.timeline.length}
-                      </span>
-                    </div>
-                    <div className="relative pl-5 space-y-0">
-                      {patientHistoryData.timeline.map((t: any, i: number) => (
-                        <div key={t.id || i} className="relative pb-3 last:pb-0">
-                          {/* Vertical line */}
-                          {i < patientHistoryData.timeline.length - 1 && (
-                            <div className="absolute left-0 top-2 bottom-0 w-px bg-gray-200" />
-                          )}
-                          {/* Dot */}
-                          <div className="absolute left-[-5px] top-1.5 w-2.5 h-2.5 rounded-full bg-gray-300 border-2 border-white" />
-                          {/* Content */}
-                          <div className="ml-3">
-                            <p className="text-xs text-gray-700">
-                              {t.action}
-                              {t.fromDepartment && t.toDepartment && (
-                                <span className="text-gray-400">: {t.fromDepartment} → {t.toDepartment}</span>
-                              )}
-                            </p>
-                            {t.description && (
-                              <p className="text-[10px] text-gray-400">{t.description}</p>
-                            )}
-                            <p className="text-[9px] text-gray-300 mt-0.5">
-                              {new Date(t.createdAt).toLocaleString()} {t.performedBy ? `by ${t.performedBy}` : ""}
-                            </p>
-                          </div>
                         </div>
                       ))}
                     </div>
@@ -997,7 +824,7 @@ export default function LaboratoryPage() {
             )}
           </div>
         </div>
-        {/* ── End Patient History Panel ──────────────────────────────────── */}
+        {/* ── End Clinical Summary Panel ──────────────────────────────── */}
 
 
         {/* Workflow Content */}
@@ -1095,6 +922,7 @@ export default function LaboratoryPage() {
               onDownloadAttachment={downloadAttachment}
               onSaveResults={handleSaveResults}
               savingResults={savingResults}
+              onBack={() => setWorkflowStep(1)}
             />
           )}
 
@@ -1236,18 +1064,26 @@ export default function LaboratoryPage() {
                       </button>
                     </div>
                   ) : (
-                    <button
-                      onClick={handleSendResults}
-                      disabled={sendingResults || selectedDepts.length === 0}
-                      className="w-full py-3 text-white font-semibold rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-2 text-base"
-                      style={{ backgroundColor: BRAND }}
-                    >
-                      {sendingResults ? (
-                        "Sending..."
-                      ) : (
-                        <><Share2 className="w-5 h-5" /> Share Results {selectedDepts.length > 0 ? `(${selectedDepts.length} recipient${selectedDepts.length > 1 ? "s" : ""})` : ""}</>
-                      )}
-                    </button>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={goBackToStep2}
+                        className="px-5 py-3 text-sm font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 flex-shrink-0"
+                      >
+                        <ChevronLeft className="w-4 h-4" /> Back to Step 2
+                      </button>
+                      <button
+                        onClick={handleSendResults}
+                        disabled={sendingResults || selectedDepts.length === 0}
+                        className="flex-1 py-3 text-white font-semibold rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-2 text-base"
+                        style={{ backgroundColor: BRAND }}
+                      >
+                        {sendingResults ? (
+                          "Sending..."
+                        ) : (
+                          <><Share2 className="w-5 h-5" /> Share Results {selectedDepts.length > 0 ? `(${selectedDepts.length} recipient${selectedDepts.length > 1 ? "s" : ""})` : ""}</>
+                        )}
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

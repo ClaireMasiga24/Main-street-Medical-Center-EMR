@@ -4,6 +4,7 @@ import React from "react";
 import {
   Microscope, CheckCircle, Save, AlertCircle,
   Upload, RefreshCw, FileText, Eye, Paperclip,
+  ChevronLeft,
 } from "lucide-react";
 import type {
   TestDefinition,
@@ -52,6 +53,8 @@ export interface ResultEntryFormProps {
   onSaveResults: () => void;
   /** Whether a save operation is in progress */
   savingResults: boolean;
+  /** Optional: go back to the previous workflow step */
+  onBack?: () => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────
@@ -75,6 +78,7 @@ export function ResultEntryForm({
   onDownloadAttachment,
   onSaveResults,
   savingResults,
+  onBack,
 }: ResultEntryFormProps) {
   const isFileTest = def.fields.every((f) => f.inputType === "file");
 
@@ -342,6 +346,16 @@ export function ResultEntryForm({
                 <Save className="w-4 h-4" /> Save Results &amp; Continue
               </>
             )}
+          </button>
+        )}
+
+        {/* Back to previous step */}
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="mt-3 w-full py-2.5 text-sm font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2"
+          >
+            <ChevronLeft className="w-4 h-4" /> Back to Step 1
           </button>
         )}
       </div>

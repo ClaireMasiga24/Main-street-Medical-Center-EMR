@@ -78,19 +78,24 @@ export async function closeEncounter(
 }
 
 /**
- * Create an encounter from triage or reception.
+ * Create an encounter from triage, reception, or doctor registration.
+ * Accepts an optional transaction client (tx) for use inside prisma.$transaction.
  */
-export async function createEncounter(data: {
-  patientId: number;
-  source: string;
-  isEmergency: boolean;
-  currentStatus?: string;
-  currentOwnerDept?: string;
-  chiefComplaint?: string | null;
-  esiLevel?: number | null;
-  triageCompletedAt?: Date | null;
-}): Promise<{ id: number }> {
-  return prisma.encounter.create({
+export async function createEncounter(
+  data: {
+    patientId: number;
+    source: string;
+    isEmergency: boolean;
+    currentStatus?: string;
+    currentOwnerDept?: string;
+    chiefComplaint?: string | null;
+    esiLevel?: number | null;
+    triageCompletedAt?: Date | null;
+  },
+  tx?: Prisma.TransactionClient
+): Promise<{ id: number }> {
+  const client = tx ?? prisma;
+  return client.encounter.create({
     data: {
       patientId: data.patientId,
       source: data.source,

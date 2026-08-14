@@ -63,107 +63,133 @@ export async function POST(req: NextRequest) {
       notifyDepartment,
       dentistReferral,
       dentistNotes,
+      isStaffId,
     } = await req.json();
 
     if (!patientId || !doctorId || !doctorName) {
       return NextResponse.json({ error: "patientId, doctorId, and doctorName are required" }, { status: 400 });
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      // 1. Create the review (skip if this is purely a referral with no clinical fields)
-      const hasClinicalFields = followUpNotes || examinationFindings || historyOfPresentIllness || diagnosis || treatmentPlan;
-      let review: any = null;
-      if (hasClinicalFields || labOrders?.length || imagingOrders?.length || dentistReferral) {
-        review = await tx.patientReview.create({
-          data: {
-            patientId,
-            doctorId,
-            doctorName,
-            followUpNotes: followUpNotes || null,
-            examinationFindings: examinationFindings || null,
-            historyOfPresentIllness: historyOfPresentIllness || null,
-            diagnosis: diagnosis || null,
-            treatmentPlan: treatmentPlan || null,
-            labOrders: labOrders?.length ? JSON.stringify(labOrders) : null,
-            imagingOrders: imagingOrders?.length ? JSON.stringify(imagingOrders) : null,
-          },
+    // Resolve the correct staff ID: doctorId might be a User.id rather than Staff.id.
+    // LabRequest.requestedById requires a valid Staff.id.
+    // When isStaffId === true (admitted-patient flows), skip resolution entirely.
+    let resolvedStaffId = doctorId;
+    if (!isStaffId) {
+      const staffExists = await prisma.staff.findUnique({ where: { id: doctorId }, select: { id: true } });
+      if (!staffExists) {
+        // Look up the Staff record linked to this User
+        const user = await prisma.user.findUnique({
+          where: { id: doctorId },
+          select: { Staff: { select: { id: true } } },
         });
-      }
-
-      // 2. Create LabRequest records for each ordered lab test
-      const createdLabRequests: any[] = [];
-      if (labOrders?.length) {
-        for (let i = 0; i < labOrders.length; i++) {
-          const lab = await tx.labRequest.create({
-            data: {
-              patientId,
-              requestedById: doctorId,
-              testName: labOrders[i],
-              testCode: testCode?.[i] || null,
-              priority: "ROUTINE",
-              referralSource: "Doctor",
-              clinicalNotes: followUpNotes || null,
-              status: "PENDING",
-            },
+        if (user?.Staff) {
+          resolvedStaffId = user.Staff.id;
+        } else {
+          // Last resort: find the Staff record by name
+          const staffByName = await prisma.staff.findFirst({
+            where: { fullName: { contains: doctorName, mode: "insensitive" } },
+            select: { id: true },
           });
-          createdLabRequests.push(lab);
+          if (staffByName) resolvedStaffId = staffByName.id;
         }
       }
+    }
 
-      // 3. Create ImagingRequest records for each ordered imaging study
-      const createdImagingRequests: any[] = [];
-      if (imagingOrders?.length) {
-        for (const studyType of imagingOrders) {
-          const mappedStudy = studyType.toUpperCase().includes("X-RAY") ? "X_RAY" :
-                              studyType.toUpperCase().includes("ULTRASOUND") ? "ULTRASOUND" :
-                              studyType.toUpperCase().includes("CT") ? "CT_SCAN" :
-                              studyType.toUpperCase().includes("MRI") ? "MRI" :
-                              studyType.toUpperCase().includes("MAMMO") ? "MAMMOGRAPHY" : "X_RAY";
-          const img = await tx.imagingRequest.create({
-            data: {
-              patientId,
-              requestedById: doctorId,
-              studyType: mappedStudy,
-              priority: "ROUTINE",
-              referralSource: "Doctor",
-              clinicalNotes: followUpNotes || null,
-              status: "ORDERED",
-            },
-          });
-          createdImagingRequests.push(img);
-        }
-      }
+    // 1. Create the review (skip if this is purely a referral with no clinical fields)
+    const hasClinicalFields = followUpNotes || examinationFindings || historyOfPresentIllness || diagnosis || treatmentPlan;
+    let review: any = null;
+    if (hasClinicalFields || labOrders?.length || imagingOrders?.length || dentistReferral) {
+      review = await prisma.patientReview.create({
+        data: {
+          patientId,
+          doctorId,
+          doctorName,
+          followUpNotes: followUpNotes || null,
+          examinationFindings: examinationFindings || null,
+          historyOfPresentIllness: historyOfPresentIllness || null,
+          diagnosis: diagnosis || null,
+          treatmentPlan: treatmentPlan || null,
+          labOrders: labOrders?.length ? JSON.stringify(labOrders) : null,
+          imagingOrders: imagingOrders?.length ? JSON.stringify(imagingOrders) : null,
+        },
+      });
+    }
 
-      // 4. Create notifications for the target departments
-      if (createdLabRequests.length > 0) {
-        await tx.notification.create({
-          data: {
-            department: "Laboratory",
-            patientId,
-            title: "New Lab Orders from Doctor",
-            message: `Dr. ${doctorName} ordered ${createdLabRequests.length} test(s) for patient`,
-            type: "RESULT_READY",
-          },
-        });
-      }
-      if (createdImagingRequests.length > 0) {
-        const imgDept = notifyDepartment && DEPT_NOTIFICATION_MAP[notifyDepartment]
-          ? DEPT_NOTIFICATION_MAP[notifyDepartment]
-          : "Radiology";
-        await tx.notification.create({
-          data: {
-            department: imgDept,
-            patientId,
-            title: "New Imaging Orders from Doctor",
-            message: `Dr. ${doctorName} ordered ${createdImagingRequests.length} study/studies for patient`,
-            type: "RESULT_READY",
-          },
-        });
-      }
+    // 2. Create LabRequest records for each ordered lab test (batch create)
+    let labCount = 0;
+    let createdLabRequests: any[] = [];
+    if (labOrders?.length) {
+      const labData = labOrders.map((name: string, i: number) => ({
+        patientId,
+        requestedById: resolvedStaffId,
+        testName: name,
+        testCode: testCode?.[i] || null,
+        priority: "ROUTINE",
+        referralSource: "Doctor",
+        clinicalNotes: followUpNotes || null,
+        status: "PENDING" as const,
+      }));
+      createdLabRequests = await prisma.labRequest.createManyAndReturn({ data: labData });
+      labCount = labOrders.length;
+    }
 
-      // 5. Create notification for the target department (e.g. Lab, Nurse, Dentist)
-      if (notifyDepartment) {
-        const deptName = DEPT_NOTIFICATION_MAP[notifyDepartment] || notifyDepartment;
+    // 3. Create ImagingRequest records for each ordered imaging study (batch create)
+    let imagingCount = 0;
+    let createdImagingRequests: any[] = [];
+    if (imagingOrders?.length) {
+      const imgData = imagingOrders.map((studyType: string) => {
+        const mappedStudy = studyType.toUpperCase().includes("X-RAY") ? "X_RAY" :
+                            studyType.toUpperCase().includes("ULTRASOUND") ? "ULTRASOUND" :
+                            studyType.toUpperCase().includes("CT") ? "CT_SCAN" :
+                            studyType.toUpperCase().includes("MRI") ? "MRI" :
+                            studyType.toUpperCase().includes("MAMMO") ? "MAMMOGRAPHY" : studyType;
+        return {
+          patientId,
+          requestedById: resolvedStaffId,
+          studyType: mappedStudy,
+          priority: "ROUTINE",
+          referralSource: "Doctor",
+          clinicalNotes: followUpNotes || null,
+          status: "ORDERED",
+        };
+      });
+      createdImagingRequests = await prisma.imagingRequest.createManyAndReturn({ data: imgData });
+      imagingCount = imagingOrders.length;
+    }
+
+    // 4. Create notifications (deduplicated — skip notifyDepartment if already covered by labCount/imagingCount)
+    const alreadyNotified = new Set<string>();
+    if (labCount > 0) {
+      await prisma.notification.create({
+        data: {
+          department: "Laboratory",
+          patientId,
+          title: "New Lab Orders from Doctor",
+          message: `Dr. ${doctorName} ordered ${labCount} test(s) for patient`,
+          type: "RESULT_READY",
+        },
+      });
+      alreadyNotified.add("Laboratory");
+    }
+    if (imagingCount > 0) {
+      const imgDept = notifyDepartment && DEPT_NOTIFICATION_MAP[notifyDepartment]
+        ? DEPT_NOTIFICATION_MAP[notifyDepartment]
+        : "Radiology";
+      await prisma.notification.create({
+        data: {
+          department: imgDept,
+          patientId,
+          title: "New Imaging Orders from Doctor",
+          message: `Dr. ${doctorName} ordered ${imagingCount} study/studies for patient`,
+          type: "RESULT_READY",
+        },
+      });
+      alreadyNotified.add(imgDept);
+    }
+    if (notifyDepartment) {
+      const deptName = DEPT_NOTIFICATION_MAP[notifyDepartment] || notifyDepartment;
+      // Skip if this department was already notified via labCount or imagingCount
+      if (!alreadyNotified.has(deptName)) {
         let title = "Patient referred";
         let message = followUpNotes || `Dr. ${doctorName} sent patient to ${deptName}`;
 
@@ -178,65 +204,59 @@ export async function POST(req: NextRequest) {
           title = "Patient sent for monitoring";
         }
 
-        await tx.notification.create({
-          data: {
-            department: deptName,
-            patientId,
-            title,
-            message,
-            type: "RESULT_READY",
-          },
+        await prisma.notification.create({
+          data: { department: deptName, patientId, title, message, type: "RESULT_READY" },
         });
       }
+    }
 
-      // 6. Log to timeline
-      let timelineAction = "PROCEDURE";
-      let timelineDesc = `Dr. ${doctorName} performed a review`;
+    // 5. Log to timeline
+    let timelineAction = "PROCEDURE";
+    let timelineDesc = `Dr. ${doctorName} performed a review`;
 
-      if (createdLabRequests.length > 0) {
-        timelineAction = "LAB_ORDER";
-        timelineDesc = `Dr. ${doctorName} ordered ${createdLabRequests.length} lab test(s)`;
-      }
-      if (createdImagingRequests.length > 0) {
-        timelineAction = "IMAGING_ORDER";
-        timelineDesc = `Dr. ${doctorName} ordered ${createdImagingRequests.length} imaging study/studies`;
-      }
-      if (dentistReferral || notifyDepartment === "DENTIST") {
-        timelineAction = "REFERRAL";
-        timelineDesc = `Dr. ${doctorName} referred patient to Dentist`;
-      }
-      if (notifyDepartment === "NURSE" && createdLabRequests.length === 0 && createdImagingRequests.length === 0 && !dentistReferral) {
-        timelineAction = "REFERRAL";
-        timelineDesc = `Dr. ${doctorName} sent patient to Nurse/Midwife for monitoring`;
-      }
+    if (labCount > 0) {
+      timelineAction = "LAB_ORDER";
+      timelineDesc = `Dr. ${doctorName} ordered ${labCount} lab test(s)`;
+    }
+    if (imagingCount > 0) {
+      timelineAction = "IMAGING_ORDER";
+      timelineDesc = `Dr. ${doctorName} ordered ${imagingCount} imaging study/studies`;
+    }
+    if (dentistReferral || notifyDepartment === "DENTIST") {
+      timelineAction = "REFERRAL";
+      timelineDesc = `Dr. ${doctorName} referred patient to Dentist`;
+    }
+    if (notifyDepartment === "NURSE" && labCount === 0 && imagingCount === 0 && !dentistReferral) {
+      timelineAction = "REFERRAL";
+      timelineDesc = `Dr. ${doctorName} sent patient to Nurse/Midwife for monitoring`;
+    }
 
-      await tx.patientTimeline.create({
-        data: {
-          patientId,
-          action: timelineAction,
-          fromDepartment: "DOCTOR",
-          toDepartment: notifyDepartment
-            ? (notifyDepartment === "LAB" ? "LAB" :
-               notifyDepartment === "RADIOLOGY" ? "RADIOLOGY" :
-               notifyDepartment === "SONOGRAPHY" ? "SONOGRAPHY" :
-               notifyDepartment === "DENTIST" ? "DENTIST" :
-               notifyDepartment === "NURSE" ? "NURSE" : notifyDepartment)
-            : null,
-          description: timelineDesc,
-          metadata: JSON.stringify({
-            reviewId: review?.id || null,
-            labCount: createdLabRequests.length,
-            imagingCount: createdImagingRequests.length,
-            notifyDepartment: notifyDepartment || null,
-            dentistReferral: dentistReferral || false,
-          }),
-          performedBy: doctorName,
-          performedById: doctorId,
-        },
-      });
-
-      return { review, labCount: createdLabRequests.length, imagingCount: createdImagingRequests.length };
+    await prisma.patientTimeline.create({
+      data: {
+        patientId,
+        action: timelineAction,
+        fromDepartment: "DOCTOR",
+        toDepartment: notifyDepartment
+          ? (notifyDepartment === "LAB" ? "LAB" :
+             notifyDepartment === "RADIOLOGY" ? "RADIOLOGY" :
+             notifyDepartment === "SONOGRAPHY" ? "SONOGRAPHY" :
+             notifyDepartment === "DENTIST" ? "DENTIST" :
+             notifyDepartment === "NURSE" ? "NURSE" : notifyDepartment)
+          : null,
+        description: timelineDesc,
+        metadata: JSON.stringify({
+          reviewId: review?.id || null,
+          labCount,
+          imagingCount,
+          notifyDepartment: notifyDepartment || null,
+          dentistReferral: dentistReferral || false,
+        }),
+        performedBy: doctorName,
+        performedById: doctorId,
+      },
     });
+
+    const result = { review, labCount, imagingCount, createdLabRequests, createdImagingRequests };
 
     return NextResponse.json({ success: true, ...result });
   } catch (err) {

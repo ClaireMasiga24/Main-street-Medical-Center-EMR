@@ -42,9 +42,9 @@ export async function GET(req: NextRequest) {
       encounterWhere.currentStatus = statusFilter;
     }
 
-    const encounters = await prisma.encounter.findMany({
+    let encounters = await prisma.encounter.findMany({
       where: encounterWhere,
-      orderBy: [{ isEmergency: "desc" }, { updatedAt: "asc" }],
+      orderBy: [{ isEmergency: "desc" }, { updatedAt: "desc" }],
       include: {
         patient: {
           include: {
@@ -71,6 +71,14 @@ export async function GET(req: NextRequest) {
           },
         },
       },
+    });
+
+    // Sort: doctor-registered patients first, then by most-recently-updated
+    encounters.sort((a, b) => {
+      const aIsDocReg = a.source === "Doctor Registration" ? 1 : 0;
+      const bIsDocReg = b.source === "Doctor Registration" ? 1 : 0;
+      if (aIsDocReg !== bIsDocReg) return bIsDocReg - aIsDocReg;
+      return 0; // Rest already sorted by Prisma: emergency desc, updatedAt desc
     });
 
     const recentNotifications = await prisma.notification.findMany({

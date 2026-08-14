@@ -101,6 +101,28 @@ export async function POST(req: NextRequest) {
 
     const performerName = staffName || "Doctor";
 
+    // Resolve the correct staff ID: staffId might be a User.id rather than Staff.id.
+    // LabRequest.requestedById requires a valid Staff.id.
+    let resolvedStaffId = staffId;
+    if (resolvedStaffId) {
+      const staffExists = await prisma.staff.findUnique({ where: { id: resolvedStaffId }, select: { id: true } });
+      if (!staffExists) {
+        const user = await prisma.user.findUnique({
+          where: { id: resolvedStaffId },
+          select: { Staff: { select: { id: true } } },
+        });
+        if (user?.Staff) {
+          resolvedStaffId = user.Staff.id;
+        } else {
+          const staffByName = await prisma.staff.findFirst({
+            where: { fullName: { contains: staffName, mode: "insensitive" } },
+            select: { id: true },
+          });
+          if (staffByName) resolvedStaffId = staffByName.id;
+        }
+      }
+    }
+
     // ── Admitted patient routing ──
     let effectiveRoute = routeTo;
     const patient = await prisma.patient.findUnique({
@@ -112,7 +134,7 @@ export async function POST(req: NextRequest) {
       if (routeTo === "NURSE") effectiveRoute = "TREATMENT";
     }
 
-    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+	  const { visit } = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const visit = await tx.visit.create({
         data: {
           patientId,
@@ -145,6 +167,7 @@ export async function POST(req: NextRequest) {
             encounterId,
             authorStaffId: staffId,
             authorName: staffName,
+            symptoms: symptoms || null,
             historyOfPresentIllness: historyOfPresentIllness || null,
             reviewOfOtherSystems: reviewOfOtherSystems || null,
             pastMedicalHistory: pastMedicalHistory || null,
@@ -157,6 +180,7 @@ export async function POST(req: NextRequest) {
             signature: doctorSignature || null,
           },
           update: {
+            symptoms: symptoms || null,
             historyOfPresentIllness: historyOfPresentIllness || null,
             reviewOfOtherSystems: reviewOfOtherSystems || null,
             pastMedicalHistory: pastMedicalHistory || null,
@@ -188,13 +212,13 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      if (labRequests?.length && staffId) {
+      if (labRequests?.length && resolvedStaffId) {
         await tx.labRequest.createMany({
           data: labRequests.map((l: { testName: string }) => ({
             patientId,
             encounterId: encounterId || null,
             visitId:       visit.id,
-            requestedById: staffId,
+            requestedById: resolvedStaffId,
             testName:      l.testName,
             referralSource: "Doctor",
             status:        "PENDING",
@@ -203,8 +227,8 @@ export async function POST(req: NextRequest) {
       }
 
       // Fallback "Pending Lab Workup"
-      if (effectiveRoute === "LAB" && (!labRequests?.length || !staffId)) {
-        let docStaffId = staffId;
+      if (effectiveRoute === "LAB" && (!labRequests?.length || !resolvedStaffId)) {
+        let docStaffId = resolvedStaffId;
         if (!docStaffId) {
           const fallbackStaff = await tx.staff.findFirst({ orderBy: { id: "asc" } });
           docStaffId = fallbackStaff?.id;
@@ -364,61 +388,67 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // ── Log to PatientTimeline ──
-      const actionLabel =
-        effectiveRoute === "ADMIT" ? "ADMITTED" :
-        effectiveRoute === "CASHIER" ? "FINISHED" :
-        effectiveRoute === "DISCHARGE" ? "DISCHARGED" :
-        effectiveRoute === "TREATMENT" ? "SENT TO TREATMENT ROOM" :
-        effectiveRoute === "SEND_ORDERS" ? "ORDERS_SENT" :
-        effectiveRoute === "SHARE" ? "SHARED" : "REFERRED";
+	      return { visit };
+	  }, { maxWait: 15000, timeout: 15000 });
 
-      await tx.patientTimeline.create({
-        data: {
-          patientId,
-          action:        "CONSULTATION_END",
-          fromDepartment: "DOCTOR",
-          toDepartment:   effectiveRoute === "ADMIT" ? "WARD" :
-                          effectiveRoute === "CASHIER" ? "CASHIER" :
-                          effectiveRoute === "DISCHARGE" ? "DISCHARGE" :
-                          effectiveRoute === "TREATMENT" ? "TREATMENT_ROOM" :
-                          effectiveRoute === "SEND_ORDERS" ? "MULTIPLE" :
-                          effectiveRoute === "SHARE" ? "SHARE" :
-                          effectiveRoute === "REFERRAL" && labRequests?.length ? "LAB" : effectiveRoute,
-          description:   effectiveRoute === "SEND_ORDERS"
-            ? `Orders sent — ${labRequests?.length || 0} lab test(s), ${prescriptions?.length || 0} prescription(s). Diagnosis: ${diagnosis || "N/A"}`
-            : effectiveRoute === "SHARE"
-              ? `Results shared with ${(shareTargets || []).join(", ") || "departments"}`
-              : `Consultation completed — ${actionLabel}. Diagnosis: ${diagnosis || "Not yet diagnosed"}`,
-          metadata:      JSON.stringify({
-            visitId:       visit.id,
-            encounterId,
-            diagnosis,
-            treatmentPlan,
-            prescriptionCount: prescriptions?.length || 0,
-            labCount:          labRequests?.length || 0,
-            routeTo: effectiveRoute,
-            shareTargets: shareTargets || [],
-          }),
-          performedBy:   performerName,
-          performedById: staffId || null,
-        },
-      });
+	  // ── Log to PatientTimeline (outside transaction — audit trail, not critical) ──
+	  const actionLabel =
+	    effectiveRoute === "ADMIT" ? "ADMITTED" :
+	    effectiveRoute === "CASHIER" ? "FINISHED" :
+	    effectiveRoute === "DISCHARGE" ? "DISCHARGED" :
+	    effectiveRoute === "TREATMENT" ? "SENT TO TREATMENT ROOM" :
+	    effectiveRoute === "SEND_ORDERS" ? "ORDERS_SENT" :
+	    effectiveRoute === "SHARE" ? "SHARED" : "REFERRED";
 
-      await tx.patientTimeline.create({
-        data: {
-          patientId,
-          action:        "STATUS_CHANGE",
-          fromDepartment: "AWAITING_DOCTOR",
-          toDepartment:   "CONSULTATION",
-          description:   `Consultation began with Dr. ${performerName}`,
-          performedBy:   performerName,
-          performedById: staffId || null,
-        },
-      });
-    });
+	  try {
+	    await prisma.patientTimeline.create({
+	      data: {
+	        patientId,
+	        action:        "CONSULTATION_END",
+	        fromDepartment: "DOCTOR",
+	        toDepartment:   effectiveRoute === "ADMIT" ? "WARD" :
+	                        effectiveRoute === "CASHIER" ? "CASHIER" :
+	                        effectiveRoute === "DISCHARGE" ? "DISCHARGE" :
+	                        effectiveRoute === "TREATMENT" ? "TREATMENT_ROOM" :
+	                        effectiveRoute === "SEND_ORDERS" ? "MULTIPLE" :
+	                        effectiveRoute === "SHARE" ? "SHARE" :
+	                        effectiveRoute === "REFERRAL" && labRequests?.length ? "LAB" : effectiveRoute,
+	        description:   effectiveRoute === "SEND_ORDERS"
+	          ? `Orders sent — ${labRequests?.length || 0} lab test(s), ${prescriptions?.length || 0} prescription(s). Diagnosis: ${diagnosis || "N/A"}`
+	          : effectiveRoute === "SHARE"
+	            ? `Results shared with ${(shareTargets || []).join(", ") || "departments"}`
+	            : `Consultation completed — ${actionLabel}. Diagnosis: ${diagnosis || "Not yet diagnosed"}`,
+	        metadata:      JSON.stringify({
+	          visitId:       visit.id,
+	          encounterId,
+	          diagnosis,
+	          treatmentPlan,
+	          prescriptionCount: prescriptions?.length || 0,
+	          labCount:          labRequests?.length || 0,
+	          routeTo: effectiveRoute,
+	          shareTargets: shareTargets || [],
+	        }),
+	        performedBy:   performerName,
+	        performedById: staffId || null,
+	      },
+	    });
 
-    return NextResponse.json({ success: true });
+	    await prisma.patientTimeline.create({
+	      data: {
+	        patientId,
+	        action:        "STATUS_CHANGE",
+	        fromDepartment: "AWAITING_DOCTOR",
+	        toDepartment:   "CONSULTATION",
+	        description:   `Consultation began with Dr. ${performerName}`,
+	        performedBy:   performerName,
+	        performedById: staffId || null,
+	      },
+	    });
+	  } catch (timelineErr) {
+	    console.error("[doctor POST] timeline log failed (non-critical)", timelineErr);
+	  }
+
+	  return NextResponse.json({ success: true });
   } catch (err) {
     console.error("[doctor POST]", err);
     return NextResponse.json({ error: "Server error. Please try again." }, { status: 500 });

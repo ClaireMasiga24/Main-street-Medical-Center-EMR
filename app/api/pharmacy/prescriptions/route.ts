@@ -59,9 +59,9 @@ export async function POST(request: Request) {
     const patName = `${patient.firstName} ${patient.lastName} (${patient.patientNumber})`;
 
     // ── Execute in a transaction ──
-    await prisma.$transaction(async (tx: any) => {
-      // 1. Create prescription records
-      await tx.prescription.createMany({
+    const created = await prisma.$transaction(async (tx: any) => {
+      // 1. Create prescription records and return them
+      const records = await tx.prescription.createManyAndReturn({
         data: sanitizedPrescriptions.map((rx: any) => ({
           patientId: patient.id,
           visitId: visitId || null,
@@ -112,12 +112,15 @@ export async function POST(request: Request) {
           performedBy: performerName,
         },
       });
+
+      return records;
     });
 
     return NextResponse.json({
       success: true,
       message: `${sanitizedPrescriptions.length} prescription(s) sent to Pharmacy`,
       count: sanitizedPrescriptions.length,
+      createdPrescriptions: created,
     });
   } catch (error: any) {
     console.error("[Pharmacy Prescriptions API]", error.message);

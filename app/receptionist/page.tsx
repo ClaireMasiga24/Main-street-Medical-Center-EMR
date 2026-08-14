@@ -188,6 +188,19 @@ const formatUGX = (n: number) =>
 const formatAge = (age: number, unit: string) =>
   `${age} ${unit === "months" ? "mo" : "yrs"}`;
 
+// Format a Date as a LOCAL "YYYY-MM-DDTHH:mm" string for <input type="datetime-local">
+// (new Date().toISOString().slice(0, 16) returns UTC and shifts times by the UTC offset)
+const toLocalInputValue = (d: Date) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+// Format a Date as a LOCAL "YYYY-MM-DD" key
+const toLocalDateKey = (d: Date) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
 // ─── Lab Test Price List — now using shared LAB_TEST_CATALOG ─────────────────
 
 const SERVICE_PRICE_KEY = "MSMC_SERVICE_PRICES";
@@ -266,7 +279,7 @@ function StaffAttendancePanel() {
   // ── Fetch attendance records (for Records view) ─────────────────────────────
   const fetchRecords = useCallback(async () => {
     try {
-      const today = new Date().toISOString().split("T")[0];
+      const today = toLocalDateKey(new Date());
       const res = await fetch(`/api/staff-attendance?date=${today}`);
       const data = await res.json();
       setRecords(data.records ?? []);
@@ -288,7 +301,7 @@ function StaffAttendancePanel() {
 
   // ── Open manual time-entry modal ────────────────────────────────────────────
   const openTimeEntry = (staff: StaffMember, mode: "clockIn" | "clockOut") => {
-    setEntryTime(new Date().toISOString().slice(0, 16));
+    setEntryTime(toLocalInputValue(new Date()));
     setTimeEntry({ staff, mode });
   };
 
@@ -303,7 +316,9 @@ function StaffAttendancePanel() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             staffId: timeEntry.staff.id,
-            clockIn: entryTime,
+            // datetime-local value is parsed as browser-LOCAL time → send as UTC ISO
+            // so the server stores the correct instant regardless of its own timezone
+            clockIn: new Date(entryTime).toISOString(),
           }),
         });
         if (!res.ok) {
@@ -316,7 +331,7 @@ function StaffAttendancePanel() {
         const res = await fetch("/api/staff-attendance", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: attendanceId, clockOut: entryTime }),
+          body: JSON.stringify({ id: attendanceId, clockOut: new Date(entryTime).toISOString() }),
         });
         if (!res.ok) {
           alert("Failed to clock out");
@@ -663,7 +678,7 @@ function AppointmentsPanel({ staffId, patients }: { staffId: string | null; pati
     const now = new Date();
     now.setMinutes(0, 0, 0);
     now.setHours(now.getHours() + 1);
-    return now.toISOString().slice(0, 16);
+    return toLocalInputValue(now);
   });
   const [formReason, setFormReason] = useState("");
   const [formNotes, setFormNotes] = useState("");
@@ -2581,6 +2596,7 @@ export default function ReceptionistPage() {
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [registryLoading, setRegistryLoading] = useState(true);
   const [isRouting, setIsRouting] = useState(false);
   const [isDischarging, setIsDischarging] = useState(false);
   const [labOrderTarget, setLabOrderTarget] = useState<Patient | null>(null);
@@ -2639,7 +2655,16 @@ export default function ReceptionistPage() {
   }, [universalSearchQuery, fetchUniversalSearch]);
 
   useEffect(() => {
-    fetchActiveRegistry();
+    // Show a loader (min ~800ms, max 4s) instead of flashing an empty
+    // registry while the initial fetch is still in flight.
+    setRegistryLoading(true);
+    const started = Date.now();
+    const cap = setTimeout(() => setRegistryLoading(false), 4000);
+    fetchActiveRegistry().finally(() => {
+      clearTimeout(cap);
+      const remaining = Math.max(0, 800 - (Date.now() - started));
+      setTimeout(() => setRegistryLoading(false), remaining);
+    });
     try {
       const r = sessionStorage.getItem("user") || localStorage.getItem("user");
       if (r) {
@@ -2906,9 +2931,15 @@ export default function ReceptionistPage() {
               <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
                 <div className="border-b border-slate-100 bg-slate-50/70 px-6 py-3 flex justify-between items-center">
                   <span className="text-xs font-bold tracking-wider text-slate-500 uppercase">Live Admissions</span>
-                  <span className="text-xs font-bold text-slate-400 font-mono">{filteredPatients.length} Records</span>
+                  <span className="text-xs font-bold text-slate-400 font-mono">{registryLoading && filteredPatients.length === 0 ? "Loading…" : `${filteredPatients.length} Records`}</span>
                 </div>
-                {filteredPatients.length === 0 ? (
+                {registryLoading && filteredPatients.length === 0 ? (
+                  <div className="flex min-h-[280px] flex-col items-center justify-center p-8 text-center">
+                    <Loader2 size={28} className="text-[#00703C] animate-spin mb-3" />
+                    <h3 className="text-sm font-bold text-slate-800">Loading patients…</h3>
+                    <p className="mt-1 max-w-xs text-xs text-slate-400">Fetching the live registry.</p>
+                  </div>
+                ) : filteredPatients.length === 0 ? (
                   <div className="flex min-h-[280px] flex-col items-center justify-center p-8 text-center">
                     <div className="rounded-2xl bg-slate-50 p-4 border border-slate-100 mb-3">
                       <AlertCircle size={28} className="text-slate-300" />

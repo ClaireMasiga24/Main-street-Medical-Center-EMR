@@ -1,16 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
 import { createEncounter, closeEncounter } from "../../lib/encounterUtils";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Generates a patient number like MSMC-2026-XXXX (random 5-digit suffix to avoid race conditions) */
-async function generatePatientNumber(): Promise<string> {
-  const year = new Date().getFullYear();
-  const random = Math.floor(10000 + Math.random() * 90000);
-  const suffix = Date.now().toString().slice(-3);
-  return `MSMC-${year}-${random}${suffix}`;
-}
+import { generatePatientNumber } from "../../lib/patientUtils";
 
 // ─── GET — fetch patients for Tracking Desk OR billing records OR results ──
 
@@ -348,43 +339,43 @@ export async function POST(req: Request) {
 	          );
 	        }
 
-        const patientNumber = await generatePatientNumber();
+	        const patientNumber = await generatePatientNumber();
 
-        // Create the patient record
-        const patient = await prisma.patient.create({
-          data: {
-            patientNumber,
-            firstName,
-            lastName,
-            age: parseInt(age, 10),
-            ageUnit: ageUnit || "years",
-            gender,                          // "MALE" | "FEMALE" | "OTHER"
-            phoneNumber: phone ?? null,
-            address: address ?? null,
-            isEmergency: isEmergency ?? false,
-            currentStatus: "REGISTERED",
-          },
-        });
+	        // Create the patient record
+	        const patient = await prisma.patient.create({
+	          data: {
+	            patientNumber,
+	            firstName,
+	            lastName,
+	            age: parseInt(age, 10),
+	            ageUnit: ageUnit || "years",
+	            gender,                          // "MALE" | "FEMALE" | "OTHER"
+	            phoneNumber: phone ?? null,
+	            address: address ?? null,
+	            isEmergency: isEmergency ?? false,
+	            currentStatus: "REGISTERED",
+	          },
+	        });
 
-        // Create an initial Visit to store the chiefComplaint (symptoms)
-        await prisma.visit.create({
-          data: {
-            patientId: patient.id,
-            symptoms: chiefComplaint,
-          },
-        });
+	        // Create an initial Visit to store the chiefComplaint (symptoms)
+	        await prisma.visit.create({
+	          data: {
+	            patientId: patient.id,
+	            symptoms: chiefComplaint,
+	          },
+	        });
 
-        // Create an encounter for tracking this visit
-        await createEncounter({
-          patientId: patient.id,
-          source: isEmergency ? "Emergency" : "Triage",
-          isEmergency: isEmergency ?? false,
-          currentStatus: "REGISTERED",
-          currentOwnerDept: "RECEPTION",
-          chiefComplaint: chiefComplaint || null,
-        });
+	        // Create an encounter for tracking this visit
+	        await createEncounter({
+	          patientId: patient.id,
+	          source: isEmergency ? "Emergency" : "Triage",
+	          isEmergency: isEmergency ?? false,
+	          currentStatus: "REGISTERED",
+	          currentOwnerDept: "RECEPTION",
+	          chiefComplaint: chiefComplaint || null,
+	        });
 
-        return NextResponse.json(patient, { status: 201 });
+	        return NextResponse.json(patient, { status: 201 });
       }
 
       // ── Route a patient to another department ───────────────────────────────
