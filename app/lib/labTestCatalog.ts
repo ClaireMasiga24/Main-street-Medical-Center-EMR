@@ -9,7 +9,14 @@
 //   specimenType  — "BLOOD" | "URINE" | "STOOL" | "SPUTUM" | "SWAB" | "SERUM"
 //   section       — lab section grouping for the modal's accordion
 //   template      — result-entry template the lab tech will use:
-//                   "CBC" | "URINALYSIS" | "GENERAL"
+//                   "CBC" | "URINALYSIS" | "GENERAL" | "GLUCOSE"
+//                   DRIVES rendering: getTestDefinition() (lab-config/registry.ts)
+//                   resolves any name under a panel template ("CBC" /
+//                   "URINALYSIS") to the canonical TEST_DEFINITIONS panel, so
+//                   catalog names never fall through to the generic single-
+//                   field "Result" row. "GLUCOSE" resolves by keyword
+//                   (fasting → FBS, random → RBS). "GENERAL" tests resolve by
+//                   definition-key match or the alias map in registry.ts.
 //   defaultPrice  — default selling price (0 = needs manual pricing)
 //   needsPricing  — true if defaultPrice is 0 and must be set before billing
 // ──────────────────────────────────────────────────────────────────────────────
@@ -19,7 +26,7 @@ export interface LabTestCatalogItem {
   name: string;
   specimenType: string;
   section: string;
-  template: "CBC" | "URINALYSIS" | "GENERAL";
+  template: "CBC" | "URINALYSIS" | "GENERAL" | "GLUCOSE";
   defaultPrice: number;
   needsPricing?: boolean;
 }
@@ -139,8 +146,8 @@ export const LAB_TEST_CATALOG: LabTestCatalogItem[] = [
   { code: "LAB011", name: "Pregnancy Urine Test",               specimenType: "URINE", section: "Urinalysis",  template: "GENERAL",    defaultPrice: 5000 },
 
   // ── BIOCHEMISTRY ──────────────────────────────────────────────────────────
-  { code: "LAB050", name: "Fasting Blood Sugar / FBS",           specimenType: "BLOOD", section: "Biochemistry", template: "GENERAL",   defaultPrice: 5000 },
-  { code: "LAB051", name: "Random Blood Sugar / RBS",            specimenType: "BLOOD", section: "Biochemistry", template: "GENERAL",   defaultPrice: 5000 },
+  { code: "LAB050", name: "Fasting Blood Sugar / FBS",           specimenType: "BLOOD", section: "Biochemistry", template: "GLUCOSE",  defaultPrice: 5000 },
+  { code: "LAB051", name: "Random Blood Sugar / RBS",            specimenType: "BLOOD", section: "Biochemistry", template: "GLUCOSE",  defaultPrice: 5000 },
   { code: "LAB035", name: "Post BS",                             specimenType: "BLOOD", section: "Biochemistry", template: "GENERAL",   defaultPrice: 10000 },
   { code: "LAB016", name: "Liver Function Test (LFTs)",          specimenType: "BLOOD", section: "Biochemistry", template: "GENERAL",   defaultPrice: 50000 },
   { code: "LAB017", name: "Renal Function Test (RFTs)",          specimenType: "BLOOD", section: "Biochemistry", template: "GENERAL",   defaultPrice: 50000 },

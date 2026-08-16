@@ -66,9 +66,18 @@ export async function POST(request: Request) {
     // Build update payload
     const updateData: any = { lastSharedFromDept: source || "Nurse/Midwife" };
 
-    // Update patient status based on where they're being sent
+    // Update patient status based on where they're being sent — but never for
+    // admitted patients. They must stay ADMITTED or they vanish from the
+    // doctor's admitted-patients list.
     const mappedStatus = NURSE_DEPT_TO_STATUS[targetDept.toLowerCase()];
-    if (mappedStatus) {
+    const shareTarget = await prisma.patient.findUnique({
+      where: { id: pid },
+      select: { currentStatus: true, sentToTreatmentRoom: true },
+    });
+    const isAdmittedPatient =
+      shareTarget?.currentStatus === "ADMITTED" ||
+      shareTarget?.sentToTreatmentRoom === true;
+    if (mappedStatus && !isAdmittedPatient) {
       updateData.currentStatus = mappedStatus as any;
     }
 

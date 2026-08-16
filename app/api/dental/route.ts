@@ -171,11 +171,21 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Update patient status
+      // Update patient status — admitted patients stay ADMITTED (unless actually
+      // being discharged), or they vanish from the doctor's admitted list.
+      const currentPatient = await tx.patient.findUnique({
+        where: { id: patientId },
+        select: { currentStatus: true, sentToTreatmentRoom: true },
+      });
+      const isAdmittedPatient =
+        currentPatient?.currentStatus === "ADMITTED" ||
+        currentPatient?.sentToTreatmentRoom === true;
+      const effectiveStatus = isAdmittedPatient && routeTo !== "DISCHARGE" ? "ADMITTED" : newStatus;
+
       await tx.patient.update({
         where: { id: patientId },
         data: {
-          currentStatus: newStatus,
+          currentStatus: effectiveStatus as PatientStatus,
           lastSharedFromDept: routeTo === "DOCTOR" || routeTo === "SPECIALIST" ? "Dentist" : undefined,
           updatedAt: new Date(),
         },

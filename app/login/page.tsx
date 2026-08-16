@@ -15,8 +15,9 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // 🚨 NO AUTO REDIRECT HERE (IMPORTANT FIX)
-  // Login page must always be accessible
+  // No auto-redirect here: AuthGate (app/components/AuthGate.tsx) handles
+  // bouncing already-logged-in users off public pages back to their role route.
+  // A hardcoded redirect here broke before (it sent every role to /dashboard).
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();

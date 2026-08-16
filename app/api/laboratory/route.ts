@@ -56,6 +56,40 @@ export async function GET(req: Request) {
       return NextResponse.json({ success: true, notifications });
     }
 
+    // Lightweight clinical summary for the lab workflow. The technician only
+    // needs the recent consultations' diagnosis/assessment/notes — NOT the
+    // full patient-history payload (13 queries), which serializes to seconds
+    // on Supabase's pgBouncer single connection. 2 queries, sub-second.
+    if (action === "clinical_summary" && patientId) {
+      const pid = parseInt(patientId);
+      const [visits, latestReview] = await Promise.all([
+        prisma.visit.findMany({
+          where: { patientId: pid },
+          orderBy: { createdAt: "desc" },
+          take: 5,
+          select: {
+            id: true,
+            symptoms: true,
+            diagnosis: true,
+            assessment: true,
+            notes: true,
+            createdAt: true,
+          },
+        }),
+        prisma.patientReview.findFirst({
+          where: { patientId: pid },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            diagnosis: true,
+            followUpNotes: true,
+            createdAt: true,
+          },
+        }),
+      ]);
+      return NextResponse.json({ success: true, data: { visits, review: latestReview } });
+    }
+
     // Communications
     if (action === "communications") {
       const communications = await prisma.labCommunication.findMany({
@@ -191,6 +225,33 @@ export async function GET(req: Request) {
 }
 
 // ─── POST: All mutating lab actions ───────────────────────────────────
+
+/**
+ * Generate a unique, non-sequential Lab specimen ID, e.g. "LAB-2025-84721".
+ * Mirrors the patient-number style (MSMC-{year}-{random}). Every candidate is
+ * checked against the LabRequest table (specimenId is @unique), so a collision
+ * is retried; the timestamp fallback cannot repeat within the checked space.
+ */
+async function generateUniqueSpecimenId(): Promise<string> {
+  const year = new Date().getFullYear();
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const random = Math.floor(10000 + Math.random() * 90000); // 10000–99999
+    const candidate = `LAB-${year}-${random}`;
+    const exists = await prisma.labRequest.findUnique({
+      where: { specimenId: candidate },
+      select: { id: true },
+    });
+    if (!exists) return candidate;
+  }
+  const fallback = `LAB-${year}-${Date.now().toString(36).toUpperCase()}`;
+  const taken = await prisma.labRequest.findUnique({
+    where: { specimenId: fallback },
+    select: { id: true },
+  });
+  if (!taken) return fallback;
+  throw new Error("Could not generate a unique Lab specimen ID");
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -217,17 +278,37 @@ export async function POST(req: Request) {
         const { id, specimenType, collectedByName } = payload;
         if (!id || !specimenType) return NextResponse.json({ error: "id and specimenType are required" }, { status: 400 });
         const labId = parseInt(id);
-        const specimenId = `LAB-${new Date().getFullYear()}-${String(labId).padStart(5, "0")}`;
-        const updated = await prisma.labRequest.update({
+
+        // Keep an already-assigned ID — re-recording must never change a
+        // specimen ID that may already be printed on a report. Otherwise
+        // assign a fresh random unique one (LAB-{year}-{random}).
+        const existing = await prisma.labRequest.findUnique({
           where: { id: labId },
-          data: {
-            specimenType, specimenId, specimenCollectedAt: new Date(),
-            collectedByName: collectedByName || null, status: "SPECIMEN_COLLECTED",
-            chainOfCustody: JSON.stringify([
-              { action: "SPECIMEN_COLLECTED", by: collectedByName || "Unknown", at: new Date().toISOString(), from: "REQUEST", to: "COLLECTION" }
-            ]),
-          },
+          select: { specimenId: true },
         });
+        let specimenId = existing?.specimenId || (await generateUniqueSpecimenId());
+
+        // The update can race with another collection on the @unique
+        // specimenId column (P2002) — regenerate and retry, then rethrow.
+        let updated;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            updated = await prisma.labRequest.update({
+              where: { id: labId },
+              data: {
+                specimenType, specimenId, specimenCollectedAt: new Date(),
+                collectedByName: collectedByName || null, status: "SPECIMEN_COLLECTED",
+                chainOfCustody: JSON.stringify([
+                  { action: "SPECIMEN_COLLECTED", by: collectedByName || "Unknown", at: new Date().toISOString(), from: "REQUEST", to: "COLLECTION" }
+                ]),
+              },
+            });
+            break;
+          } catch (e: any) {
+            if (e.code !== "P2002" || attempt >= 2) throw e;
+            specimenId = await generateUniqueSpecimenId();
+          }
+        }
         return NextResponse.json({ ...updated, specimenId });
       }
 
@@ -274,12 +355,28 @@ export async function POST(req: Request) {
         });
 
         // Additionally: update the patient's currentStatus so the receptionist
-        // correctly sees "Rejected by Lab" (or the patient is excluded from the
-        // Live Admissions panel when the status is LAB_REJECTED).
-        await prisma.patient.update({
+        // correctly sees "Rejected by Lab" — but ONLY for non-admitted patients.
+        // Admitted patients must stay ADMITTED (the lab request still gets the
+        // REJECTED flag + notification above); flipping them to LAB_REJECTED
+        // kicks them out of the doctor's admitted-patients list.
+        const admittedCheck = await prisma.patient.findUnique({
           where: { id: labReq.Patient.id },
-          data: { currentStatus: "LAB_REJECTED" },
+          select: { currentStatus: true, sentToTreatmentRoom: true },
         });
+        const isAdmittedPatient =
+          admittedCheck?.currentStatus === "ADMITTED" ||
+          admittedCheck?.sentToTreatmentRoom === true;
+        if (!isAdmittedPatient) {
+          await prisma.patient.update({
+            where: { id: labReq.Patient.id },
+            data: { currentStatus: "LAB_REJECTED" },
+          });
+        } else {
+          await prisma.patient.update({
+            where: { id: labReq.Patient.id },
+            data: { lastSharedFromDept: "Lab" },
+          });
+        }
 
         return NextResponse.json(updated);
       }
@@ -468,9 +565,13 @@ export async function POST(req: Request) {
 	          "Radiology": "AWAITING_RADIOLOGY",
 	        };
 	        try {
-	          const patient = await prisma.patient.findUnique({ where: { id: parseInt(patientId) }, select: { currentStatus: true } });
+	          const patient = await prisma.patient.findUnique({ where: { id: parseInt(patientId) }, select: { currentStatus: true, sentToTreatmentRoom: true, admittingDoctorName: true } });
 	          if (patient) {
-	            if (patient.currentStatus === "ADMITTED") {
+	            const isAdmittedPatient =
+	              patient.currentStatus === "ADMITTED" ||
+	              patient.sentToTreatmentRoom === true ||
+	              (patient.admittingDoctorName !== null && patient.currentStatus !== "DISCHARGED");
+	            if (isAdmittedPatient) {
 	              // Admitted patient — stays admitted; flag that lab results are back.
 	              await prisma.patient.update({
 	                where: { id: parseInt(patientId) },
@@ -540,14 +641,20 @@ export async function POST(req: Request) {
 		        const [patientStatus, labReqInfo] = await Promise.all([
 		          prisma.patient.findUnique({
 		            where: { id: parseInt(patientId) },
-		            select: { currentStatus: true, firstName: true, lastName: true },
+		            select: { currentStatus: true, sentToTreatmentRoom: true, admittingDoctorName: true, firstName: true, lastName: true },
 		          }),
 		          prisma.labRequest.findUnique({
 		            where: { id: parseInt(labRequestId) },
 		            select: { testName: true },
 		          }),
 		        ]);
-		        const isAdmitted = patientStatus?.currentStatus === "ADMITTED";
+		        // "Admitted" also covers patients whose status was temporarily moved
+		        // off ADMITTED (e.g. LAB_REJECTED by an older rejection flow) but who
+		        // were never discharged — they must not be routed back to the queue.
+		        const isAdmitted =
+		          patientStatus?.currentStatus === "ADMITTED" ||
+		          patientStatus?.sentToTreatmentRoom === true ||
+		          (patientStatus?.admittingDoctorName !== null && patientStatus?.currentStatus !== "DISCHARGED");
 		        if (isAdmitted) {
 		          // Admitted patient — stays admitted; flag that results are back + create clinical update
 		          await prisma.patient.update({

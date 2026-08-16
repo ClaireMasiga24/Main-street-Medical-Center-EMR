@@ -53,8 +53,11 @@ export function generateLabReportHTML(
         flagBg = "background:#fffbeb;";
       } else if (r.flag === "NORMAL") {
         flagColor = "color:#16a34a;";
+      } else if (r.flag === "UNVERIFIED") {
+        flagColor = "color:#6b7280;font-style:italic;";
       }
-      const flagDisplay = r.result.trim() ? r.flag : "";
+      let flagDisplay: string = r.result.trim() ? r.flag : "";
+      if (r.flag === "UNVERIFIED") flagDisplay = "Range unavailable";
       // Insert WBC Differential section header dynamically from printLayout config
       const sectionHeader =
         wbcDifferentialIdx !== undefined && i === wbcDifferentialIdx
@@ -75,6 +78,7 @@ export function generateLabReportHTML(
   const flagged = results.filter(
     (r) => r.flag === "HIGH" || r.flag === "LOW"
   );
+  const unverified = results.filter((r) => r.flag === "UNVERIFIED");
   const interpretationHtml =
     flagged.length > 0
       ? `<div style="margin-top:16px;">
@@ -86,7 +90,17 @@ export function generateLabReportHTML(
           Clinical correlation advised.
         </p>
        </div>`
-      : `<div style="margin-top:16px;">
+      : unverified.length > 0
+        ? `<div style="margin-top:16px;">
+        <p style="font-size:11px;font-weight:700;color:#111827;margin:0 0 4px 0;">Remarks / Interpretation:</p>
+        <p style="font-size:11px;color:#374151;margin:0;line-height:1.5;font-style:italic;">
+          Reference range unavailable for: ${unverified
+            .map((r) => `${r.test} (${r.result})`)
+            .join("; ")}.
+          Values not verified — clinical correlation advised.
+        </p>
+       </div>`
+        : `<div style="margin-top:16px;">
         <p style="font-size:11px;font-weight:700;color:#111827;margin:0 0 4px 0;">Remarks / Interpretation:</p>
         <p style="font-size:11px;color:#6b7280;margin:0;font-style:italic;">No remarks.</p>
        </div>`;
@@ -132,17 +146,17 @@ export function generateLabReportHTML(
 <body>
   <img src="/Images/LOGO.jpg" alt="" class="watermark-fixed" />
   <div class="screen-only" style="text-align:center;padding:40px 20px;">
-    <button onclick="window.print()" style="background:#00703C;color:#fff;border:none;padding:12px 32px;font-size:16px;font-weight:600;border-radius:8px;cursor:pointer;">Click here to print</button>
+    <button onclick="window.print()" style="background:#166534;color:#fff;border:none;padding:12px 32px;font-size:16px;font-weight:600;border-radius:8px;cursor:pointer;">Click here to print</button>
     <p style="margin-top:12px;font-size:13px;color:#6b7280;">If the print dialog does not open automatically, click the button above.</p>
   </div>
   <div class="report-content">
     <!-- Facility header -->
     <div style="text-align:center;margin-bottom:20px;">
-      <h1 style="font-size:20px;font-weight:800;color:#00703C;letter-spacing:1px;margin:0;">MAIN STREET MEDICAL CENTER</h1>
+      <h1 style="font-size:20px;font-weight:800;color:#166534;letter-spacing:1px;margin:0;">MAIN STREET MEDICAL CENTER</h1>
       <p style="font-size:11px;color:#4b5563;margin:2px 0 0 0;">P.O BOX 154293, Seeta, Uganda</p>
       <p style="font-size:10px;color:#6b7280;margin:2px 0 0 0;">Laboratory Report</p>
     </div>
-    <hr style="border:none;border-top:2px solid #00703C;margin-bottom:16px;" />
+    <hr style="border:none;border-top:2px solid #166534;margin-bottom:16px;" />
     <!-- Patient details -->
     <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
       <tr>
@@ -189,7 +203,7 @@ export function generateLabReportHTML(
     <!-- Results table -->
     <table style="width:100%;border-collapse:collapse;border:1px solid #d1d5db;">
       <thead>
-        <tr style="background:#00703C;color:#fff;">
+        <tr style="background:#166534;color:#fff;">
           <th style="padding:7px 8px;font-size:10px;font-weight:700;text-align:left;letter-spacing:0.5px;">#</th>
           <th style="padding:7px 8px;font-size:10px;font-weight:700;text-align:left;letter-spacing:0.5px;">Parameter</th>
           <th style="padding:7px 8px;font-size:10px;font-weight:700;text-align:center;letter-spacing:0.5px;">Result</th>

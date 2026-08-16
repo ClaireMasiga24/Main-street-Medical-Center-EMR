@@ -114,7 +114,14 @@ export interface ResultEntry {
   unit: string;
   referenceRange: string;
   result: string;
-  flag: "" | "HIGH" | "LOW" | "NORMAL";
+  /**
+   * "" (empty) → no result entered yet.
+   * "UNVERIFIED" → a result exists but could not be checked against a
+   * reference range (missing / unparseable range, or non-numeric value).
+   * NEVER a silent stand-in for NORMAL — the UI must show it as
+   * "range unavailable", never a green badge.
+   */
+  flag: "" | "HIGH" | "LOW" | "NORMAL" | "UNVERIFIED";
 }
 
 export type ResultFlag = ResultEntry["flag"];

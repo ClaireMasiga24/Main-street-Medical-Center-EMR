@@ -54,7 +54,21 @@ function FlagBadge({ flag }: { flag?: string }) {
       </span>
     );
   }
-  return <span className="text-[9px] text-emerald-600 font-medium">Normal</span>;
+  if (flag === "NORMAL") {
+    return <span className="text-[9px] text-emerald-600 font-medium">Normal</span>;
+  }
+  if (flag === "UNVERIFIED") {
+    return (
+      <span
+        className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-gray-100 text-gray-600 leading-none"
+        title="Reference range unavailable — value not verified"
+      >
+        Range unavail.
+      </span>
+    );
+  }
+  // No flag (no result entered) — never imply "Normal"
+  return <span className="text-[9px] text-gray-400 font-medium">—</span>;
 }
 
 export default function LabResultDetail({ lr }: { lr: LabRequest }) {

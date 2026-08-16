@@ -23,6 +23,8 @@ import {
   computeFlag,
   getFlagColor,
   computeInterpretation,
+  getReferenceRangeForPatient,
+  REFERENCE_RANGE_TEST_IDS,
   type TestDefinition,
   type TestFieldConfig,
   type PrintLayoutConfig,
@@ -35,12 +37,11 @@ import {
 } from "../components/lis";
 
 // ─── Colors ──────────────────────────────────────────────────────────────
-const BRAND = "#00703C";
+const BRAND = "#166534";
 const BRAND_LIGHT = "#e8f5e9";
 const BRAND_DARK = "#004d2b";
 
 const SPECIMEN_TYPES = ["BLOOD", "URINE", "STOOL", "CSF", "SWAB", "SPUTUM", "TISSUE", "SERUM", "PLASMA", "OTHER"];
-const NOTIFICATION_METHODS = ["Phone", "In Person", "Email"];
 const PRIORITY_ORDER: Record<string, number> = { STAT: 0, URGENT: 1, ROUTINE: 2 };
 
 // ─── Role → Department mapping for SHARE_RESULT ──────────────────────────
@@ -153,6 +154,9 @@ export default function LaboratoryPage() {
   const [critNotifiedPerson, setCritNotifiedPerson] = useState("");
   const [critNotificationMethod, setCritNotificationMethod] = useState("");
   const [savingCritical, setSavingCritical] = useState(false);
+  // Staff directory for the notified-person dropdown (name/phone/email per user)
+  const [staffList, setStaffList] = useState<any[]>([]);
+  const [critPersonId, setCritPersonId] = useState<number | "">("");
 
   // Attachments
   const [attachments, setAttachments] = useState<LabAttachment[]>([]);
@@ -196,6 +200,15 @@ export default function LaboratoryPage() {
     return () => clearInterval(interval);
   }, [fetchRequests, isAuthed]);
 
+  // ── Staff directory (for the critical-notification person dropdown) ────
+  useEffect(() => {
+    if (!isAuthed) return;
+    fetch("/api/staffcreate")
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d?.success && Array.isArray(d.staff)) setStaffList(d.staff); })
+      .catch(() => { /* fetch failed — the critical section falls back to free text */ });
+  }, [isAuthed]);
+
   // ── API helper ────────────────────────────────────────────────────────
   const callLabApi = async (action: string, payload: any) => {
     const res = await fetch("/api/laboratory", {
@@ -207,16 +220,20 @@ export default function LaboratoryPage() {
     return res.json();
   };
 
-  // ── Fetch cross-department patient history ──────────────────────────────
+  // ── Fetch clinical summary (lightweight — lab workflow only) ─────────────
+  // Uses the dedicated clinical_summary action on the laboratory API (latest
+  // visits + latest doctor review, 2 queries) instead of the full 13-query
+  // patient-history endpoint, which serializes to seconds on pgBouncer's
+  // single DB connection and was making the Clinical Summary panel load slowly.
   const fetchPatientHistory = useCallback(async (patientId: number) => {
     setHistoryLoading(true);
     setPatientHistoryData(null);
     try {
-      const res = await fetch(`/api/patient-history?patientId=${patientId}`);
+      const res = await fetch(`/api/laboratory?action=clinical_summary&patientId=${patientId}`);
       const data = await res.json();
       if (data.success) setPatientHistoryData(data.data);
     } catch (err) {
-      console.error("Failed to fetch patient history", err);
+      console.error("Failed to fetch clinical summary", err);
     } finally {
       setHistoryLoading(false);
     }
@@ -298,6 +315,7 @@ export default function LaboratoryPage() {
     setSelectedDepts([]);
     setCritNotifiedPerson("");
     setCritNotificationMethod("");
+    setCritPersonId("");
     setActiveSection(0);
 
     // Fetch cross-department patient history
@@ -344,6 +362,7 @@ export default function LaboratoryPage() {
     setSelectedDepts([]);
     setCritNotifiedPerson("");
     setCritNotificationMethod("");
+    setCritPersonId("");
     setAttachments([]);
     setActiveSection(0);
   };
@@ -351,9 +370,16 @@ export default function LaboratoryPage() {
   // ── Default Results ───────────────────────────────────────────────────
   const getDefaultResults = (req: LabRequestItem): ResultEntry[] => {
     const def = getTestDefinition(req.testName);
-    return def.fields.map(f => ({
-      test: f.test, unit: f.unit || "", referenceRange: f.referenceRange || "", result: "", flag: "",
-    }));
+    const resolveRanges = REFERENCE_RANGE_TEST_IDS.has(def.id);
+    return def.fields.map(f => {
+      const resolved = resolveRanges
+        ? getReferenceRangeForPatient(f.test, req.age, req.ageUnit, req.gender)
+        : "";
+      return {
+        test: f.test, unit: f.unit || "",
+        referenceRange: resolved || f.referenceRange || "", result: "", flag: "",
+      };
+    });
   };
 
   // ── Step 1: Save Specimen ─────────────────────────────────────────────
@@ -538,22 +564,24 @@ export default function LaboratoryPage() {
   // ── Critical Notification ─────────────────────────────────────────────
   const handleSaveCriticalNotification = async () => {
     if (!selectedRequest || !critNotifiedPerson || !critNotificationMethod) {
-      alert("Enter who was notified and the notification method.");
+      alert("Select who was notified and the notification method.");
       return;
     }
     setSavingCritical(true);
     try {
+      const critPerson = critPersonId !== "" ? staffList.find((s: any) => s.id === critPersonId) : null;
       await callLabApi("RECORD_CRITICAL_NOTIFICATION", {
         labRequestId: selectedRequest.id,
         patientId: selectedRequest.patientId,
         notifiedPerson: critNotifiedPerson,
-        notifiedDept: selectedDepts.length > 0 ? selectedDepts.join(",") : "GENERAL",
+        notifiedDept: critPerson?.department || "GENERAL",
         notificationMethod: critNotificationMethod,
       });
       await fetchRequests();
       alert("Critical notification recorded.");
       setCritNotifiedPerson("");
       setCritNotificationMethod("");
+      setCritPersonId("");
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -564,40 +592,72 @@ export default function LaboratoryPage() {
   const specimenAlreadyCollected = selectedRequest?.specimenType && selectedRequest?.specimenCollectedAt;
 
   // ── Print Report ────────────────────────────────────────────────────
-  const openPrintWindow = (req: LabRequestItem) => {
+  // Always fetch the freshest record from the server before generating the
+  // report. The in-memory request object (selectedRequest or a queue item)
+  // can be stale — e.g. specimen and results were saved after the workflow
+  // opened — which previously caused printed reports to show "—" for the
+  // Lab ID and every result.
+  const openPrintWindow = async (req: LabRequestItem) => {
+    // Open the window synchronously so popup blockers don't reject it;
+    // the content is written once the fresh data arrives.
+    const w = window.open("", "_blank", "width=900,height=700,scrollbars=yes");
+    if (!w) {
+      alert("Popup blocked. Please allow popups for this site to print reports.");
+      return;
+    }
+
+    let fresh = req;
+    try {
+      const res = await fetch(`/api/laboratory?id=${req.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.id) {
+          // The single-request endpoint returns the raw Prisma object with
+          // nested Patient/Staff relations — normalize it back to the shape
+          // the report generator expects, preferring the fresh values.
+          fresh = {
+            ...req,
+            ...data,
+            patientNumber: data.Patient?.patientNumber ?? req.patientNumber,
+            firstName: data.Patient?.firstName ?? req.firstName,
+            lastName: data.Patient?.lastName ?? req.lastName,
+            age: data.Patient?.age ?? req.age,
+            ageUnit: data.Patient?.ageUnit ?? req.ageUnit,
+            gender: data.Patient?.gender ?? req.gender,
+            requestedBy: data.Staff?.fullName ?? req.requestedBy,
+          };
+        }
+      }
+    } catch { /* fall back to the passed-in request */ }
+
     let parsedResults: ResultEntry[] = [];
-    if (req.results) {
+    if (fresh.results) {
       try {
-        const p = JSON.parse(req.results);
+        const p = JSON.parse(fresh.results);
         if (Array.isArray(p)) parsedResults = p;
       } catch {}
     }
     if (parsedResults.length === 0) {
-      parsedResults = getDefaultResults(req);
+      parsedResults = getDefaultResults(fresh);
     }
-    const printDef = getTestDefinition(req.testName);
+    const printDef = getTestDefinition(fresh.testName);
     const html = generateLabReportHTML(
-      `${req.lastName}, ${req.firstName}`,
-      req.patientNumber,
-      req.gender,
-      req.age,
-      req.testName,
-      req.specimenType,
-      req.specimenId,
-      req.specimenCollectedAt,
-      req.requestedBy,
+      `${fresh.lastName}, ${fresh.firstName}`,
+      fresh.patientNumber,
+      fresh.gender,
+      fresh.age,
+      fresh.testName,
+      fresh.specimenType,
+      fresh.specimenId,
+      fresh.specimenCollectedAt,
+      fresh.requestedBy,
       parsedResults,
-      req.enteredByName,
-      req.validatedByName,
+      fresh.enteredByName,
+      fresh.validatedByName,
       printDef.printLayout,
     );
-    const w = window.open("", "_blank", "width=900,height=700,scrollbars=yes");
-    if (w) {
-      w.document.write(html);
-      w.document.close();
-    } else {
-      alert("Popup blocked. Please allow popups for this site to print reports.");
-    }
+    w.document.write(html);
+    w.document.close();
   };
 
   if (!isAuthed) return null;
@@ -641,6 +701,12 @@ export default function LaboratoryPage() {
       ? sectionBounds[activeSection]
       : results.length;
     const visibleResults = hasSections ? results.slice(sectionStart, sectionEnd) : results;
+
+    // Critical-notification section: derived from the live `results` state
+    // (flags always accompany isCritical in ENTER_RESULTS) — never from
+    // selectedRequest.isCritical, which goes stale after a save + refetch.
+    const showCritSection = results.some(r => r.flag === "HIGH" || r.flag === "LOW");
+    const critPerson = critPersonId !== "" ? staffList.find((s: any) => s.id === critPersonId) : null;
 
     return (
       <div className="min-h-screen" style={{ backgroundColor: "#f5f7fa" }}>
@@ -762,7 +828,9 @@ export default function LaboratoryPage() {
                 )}
 
                 {/* Error / empty state (loaded but nothing found) */}
-                {!historyLoading && !patientHistoryData && !selectedRequest?.clinicalNotes && !selectedRequest?.referralNotes && (
+                {!historyLoading &&
+                  (!patientHistoryData || ((patientHistoryData?.visits?.length ?? 0) === 0 && !patientHistoryData?.review)) &&
+                  !selectedRequest?.clinicalNotes && !selectedRequest?.referralNotes && (
                   <div className="px-5 py-6 text-center text-sm text-gray-400">
                     No clinical summary available for this patient.
                   </div>
@@ -784,7 +852,7 @@ export default function LaboratoryPage() {
                 )}
 
                 {/* ── Diagnosis & Assessment ── */}
-                {!historyLoading && patientHistoryData?.visits?.length > 0 && (
+                {!historyLoading && ((patientHistoryData?.visits?.length ?? 0) > 0 || patientHistoryData?.review) && (
                   <div className="px-5 py-4">
                     <div className="flex items-center gap-2 mb-3">
                       <div className="w-7 h-7 rounded-md bg-amber-100 flex items-center justify-center">
@@ -792,7 +860,7 @@ export default function LaboratoryPage() {
                       </div>
                       <span className="text-xs font-bold uppercase tracking-wider text-amber-700">Diagnosis &amp; Assessment</span>
                       <span className="text-[9px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full ml-auto">
-                        {patientHistoryData.visits.length}
+                        {(patientHistoryData?.visits?.length ?? 0) + (patientHistoryData?.review ? 1 : 0)}
                       </span>
                     </div>
                     <div className="space-y-2">
@@ -817,6 +885,24 @@ export default function LaboratoryPage() {
                           )}
                         </div>
                       ))}
+                      {patientHistoryData?.review && (
+                        <div key={`review-${patientHistoryData.review.id}`} className="bg-amber-50/30 rounded-lg border border-amber-100 px-3 py-2.5">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">
+                              Latest Doctor Review
+                            </span>
+                            <span className="text-[9px] text-gray-400">
+                              {new Date(patientHistoryData.review.createdAt).toLocaleDateString()}
+                            </span>
+                          </div>
+                          {patientHistoryData.review.diagnosis && (
+                            <p className="text-xs mb-0.5"><span className="font-semibold text-gray-500">Diagnosis:</span> {patientHistoryData.review.diagnosis}</p>
+                          )}
+                          {patientHistoryData.review.followUpNotes && (
+                            <p className="text-xs text-gray-500"><span className="font-semibold text-gray-400">Clinical Notes:</span> {patientHistoryData.review.followUpNotes}</p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -952,6 +1038,7 @@ export default function LaboratoryPage() {
                       if (!Array.isArray(res)) return null;
                       const flagged = res.filter((r: any) => r.flag === "HIGH" || r.flag === "LOW");
                       const normal = res.filter((r: any) => r.flag === "NORMAL");
+                      const unverified = res.filter((r: any) => r.flag === "UNVERIFIED");
                       return (
                         <div className="mb-5 p-3 bg-gray-50 rounded-lg border border-gray-200">
                           <p className="text-xs font-medium text-gray-500 mb-2">Results Summary</p>
@@ -964,6 +1051,11 @@ export default function LaboratoryPage() {
                             {normal.length > 0 && (
                               <span className="text-xs px-2 py-1 rounded bg-green-50 text-green-700 border border-green-200">
                                 {normal.length} normal parameters
+                              </span>
+                            )}
+                            {unverified.length > 0 && (
+                              <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600 border border-gray-300">
+                                {unverified.length} unverified — range unavailable
                               </span>
                             )}
                           </div>
@@ -1088,7 +1180,9 @@ export default function LaboratoryPage() {
                 </div>
               </div>
 
-              {/* Critical Notification Section */}
+              {/* Critical Notification Section — optional, shown only when the
+                  entered results contain HIGH/LOW flags */}
+              {showCritSection && (
               <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-3">
                   <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: "#fef2f2" }}>
@@ -1096,7 +1190,7 @@ export default function LaboratoryPage() {
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-gray-800">Record Critical Notification</h3>
-                    <p className="text-xs text-gray-500">Only if critical/abnormal results were reported</p>
+                    <p className="text-xs text-gray-500">Optional — only if critical/abnormal results were reported</p>
                   </div>
                 </div>
                 <div className="p-6">
@@ -1105,35 +1199,124 @@ export default function LaboratoryPage() {
                       <label className="block text-sm font-medium text-gray-700 mb-1.5">
                         Who Was Notified <span className="text-red-500">*</span>
                       </label>
-                      <input
-                        type="text"
-                        value={critNotifiedPerson}
-                        onChange={e => setCritNotifiedPerson(e.target.value)}
-                        placeholder="e.g. Dr. Okello, Nurse Sarah"
-                        className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:outline-none"
-                      />
+                      {staffList.length > 0 ? (
+                        <>
+                          <select
+                            value={critPersonId === "" ? "" : String(critPersonId)}
+                            onChange={(e) => {
+                              const id = parseInt(e.target.value, 10);
+                              setCritPersonId(Number.isNaN(id) ? "" : id);
+                              const p = staffList.find((s: any) => s.id === id);
+                              setCritNotifiedPerson(p?.fullName || "");
+                            }}
+                            className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:outline-none bg-white"
+                          >
+                            <option value="">Select staff member...</option>
+                            {(() => {
+                              // Group by department (case-insensitive dedupe), sorted
+                              const groups = new Map<string, any[]>();
+                              for (const s of staffList) {
+                                const dept = (s.department || "Other").trim() || "Other";
+                                const key = dept.toLowerCase();
+                                if (!groups.has(key)) groups.set(key, []);
+                                groups.get(key)!.push(s);
+                              }
+                              return Array.from(groups.entries())
+                                .sort((a, b) => a[0].localeCompare(b[0]))
+                                .map(([key, members]) => (
+                                  <optgroup key={key} label={members[0].department}>
+                                    {[...members]
+                                      .sort((a: any, b: any) => a.fullName.localeCompare(b.fullName))
+                                      .map((s: any) => (
+                                        <option key={s.id} value={s.id}>{s.fullName} — {s.department}</option>
+                                      ))}
+                                  </optgroup>
+                                ));
+                            })()}
+                          </select>
+                          {critPerson && (
+                            <p className="text-xs text-gray-500 mt-1.5">
+                              <span className="font-medium text-gray-600">Phone:</span>{" "}
+                              {critPerson.phoneNumber?.trim() && critPerson.phoneNumber.trim() !== "N/A"
+                                ? critPerson.phoneNumber
+                                : "No phone on file"}
+                              <span className="mx-1.5 text-gray-300">·</span>
+                              <span className="font-medium text-gray-600">Email:</span>{" "}
+                              {critPerson.email?.trim() && critPerson.email.trim() !== "N/A"
+                                ? critPerson.email
+                                : "No email on file"}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <input
+                          type="text"
+                          value={critNotifiedPerson}
+                          onChange={e => setCritNotifiedPerson(e.target.value)}
+                          placeholder="e.g. Dr. Okello, Nurse Sarah"
+                          className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:outline-none"
+                        />
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1.5">
                         Notification Method <span className="text-red-500">*</span>
                       </label>
                       <div className="flex gap-2">
-                        {NOTIFICATION_METHODS.map(method => (
-                          <button
-                            key={method}
-                            onClick={() => setCritNotificationMethod(method)}
-                            className={`flex-1 py-2.5 px-3 rounded-lg border-2 text-sm font-medium transition-all ${
-                              critNotificationMethod === method
-                                ? "border-red-500 bg-red-50 text-red-700"
-                                : "border-gray-200 bg-white text-gray-500 hover:border-gray-300"
-                            }`}
-                          >
-                            {method === "Phone" && <Phone className="w-4 h-4 inline mr-1" />}
-                            {method === "In Person" && <User className="w-4 h-4 inline mr-1" />}
-                            {method === "Email" && <MailIcon className="w-4 h-4 inline mr-1" />}
-                            {method}
-                          </button>
-                        ))}
+                        {/* Phone — click-to-call the selected staff member's stored number */}
+                        {(() => {
+                          const phone = critPerson?.phoneNumber?.trim() || "";
+                          const dialable = phone !== "" && phone !== "N/A" && phone.replace(/[^\d+]/g, "") !== "";
+                          return dialable ? (
+                            <a
+                              href={`tel:${phone.replace(/[^\d+]/g, "")}`}
+                              onClick={() => setCritNotificationMethod("Phone")}
+                              className={`flex-1 py-2.5 px-3 rounded-lg border-2 text-sm font-medium transition-all flex items-center justify-center ${critNotificationMethod === "Phone" ? "border-red-500 bg-red-50 text-red-700" : "border-gray-200 bg-white text-gray-500 hover:border-gray-300"}`}
+                            >
+                              <Phone className="w-4 h-4 inline mr-1" /> Phone
+                            </a>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled
+                              title="No phone number on file for the selected staff member"
+                              className="flex-1 py-2.5 px-3 rounded-lg border-2 text-sm font-medium opacity-40 cursor-not-allowed flex items-center justify-center border-gray-200 bg-gray-50 text-gray-400"
+                            >
+                              <Phone className="w-4 h-4 inline mr-1" /> No phone on file
+                            </button>
+                          );
+                        })()}
+                        {/* In Person — plain button */}
+                        <button
+                          type="button"
+                          onClick={() => setCritNotificationMethod("In Person")}
+                          className={`flex-1 py-2.5 px-3 rounded-lg border-2 text-sm font-medium transition-all flex items-center justify-center ${critNotificationMethod === "In Person" ? "border-red-500 bg-red-50 text-red-700" : "border-gray-200 bg-white text-gray-500 hover:border-gray-300"}`}
+                        >
+                          <User className="w-4 h-4 inline mr-1" /> In Person
+                        </button>
+                        {/* Email — click-to-email the selected staff member's stored address */}
+                        {(() => {
+                          const email = critPerson?.email?.trim() || "";
+                          const usable = email !== "" && email !== "N/A";
+                          return usable ? (
+                            <a
+                              href={`mailto:${email}`}
+                              onClick={() => setCritNotificationMethod("Email")}
+                              className={`flex-1 py-2.5 px-3 rounded-lg border-2 text-sm font-medium transition-all flex items-center justify-center ${critNotificationMethod === "Email" ? "border-red-500 bg-red-50 text-red-700" : "border-gray-200 bg-white text-gray-500 hover:border-gray-300"}`}
+                            >
+                              <MailIcon className="w-4 h-4 inline mr-1" /> Email
+                            </a>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled
+                              title="No email address on file for the selected staff member"
+                              className="flex-1 py-2.5 px-3 rounded-lg border-2 text-sm font-medium opacity-40 cursor-not-allowed flex items-center justify-center border-gray-200 bg-gray-50 text-gray-400"
+                            >
+                              <MailIcon className="w-4 h-4 inline mr-1" /> No email on file
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -1147,6 +1330,7 @@ export default function LaboratoryPage() {
                   </button>
                 </div>
               </div>
+              )}
             </div>
           )}
         </div>
@@ -1294,7 +1478,7 @@ export default function LaboratoryPage() {
                     placeholder="Search patient name, ID, or test..."
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    className="pl-9 pr-8 py-1.5 bg-gray-100 border border-gray-200 rounded-lg text-xs w-56 focus:outline-none focus:ring-2 focus:ring-[#00703C] focus:bg-white transition-all"
+                    className="pl-9 pr-8 py-1.5 bg-gray-100 border border-gray-200 rounded-lg text-xs w-56 focus:outline-none focus:ring-2 focus:ring-[#166534] focus:bg-white transition-all"
                   />
                   {searchQuery && (
                     <button
@@ -1409,8 +1593,8 @@ export default function LaboratoryPage() {
                         maxHeight: "160px",
                       }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.boxShadow = "0 8px 30px rgba(0,112,60,0.12)";
-                        e.currentTarget.style.borderColor = "#00703C";
+                        e.currentTarget.style.boxShadow = "0 8px 30px rgba(22,101,52,0.12)";
+                        e.currentTarget.style.borderColor = "#166534";
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.06)";
@@ -1481,7 +1665,7 @@ export default function LaboratoryPage() {
                                       isDone
                                         ? "bg-green-500 text-white"
                                         : isActive
-                                        ? "bg-[#00703C] text-white animate-pulse"
+                                        ? "bg-[#166534] text-white animate-pulse"
                                         : "bg-gray-200 text-gray-400"
                                     }`}
                                     title={step.title}
@@ -1538,7 +1722,7 @@ export default function LaboratoryPage() {
                             {isCompleted && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); openPrintWindow(req); }}
-                                className="p-1 rounded text-gray-300 hover:text-white hover:bg-[#00703C] transition-colors"
+                                className="p-1 rounded text-gray-300 hover:text-white hover:bg-[#166534] transition-colors"
                                 title="Print Report"
                               >
                                 <Printer className="w-3 h-3" />
@@ -1584,7 +1768,7 @@ export default function LaboratoryPage() {
                     placeholder="Search records..."
                     value={recordsSearch}
                     onChange={e => setRecordsSearch(e.target.value)}
-                    className="w-full sm:w-64 pl-9 pr-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#00703C]"
+                    className="w-full sm:w-64 pl-9 pr-3 py-1.5 bg-white border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-[#166534]"
                   />
                 </div>
               </div>

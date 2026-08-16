@@ -90,7 +90,7 @@ export function ResultEntryForm({
           className="w-10 h-10 rounded-lg flex items-center justify-center"
           style={{ backgroundColor: "#e8f5e9" }}
         >
-          <Microscope className="w-5 h-5" style={{ color: "#00703C" }} />
+          <Microscope className="w-5 h-5" style={{ color: "#166534" }} />
         </div>
         <div>
           <h2 className="text-lg font-bold text-gray-800">Step 2: Enter Results</h2>
@@ -128,7 +128,7 @@ export function ResultEntryForm({
                 onClick={onFileUploadClick}
                 disabled={isUploading}
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-50"
-                style={{ backgroundColor: "#00703C" }}
+                style={{ backgroundColor: "#166534" }}
               >
                 {isUploading ? (
                   <>
@@ -196,7 +196,7 @@ export function ResultEntryForm({
                 <thead>
                   <tr
                     className="border-b-2"
-                    style={{ borderColor: "#00703C" }}
+                    style={{ borderColor: "#166534" }}
                   >
                     <th className="text-left py-3 px-2 font-semibold text-gray-700">
                       #
@@ -261,8 +261,15 @@ export function ResultEntryForm({
                           {row.flag && (
                             <span
                               className={`inline-block text-xs font-bold px-2 py-0.5 rounded border whitespace-nowrap ${flagColor}`}
+                              title={
+                                row.flag === "UNVERIFIED"
+                                  ? "Reference range unavailable — value could not be verified"
+                                  : undefined
+                              }
                             >
-                              {row.flag}
+                              {row.flag === "UNVERIFIED"
+                                ? "Range unavailable"
+                                : row.flag}
                             </span>
                           )}
                         </td>
@@ -337,7 +344,7 @@ export function ResultEntryForm({
             onClick={onSaveResults}
             disabled={savingResults}
             className="mt-6 w-full py-3 text-white font-semibold rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
-            style={{ backgroundColor: "#00703C" }}
+            style={{ backgroundColor: "#166534" }}
           >
             {savingResults ? (
               "Saving..."

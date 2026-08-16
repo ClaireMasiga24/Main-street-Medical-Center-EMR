@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     // ── Fetch patient info for notification and timeline ──
     const patient = await prisma.patient.findUnique({
       where: { id: parseInt(patientId) },
-      select: { id: true, firstName: true, lastName: true, patientNumber: true, currentStatus: true },
+      select: { id: true, firstName: true, lastName: true, patientNumber: true, currentStatus: true, sentToTreatmentRoom: true },
     });
 
     if (!patient) {
@@ -87,8 +87,13 @@ export async function POST(request: Request) {
         },
       });
 
-      // 3. Update patient status to AWAITING_PHARMACY (only if not already there or discharged)
-      if (patient.currentStatus !== "AWAITING_PHARMACY" && patient.currentStatus !== "DISCHARGED") {
+      // 3. Update patient status to AWAITING_PHARMACY (only if not already there,
+      //    not discharged, and not an admitted/in-treatment patient — admitted
+      //    patients must stay ADMITTED or they vanish from the doctor's list).
+      const isAdmittedPatient =
+        patient.currentStatus === "ADMITTED" ||
+        patient.sentToTreatmentRoom === true;
+      if (patient.currentStatus !== "AWAITING_PHARMACY" && patient.currentStatus !== "DISCHARGED" && !isAdmittedPatient) {
         await tx.patient.update({
           where: { id: patient.id },
           data: { currentStatus: "AWAITING_PHARMACY" },

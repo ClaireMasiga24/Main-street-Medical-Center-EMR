@@ -350,6 +350,42 @@ export const TEST_DEFINITIONS: Record<string, TestDefinition> = {
     ],
   },
 
+  // Walk-in / reception orders (LAB050, LAB051) use these catalog names. Units
+  // are mmol/L — do NOT mix with the mg/dL doctor-side glucose definitions
+  // ("Blood Glucose (Fasting FBS)" / "Blood Glucose (Random RBS)") which keep
+  // their own static ranges. The patient-aware resolver also returns these
+  // ranges via getReferenceRangeForPatient (see referenceRanges.ts).
+
+  "Fasting Blood Sugar / FBS": {
+    id: "Fasting Blood Sugar / FBS",
+    label: "Fasting Blood Sugar (FBS)",
+    category: "ENDOCRINOLOGY",
+    specimenTypes: ["BLOOD"],
+    fields: [
+      { test: "Glucose (Fasting)", unit: "mmol/L", referenceRange: "4.5–5.5", inputType: "decimal" },
+    ],
+    interpretationRules: [
+      { condition: "ANY_HIGH", interpretation: "Elevated fasting blood glucose — clinical correlation advised.", isCritical: true },
+      { condition: "ANY_LOW", interpretation: "Low fasting blood glucose (hypoglycemia) — clinical correlation advised.", isCritical: true },
+      { condition: "ALL_NORMAL", interpretation: "Fasting blood glucose within normal limits." },
+    ],
+  },
+
+  "Random Blood Sugar / RBS": {
+    id: "Random Blood Sugar / RBS",
+    label: "Random Blood Sugar (RBS)",
+    category: "ENDOCRINOLOGY",
+    specimenTypes: ["BLOOD"],
+    fields: [
+      { test: "Glucose (Random)", unit: "mmol/L", referenceRange: "4.5–7.5", inputType: "decimal" },
+    ],
+    interpretationRules: [
+      { condition: "ANY_HIGH", interpretation: "Elevated random blood glucose — clinical correlation advised.", isCritical: true },
+      { condition: "ANY_LOW", interpretation: "Low random blood glucose (hypoglycemia) — clinical correlation advised.", isCritical: true },
+      { condition: "ALL_NORMAL", interpretation: "Random blood glucose within normal limits." },
+    ],
+  },
+
   "PSA (Prostate Specific Antigen)": {
     id: "PSA (Prostate Specific Antigen)",
     label: "PSA (Prostate Specific Antigen)",
