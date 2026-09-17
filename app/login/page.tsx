@@ -1,6 +1,7 @@
 "use client";
 
 import { ROLE_ROUTES } from "../lib/roleRoutes";
+import { writeSession } from "@/app/lib/session";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -40,12 +41,10 @@ export default function LoginPage() {
       }
 
       const user = data.user;
-      const userData = JSON.stringify(user);
 
       // save session — always persist to localStorage so the user stays
       // logged in on this device until they press Logout themselves
-      sessionStorage.removeItem("user");
-      localStorage.setItem("user", userData);
+      writeSession(user);
 
       // clean role-based routing
       const route = ROLE_ROUTES[user.role];

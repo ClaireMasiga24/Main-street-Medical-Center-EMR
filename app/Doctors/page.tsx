@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 
 
 import { useRouter } from "next/navigation";
+import { endSession } from "@/app/lib/session";
 
 
 import NotificationInbox from "../components/NotificationInbox";
@@ -3309,19 +3310,6 @@ export default function DoctorDashboard() {
 
 
 
-  const handleLogout = async () => {
-
-    localStorage.removeItem("user");
-
-    sessionStorage.removeItem("user");
-
-    await fetch("/api/logout", { method: "POST" }).catch(() => {});
-
-    router.push("/login");
-
-  };
-
-
   // ── Register patient directly from doctor page ──────────────────────────
   const handleRegisterPatient = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -3802,7 +3790,7 @@ export default function DoctorDashboard() {
 
         onAntenatal={() => setActiveSection("antenatal")}
 
-        onLogout={handleLogout}
+        onLogout={endSession}
 
         mobileOpen={mobileOpen}
 

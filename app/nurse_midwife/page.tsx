@@ -34,7 +34,23 @@ import {
 		} from "lucide-react";
 
 
-import { useRouter } from "next/navigation";
+import SessionLoading from "@/app/components/SessionLoading";
+import { endSession, useSessionGuard } from "@/app/lib/session";
+
+// Session gate. The dashboard below only mounts once a session is confirmed, so
+// an unauthenticated visitor never triggers its fetches or renders patient data.
+export default function NurseMidwifeDashboard() {
+  const { ready } = useSessionGuard([
+    "NURSE_MIDWIFE",
+    "NURSE",
+    "MIDWIFE",
+    "ADMINISTRATOR",
+  ]);
+
+  if (!ready) return <SessionLoading />;
+
+  return <NurseMidwifeDashboardInner />;
+}
 
 
 
@@ -467,13 +483,10 @@ function RegisterPatientModal({
   );
 }
 
-export default function NurseMidwifeDashboard() {
+function NurseMidwifeDashboardInner() {
 
 
-  const router = useRouter();
-
-
-  const [activeTab, setActiveTab] = useState("triage");
+  const [activeTab, setActiveTab] = useState("triage");
 
 
   const [patients, setPatients] = useState<TriagePatient[]>([]);
@@ -2948,22 +2961,7 @@ export default function NurseMidwifeDashboard() {
           <button
 
 
-            onClick={async () => {
-
-
-              try {
-
-
-                const r = sessionStorage.getItem("user") || localStorage.getItem("user");
-
-
-                if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id, username: u.username }) }); }
-
-
-              } catch {} router.push("/");
-
-
-            }}
+            onClick={endSession}
 
 
             className="w-full flex items-center justify-center gap-2 bg-red-600/90 hover:bg-red-600 text-white font-bold py-3 sm:py-3.5 px-4 rounded-xl transition-colors duration-200 text-sm shadow-sm"
@@ -4713,12 +4711,7 @@ export default function NurseMidwifeDashboard() {
                 </button>
 
 
-                <button onClick={async () => {
-                  try {
-                    const r = sessionStorage.getItem("user") || localStorage.getItem("user");
-                    if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id, username: u.username }) }); }
-                  } catch {} router.push("/");
-                }}
+                <button onClick={endSession}
                   className="flex items-center gap-1.5 text-xs font-bold bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-lg transition-colors shadow-sm">
                   <LogOut size={13} /> <span className="hidden sm:inline">Logout</span>
                 </button>

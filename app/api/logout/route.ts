@@ -2,24 +2,45 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/app/lib/prisma";
 
 // ─── POST: Record logout and clear lastActive ─────────────────────────
+//
+// A client calling this is logging out whether or not we can identify them.
+// Every "can't identify" path therefore returns success rather than an error:
+// refusing the request only loses the audit row, and used to leave callers
+// (the doctor page posted with no body at all) silently unauthorized in the
+// admin's online list.
 export async function POST(req: Request) {
+  let userId: unknown;
+  let username: unknown;
+
   try {
-    const { userId, username } = await req.json();
-    if (!userId) {
-      return NextResponse.json({ error: "userId required" }, { status: 400 });
+    const body = await req.json();
+    userId = body?.userId;
+    username = body?.username;
+  } catch {
+    // Missing or unparseable body — fall through and clear what we can.
+  }
+
+  try {
+    const uid = Number(userId);
+
+    if (!Number.isInteger(uid) || uid <= 0) {
+      return NextResponse.json({ success: true });
     }
 
-    const uid = parseInt(userId);
     const user = await prisma.user.findUnique({ where: { id: uid } });
     if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+      return NextResponse.json({ success: true });
     }
 
     // Record logout in audit log
     await prisma.auditLog.create({
       data: {
         action: "LOGOUT",
-        details: `User "${username || user.username}" (${user.fullName}) logged out at ${new Date().toISOString()}. Role: ${user.role}`,
+        details: `User "${
+          typeof username === "string" && username ? username : user.username
+        }" (${user.fullName}) logged out at ${new Date().toISOString()}. Role: ${
+          user.role
+        }`,
         userId: uid,
       },
     });

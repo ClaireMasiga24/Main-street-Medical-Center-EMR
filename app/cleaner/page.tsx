@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { endSession, useSessionGuard } from "@/app/lib/session";
 import NotificationInbox from "../components/NotificationInbox";
 import StaffMessaging from "../components/StaffMessaging";
 import {
@@ -219,13 +220,6 @@ export default function CleanerDashboard() {
     finally { setReportSaving(false); }
   };
 
-  // ── Logout ─────────────────────────────────────────────────────────────
-  const handleLogout = () => {
-    sessionStorage.removeItem("user");
-    localStorage.removeItem("user");
-    router.replace("/login");
-  };
-
   // ── Filtered tasks ─────────────────────────────────────────────────────
   const filteredTasks = filterStatus === "all"
     ? tasks
@@ -271,7 +265,7 @@ export default function CleanerDashboard() {
               <span className="font-semibold text-[#00703C]">{cleanerName}</span>
             </div>
             <button
-              onClick={handleLogout}
+              onClick={endSession}
               className="flex items-center gap-1.5 text-xs font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition"
             >
               <LogOut size={14} />

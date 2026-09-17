@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { endSession } from "@/app/lib/session";
 import {
   Users, UserRound, Stethoscope, FlaskConical, Pill, CreditCard,
   ClipboardList, CalendarDays, Activity, FileText, Settings, ShieldCheck,
@@ -81,19 +82,6 @@ export default function DashboardPage() {
     return () => { clearInterval(interval); clearInterval(hb); };
   }, [user, fetchOnline, fetchAuditLogs]);
 
-  const logout = async () => {
-    try {
-      const u = user;
-      await fetch("/api/logout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: u.id, username: u.username }),
-      });
-    } catch {} finally {
-      localStorage.removeItem("user"); sessionStorage.removeItem("user"); router.push("/");
-    }
-  };
-
   const formatTime = (iso: string | null) => {
     if (!iso) return "—";
     try {
@@ -150,7 +138,7 @@ export default function DashboardPage() {
             <p className="text-[10px] text-green-200/60">Logged in as</p>
             <p className="text-xs font-bold text-white truncate">{user?.fullName || user?.username}</p>
           </div>
-          <button onClick={logout} className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 py-2.5 rounded-xl font-semibold text-sm transition">
+          <button onClick={endSession} className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 py-2.5 rounded-xl font-semibold text-sm transition">
             <LogOut size={15} /> Sign Out
           </button>
         </div>

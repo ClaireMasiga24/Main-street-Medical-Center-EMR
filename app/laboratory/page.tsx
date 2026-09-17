@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { endSession } from "@/app/lib/session";
 import {
   FlaskConical, Search, RefreshCw, LogOut, User, Phone,
   ArrowRight, CheckCircle, XCircle, Save, FileText,
@@ -238,12 +239,6 @@ export default function LaboratoryPage() {
       setHistoryLoading(false);
     }
   }, []);
-
-  // ── Logout ────────────────────────────────────────────────────────────
-  const handleLogout = async () => {
-    try { await fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: user?.id, username: user?.username }) }); } catch {}
-    localStorage.removeItem("user"); sessionStorage.removeItem("user"); router.push("/");
-  };
 
   // ── Derived data ──────────────────────────────────────────────────────
   const completedRequests = useMemo(() =>
@@ -735,7 +730,7 @@ export default function LaboratoryPage() {
                 </span>
               )}
             </div>
-            <button onClick={handleLogout} className="text-white/70 hover:text-white transition-colors">
+            <button onClick={endSession} className="text-white/70 hover:text-white transition-colors">
               <LogOut className="w-5 h-5" />
             </button>
           </div>
@@ -1390,7 +1385,7 @@ export default function LaboratoryPage() {
         {/* Logout at bottom */}
         <div className="p-3 border-t border-white/10">
           <button
-            onClick={handleLogout}
+            onClick={endSession}
             className="w-full flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-all"
           >
             <LogOut className="w-4 h-4" />

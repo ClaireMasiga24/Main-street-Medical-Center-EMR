@@ -4,6 +4,8 @@ import Image from "next/image";
 import { useState, useEffect, useTransition, useRef, useCallback } from "react";
 import NotificationInbox from "../components/NotificationInbox";
 import StaffMessaging from "../components/StaffMessaging";
+import SessionLoading from "@/app/components/SessionLoading";
+import { endSession, useSessionGuard } from "@/app/lib/session";
 import {
   Users, ClipboardList, Pill, ArrowLeft, CheckCircle,
   LogOut, ChevronRight, AlertTriangle, Stethoscope,
@@ -989,7 +991,7 @@ function DashboardView({ stats, dentistName }: { stats: DashboardStats | null; d
 // MAIN DENTIST PAGE
 // ════════════════════════════════════════════════════════════════════════
 
-export default function DentistPage() {
+function DentistPageInner() {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [dentistName, setDentistName] = useState("Dentist");
@@ -1428,13 +1430,7 @@ export default function DentistPage() {
                 className="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
                 Stay in session
               </button>
-              <button onClick={async () => {
-                try {
-                  const r = sessionStorage.getItem("user") || localStorage.getItem("user");
-                  if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: u.id, username: u.username }) }); }
-                } catch {}
-                window.location.href = "/login";
-              }}
+              <button onClick={() => { setLogoutModal(false); endSession(); }}
                 className="px-4 py-2 text-sm rounded-lg bg-rose-600 text-white hover:bg-rose-700">
                 Sign out
               </button>
@@ -2693,4 +2689,14 @@ function ProcedureForm({
       </div>
     </div>
   );
+}
+
+// Session gate. The page above only mounts once a session is confirmed, so an
+// unauthenticated visitor never triggers its fetches or renders patient data.
+export default function DentistPage() {
+  const { ready } = useSessionGuard(["DENTIST", "ADMINISTRATOR"]);
+
+  if (!ready) return <SessionLoading />;
+
+  return <DentistPageInner />;
 }

@@ -4,7 +4,8 @@ import { useEffect, useState, useRef } from "react";
 import { Search, X, PackageCheck, Pill, LogOut, User } from "lucide-react";
 import NotificationInbox from "../components/NotificationInbox";
 import StaffMessaging from "../components/StaffMessaging";
-import { useRouter } from "next/navigation";
+import SessionLoading from "@/app/components/SessionLoading";
+import { endSession, useSessionGuard } from "@/app/lib/session";
 
 type PrescriptionStatus = "PENDING" | "DISPENSED";
 
@@ -30,8 +31,7 @@ interface QueueItem {
   prescriptions: Prescription[];
 }
 
-export default function PharmacyPage() {
-  const router = useRouter();
+function PharmacyPageInner() {
 
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [selected, setSelected] = useState<QueueItem | null>(null);
@@ -79,11 +79,6 @@ export default function PharmacyPage() {
       .toLowerCase()
       .includes(search.toLowerCase())
   );
-
-  const handleLogout = async () => {
-    try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: u.id, username: u.username }) }); } } catch {}
-    router.push("/");
-  };
 
   async function dispense(id: number) {
     try {
@@ -160,7 +155,7 @@ export default function PharmacyPage() {
               <X size={18} />
             </button>
           </div>
-          <button onClick={handleLogout} className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors shadow-sm">
+          <button onClick={endSession} className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-4 py-2.5 rounded-lg transition-colors shadow-sm">
             <LogOut size={14} /> Logout
           </button>
           </div>
@@ -246,4 +241,20 @@ export default function PharmacyPage() {
       </main>
     </div>
   );
+}
+
+// Session gate. The page above only mounts once a session is confirmed, so an
+// unauthenticated visitor never triggers its fetches or renders patient data.
+export default function PharmacyPage() {
+  const { ready } = useSessionGuard([
+    "NURSE_MIDWIFE",
+    "NURSE",
+    "MIDWIFE",
+    "PHARMACIST",
+    "ADMINISTRATOR",
+  ]);
+
+  if (!ready) return <SessionLoading />;
+
+  return <PharmacyPageInner />;
 }

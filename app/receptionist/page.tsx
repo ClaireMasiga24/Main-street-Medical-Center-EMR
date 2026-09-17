@@ -4,7 +4,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import Image from "next/image";
 import NotificationInbox from "../components/NotificationInbox";
 import StaffMessaging from "../components/StaffMessaging";
-import { useRouter } from "next/navigation";
+import SessionLoading from "@/app/components/SessionLoading";
+import { endSession, useSessionGuard } from "@/app/lib/session";
 import {
   Search, UserPlus, UserCheck, ArrowRight, CheckCircle2,
   AlertCircle, ShieldAlert, FileText, Phone, MapPin, FileHeart,
@@ -2588,8 +2589,7 @@ function CashierPOS({ patients, directBillPatient, onBillingComplete }: { patien
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export default function ReceptionistPage() {
-  const router = useRouter();
+function ReceptionistPageInner() {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState<"search" | "register" | "cashier" | "attendance" | "schedule" | "receipts">("search");
   const [registrationMode, setRegistrationMode] = useState<"normal" | "emergency">("normal");
@@ -2876,7 +2876,7 @@ export default function ReceptionistPage() {
             <NotificationInbox department="Reception" showTitle={false} />
             <StaffMessaging showTitle={false} />
             <button
-              onClick={async () => { try { const r = sessionStorage.getItem("user") || localStorage.getItem("user"); if (r) { const u = JSON.parse(r); await fetch("/api/logout", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ userId: u.id, username: u.username }) }); } } catch {} router.push("/"); }}
+              onClick={endSession}
               className="flex items-center gap-2 rounded-full bg-red-50 px-4 py-1.5 border border-red-100 text-red-600 hover:bg-red-100 transition-all"
             >
               <LogOut size={14} />
@@ -3354,4 +3354,18 @@ export default function ReceptionistPage() {
       </div>
     </main>
   );
+}
+
+// Session gate. The page above only mounts once a session is confirmed, so an
+// unauthenticated visitor never triggers its fetches or renders patient data.
+export default function ReceptionistPage() {
+  const { ready } = useSessionGuard([
+    "RECEPTIONIST",
+    "CASHIER",
+    "ADMINISTRATOR",
+  ]);
+
+  if (!ready) return <SessionLoading />;
+
+  return <ReceptionistPageInner />;
 }
