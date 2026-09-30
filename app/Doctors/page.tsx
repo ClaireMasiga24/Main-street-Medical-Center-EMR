@@ -23,7 +23,13 @@ import LabResultDetail from "../components/LabResultDetail";
 import ImagingResultDetail from "../components/ImagingResultDetail";
 import { LabOrderModal } from "../components/LabOrderModal";
 import DischargeSummaryForm from "../components/DischargeSummaryForm";
-import { LAB_TEST_CATALOG, DOCTOR_LAB_TESTS, DOCTOR_SONOGRAPHY_TESTS, DOCTOR_RADIOLOGY_TESTS, type LabTestCatalogItem } from "../lib/labTestCatalog";
+import SectionCard from "../components/SectionCard";
+import AutoTextarea from "../components/AutoTextarea";
+import Accordion, { type AccordionItem } from "../components/Accordion";
+import PageProgress from "../components/PageProgress";
+import PageFooter from "../components/PageFooter";
+import SaveStatus, { type SaveState } from "../components/SaveStatus";
+import { DOCTOR_LAB_TESTS, DOCTOR_LAB_TESTS_GROUPED, DOCTOR_SONOGRAPHY_TESTS, DOCTOR_RADIOLOGY_TESTS, type LabTestCatalogItem } from "../lib/labTestCatalog";
 
 
 
@@ -45,6 +51,223 @@ import {
 
 
 type RxDraft = { medication: string; dosage: string; instructions: string; route: string; frequency: string; givenAt: string; nextDose: string };
+
+/** Human label for a required field, used in the "can't turn the page" message. */
+const KEY_FIELD_LABELS: Record<string, string> = {
+  symptoms: "Presenting complaint",
+  physicalExamination: "Physical examination findings",
+  diagnosis: "Provisional diagnosis",
+  finalDiagnosis: "Final diagnosis",
+  treatmentPlan: "Treatment plan",
+  notes: "Clinical notes",
+};
+
+/** One page of the consultation file. */
+type ConsultPage = {
+  id: string;
+  label: string;
+  subtitle: string;
+  icon: React.ElementType;
+  render: () => React.ReactNode;
+};
+
+/**
+ * Fields that must hold a value before the doctor can turn the page. An empty
+ * list means nothing is required — the page is then gated on the "None for this
+ * patient" acknowledgement instead, so leaving it blank stays a deliberate act.
+ */
+const REQUIRED_FIELDS: Record<string, string[]> = {
+  history: ["symptoms"],
+  exam: ["physicalExamination"],
+  diagnosis: ["diagnosis"],
+  // Either at least one request exists, or the doctor ticks "No investigations
+  // needed" — the latter is handled by OPTIONAL_PAGES below, not by a field.
+  investigations: [],
+  // Skipped entirely when the doctor ticked "No investigations needed".
+  results: ["finalDiagnosis"],
+  rx: [],
+  procedures: [],
+  notes: [],
+  // A decision page: nothing to fill in, and deliberately not in
+  // OPTIONAL_PAGES, so it never asks for a "None for this patient" tick.
+  outcome: [],
+};
+
+/** Pages with no required field still need an explicit "nothing here" choice. */
+const OPTIONAL_PAGES = ["investigations", "rx", "procedures", "notes"];
+
+/**
+ * The generic acknowledgement is phrased for a blank page, but Investigations
+ * has its own clinical wording, so it says the same thing more precisely.
+ */
+const NONE_ACK_COPY: Record<string, { title: string; hint: string }> = {
+  investigations: {
+    title: "No investigations needed for this patient",
+    hint: "Tick this when the diagnosis does not need any test to confirm or rule it out.",
+  },
+};
+
+/**
+ * The diagnostic units that actually have a queue in this system, each with
+ * the real catalogue it can receive. Built from data rather than free text, so
+ * a doctor can never order a test no department will ever be handed.
+ *
+ * Laboratory is the UNION of the structured catalogue and the doctor's own
+ * panel, grouped — using either list alone hides tests the other one carries.
+ */
+type InvestigationDepartment = {
+  value: "LAB" | "SONOGRAPHY" | "RADIOLOGY";
+  label: string;
+  icon: React.ElementType;
+  hint: string;
+  /** True when only one study may be picked per request. */
+  singleChoice?: boolean;
+  groups: { section: string; tests: string[] }[];
+};
+
+const INVESTIGATION_DEPARTMENTS: InvestigationDepartment[] = [
+  {
+    value: "LAB",
+    label: "Laboratory",
+    icon: Microscope,
+    hint: "Blood, urine, stool, swab and serology tests",
+    groups: DOCTOR_LAB_TESTS_GROUPED,
+  },
+  {
+    value: "SONOGRAPHY",
+    label: "Sonography (ultrasound)",
+    icon: Waves,
+    hint: "Ultrasound scans",
+    singleChoice: true,
+    groups: [{ section: "Ultrasound", tests: [...DOCTOR_SONOGRAPHY_TESTS] }],
+  },
+  {
+    value: "RADIOLOGY",
+    label: "X-ray / Imaging",
+    icon: Radio,
+    hint: "Plain films, CT and MRI",
+    singleChoice: true,
+    groups: [{ section: "Radiology", tests: [...DOCTOR_RADIOLOGY_TESTS] }],
+  },
+];
+
+/** How each department's own queue status reads on the doctor's page. */
+const REQUEST_STATUS_LABEL: Record<string, string> = {
+  PENDING: "Requested", ORDERED: "Requested", ACCEPTED: "In progress",
+  SPECIMEN_COLLECTED: "In progress", PROCESSING: "In progress",
+  IN_PROGRESS: "In progress", AWAITING_VALIDATION: "In progress",
+  AWAITING_INTERPRETATION: "In progress",
+  COMPLETED: "Result ready", REPORTED: "Result ready",
+  CANCELLED: "Cancelled", REJECTED: "Rejected",
+};
+
+/** The message shown under the field that is holding the page. */
+const PAGE_REQUIRED_MESSAGE: Record<string, string> = {
+  history: "Presenting complaint is required to turn the page.",
+  exam: "Record at least one examination finding to turn the page.",
+  diagnosis: "Record a provisional diagnosis to turn the page.",
+  results: "Confirm the final diagnosis to turn the page.",
+};
+
+/**
+ * Examination is a long free-text column in the database, so the body systems
+ * live as "## <name>" sections inside that one string. Keeps the accordion
+ * without a schema change, and round-trips the doctor's own text: anything they
+ * wrote without a heading is kept verbatim under the first section.
+ */
+const EXAM_SECTIONS = [
+  { id: "general", name: "General & Vitals" },
+  { id: "cardio", name: "Cardiovascular" },
+  { id: "resp", name: "Respiratory" },
+  { id: "abdomen", name: "Abdomen" },
+  { id: "neuro", name: "Neurological" },
+  { id: "other", name: "Other Systems" },
+] as const;
+
+const examToText = (parts: Record<string, string>) =>
+  EXAM_SECTIONS
+    .map((s) => ({ s, body: (parts[s.id] ?? "").trim() }))
+    .filter((x) => x.body)
+    .map((x) => `## ${x.s.name}\n${x.body}`)
+    .join("\n\n");
+
+const textToExam = (text: string): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const s of EXAM_SECTIONS) out[s.id] = "";
+
+  const trimmed = (text ?? "").trim();
+  if (!trimmed) return out;
+  // No headings at all — the whole note is the doctor's free text, so keep it
+  // intact under the first section rather than inventing structure.
+  if (!/^##\s/m.test(trimmed)) {
+    out.general = text;
+    return out;
+  }
+
+  let current = "";
+  for (const line of trimmed.split(/\r?\n/)) {
+    const heading = line.match(/^##\s+(.*)$/);
+    if (heading) {
+      current = heading[1].trim().toLowerCase();
+      continue;
+    }
+    const match = EXAM_SECTIONS.find((s) => s.name.toLowerCase() === current);
+    if (match) out[match.id] += (out[match.id] ? "\n" : "") + line;
+  }
+  return out;
+};
+
+/**
+ * The ClinicalNote fields, in a fixed order. One list drives the dirty check
+ * and the draft write so the two can never drift apart. `doctorSignature` is
+ * the form's name for the note's `signature` column.
+ */
+const CLINICAL_DOC_FIELDS = [
+  "symptoms", "historyOfPresentIllness", "pastMedicalHistory", "reviewOfOtherSystems",
+  "physicalExamination", "diagnosis", "differentialDiagnosis", "assessment",
+  "treatmentPlan", "notes", "doctorSignature",
+] as const;
+
+/** Flattens a ClinicalNote row (or live form state) into a comparable string. */
+const docSnapshotOf = (src: Record<string, any>) =>
+  JSON.stringify(CLINICAL_DOC_FIELDS.map((f) => src?.[f] ?? ""));
+
+
+
+// ─── Final Diagnosis ──────────────────────────────────────────────────────
+// The doctor confirms or changes the suspected diagnosis once results are
+// back, so Final Diagnosis has to be separate from the Provisional one. There
+// is no column for it on ClinicalNote or Visit, so for now it lives inside
+// `notes` in a reserved fenced block.
+//
+// EVERY read and write of that block goes through extractFinalDiagnosis and
+// injectFinalDiagnosis below. When the real `finalDiagnosis` column is added,
+// only these two functions change — no page has to know where it is stored.
+
+const FD_OPEN = "<!--FINAL_DIAGNOSIS-->";
+const FD_CLOSE = "<!--/FINAL_DIAGNOSIS-->";
+/** Non-greedy, so a doctor typing a stray open marker cannot swallow the note. */
+const FD_BLOCK = new RegExp(`${FD_OPEN}[\\s\\S]*?${FD_CLOSE}[\\r\\n]*`);
+
+/** The final diagnosis, or "" when the block is absent, empty or malformed. */
+const extractFinalDiagnosis = (notes: string | null | undefined): string => {
+  if (!notes) return "";
+  const match = notes.match(FD_BLOCK);
+  if (!match) return "";
+  return match[0].split(FD_OPEN)[1].split(FD_CLOSE)[0].trim();
+};
+
+/** `notes` with any previous block replaced by `finalDiagnosis` (or removed). */
+const injectFinalDiagnosis = (notes: string | null | undefined, finalDiagnosis: string): string => {
+  const base = (notes ?? "").replace(FD_BLOCK, "").replace(/\n{3,}$/, "\n");
+  const value = (finalDiagnosis ?? "").trim();
+  if (!value) return base;
+  return `${base}${base ? "\n" : ""}${FD_OPEN}\n${value}\n${FD_CLOSE}\n`;
+};
+
+/** Clinical notes as the doctor should see them: the block is never shown. */
+const notesWithoutFinalDiagnosis = (notes: string | null | undefined): string =>
+  (notes ?? "").replace(FD_BLOCK, "").trimEnd();
 
 
 
@@ -774,7 +997,7 @@ function ConsultationPanel({
 
 }) {
 
-  const [tab, setTab] = useState<"history" | "exam" | "diagnosis" | "rx" | "procedures" | "notes">(initialTab || "diagnosis");
+  const [currentPageId, setCurrentPageId] = useState<string>(initialTab || "history");
 
   const [symptoms, setSymptoms] = useState(patient.source === "Doctor Registration" ? "" : (patient.chiefComplaint || ""));
 
@@ -796,12 +1019,34 @@ function ConsultationPanel({
 
   const [notes, setNotes] = useState("");
 
+  /** The confirmed diagnosis, held apart from `notes` but stored inside it. */
+  const [finalDiagnosis, setFinalDiagnosis] = useState("");
+
   const [doctorSignature, setDoctorSignature] = useState("");
 
   const [rxDrafts, setRxDrafts] = useState<RxDraft[]>([]);
 
   const [labChecked, setLabChecked] = useState<Set<string>>(new Set());
   const [sonographyChecked, setSonographyChecked] = useState<Set<string>>(new Set());
+  /** Tests already ordered on this encounter, so the Orders section can show
+      them instead of leaving the doctor to re-order from memory. Seeded from
+      the server on load, appended to by either ordering handler. */
+  const [orderedLabTests, setOrderedLabTests] = useState<string[]>([]);
+
+  // ── Investigations (page 4) ──
+  // Every test requested on this encounter, newest last, whatever department it
+  // went to. Seeded from the server so a page reload does not lose the list,
+  // and appended to by the same handlers the old order buttons used.
+  const [investigationRequests, setInvestigationRequests] = useState<
+    { id: string; department: string; what: string; urgency: string; status: string }[]
+  >([]);
+  const [showInvestigationForm, setShowInvestigationForm] = useState(false);
+  const [invDepartment, setInvDepartment] = useState<"LAB" | "SONOGRAPHY" | "RADIOLOGY">("LAB");
+  const [invTests, setInvTests] = useState<Set<string>>(new Set());
+  const [invQuery, setInvQuery] = useState("");
+  const [invQuestion, setInvQuestion] = useState("");
+  const [invUrgency, setInvUrgency] = useState("ROUTINE");
+  const [savingInvestigation, setSavingInvestigation] = useState(false);
 
   const [showNewRx, setShowNewRx] = useState(false);
 
@@ -843,7 +1088,89 @@ function ConsultationPanel({
 
   const [showProcedureForm, setShowProcedureForm] = useState(false);
 
+  // ── Paper-file page model ──
+  /** Which way the last page-turn went, so the sheet animates that way. */
+  const [pageMove, setPageMove] = useState<"forward" | "back">("forward");
+  /** "None for this patient" per page, so leaving one blank is a real choice. */
+  const [noneAck, setNoneAck] = useState<Record<string, boolean>>({});
+  /**
+   * Required messages stay hidden until the doctor has actually tried. A page
+   * becomes "revealed" when Next is pressed while blocked, and a single field
+   * is revealed when it is entered and then left empty. Opening a page reveals
+   * nothing, so a blank page never greets the doctor in red.
+   */
+  const [revealedPage, setRevealedPage] = useState<Record<string, boolean>>({});
+  const [touchedField, setTouchedField] = useState<Set<string>>(new Set());
+  // ── Outcome page ──
+  // Only a successful server write moves this to "completed", so the
+  // read-only finished-file view can never appear for an encounter that was not
+  // actually closed. A failure leaves the doctor here with the error.
+  const [outcomeState, setOutcomeState] = useState<"choosing" | "submitting" | "completed" | "error">("choosing");
+  const [outcomeError, setOutcomeError] = useState("");
+  /** Which accordion row is open, per page. */
+  const [openSection, setOpenSection] = useState<Record<string, string>>({
+    exam: "general",
+    notes: "notes",
+  });
+  /** Examination body systems, mirrored into the one physicalExamination column. */
+  const [examParts, setExamParts] = useState<Record<string, string>>(() => textToExam(physicalExamination));
+  const examTouched = useRef(false);
+  const examAdopted = useRef(false);
 
+  // ── Draft autosave + page turn ──
+  // Draft feedback for the encounter header, a ref to the current page's body
+  // (so a page turn can focus its first field), and a stable handle on the
+  // footer's primary action for the Ctrl+Enter shortcut.
+  const [saveState, setSaveState] = useState<SaveState>({ status: "idle" });
+  const pageBodyRef = useRef<HTMLDivElement | null>(null);
+  const primaryActionRef = useRef<() => void>(() => {});
+
+  // Adopt the hydrated examination note exactly once, the first time a value
+  // arrives from the server. After that the accordion owns the text — otherwise
+  // the writer below would reformat the doctor's own free text just for opening
+  // the page.
+  useEffect(() => {
+    if (examAdopted.current || examTouched.current) return;
+    if (!physicalExamination.trim()) return;
+    examAdopted.current = true;
+    setExamParts(textToExam(physicalExamination));
+  }, [physicalExamination]);
+
+  // Write the body systems back into the single column, only once the doctor has
+  // actually edited one.
+  useEffect(() => {
+    if (!examTouched.current) return;
+    const next = examToText(examParts);
+    if (next !== physicalExamination) setPhysicalExamination(next);
+  }, [examParts]);
+
+  const setExamPart = (id: string, value: string) => {
+    examTouched.current = true;
+    setExamParts((prev) => ({ ...prev, [id]: value }));
+  };
+
+  // ── Unsaved-changes guard ──
+  // Snapshot of what is currently persisted, set on hydration and after every
+  // successful write. Null until the first load resolves, so an in-flight fetch
+  // never reads as "dirty" and autosave never fires on open.
+  const [savedDocBaseline, setSavedDocBaseline] = useState<string | null>(null);
+  // One map of the live note fields, shared by the dirty check, the save calls
+  // and the per-step status rollup so they can never disagree.
+  const docValues: Record<string, string> = {
+    symptoms, historyOfPresentIllness, pastMedicalHistory, reviewOfOtherSystems,
+    physicalExamination, diagnosis, differentialDiagnosis, assessment,
+    treatmentPlan,
+    // What actually gets persisted: the doctor's notes with the final
+    // diagnosis folded back in. Every save path reads this, never the raw
+    // `notes` state, so the block can never be dropped on finalize.
+    notes: injectFinalDiagnosis(notes, finalDiagnosis),
+    doctorSignature,
+    // Derived, not a column — the page-turn rule only needs to read it.
+    finalDiagnosis,
+  };
+  const hasUnsavedEdits = savedDocBaseline !== null && docSnapshotOf(docValues) !== savedDocBaseline;
+  /** Treats what is on screen as persisted — called after every note write. */
+  const markDocSaved = () => setSavedDocBaseline(docSnapshotOf(docValues));
 
   const addRx = () => {
 
@@ -885,9 +1212,9 @@ function ConsultationPanel({
 
   useEffect(() => {
 
-    if (tab === "procedures") fetchProcedures();
+    if (currentPageId === "procedures") fetchProcedures();
 
-  }, [tab, fetchProcedures]);
+  }, [currentPageId, fetchProcedures]);
 
 
 
@@ -923,9 +1250,36 @@ function ConsultationPanel({
           if (n.differentialDiagnosis) setDifferentialDiagnosis(n.differentialDiagnosis);
           if (n.assessment) setAssessment(n.assessment);
           if (n.treatmentPlan) setTreatmentPlan(n.treatmentPlan);
-          if (n.notes) setNotes(n.notes);
+          if (n.notes) {
+            // Split the stored note into the doctor's own text and the final
+            // diagnosis block, so the raw markers never reach the Notes box.
+            setFinalDiagnosis(extractFinalDiagnosis(n.notes));
+            setNotes(notesWithoutFinalDiagnosis(n.notes));
+          }
           if (n.signature) setDoctorSignature(n.signature);
         }
+
+        // Snapshot what the form now holds so autosave never fires on a note the
+        // doctor didn't type. Hydration merges rather than replaces, so mirror
+        // that exactly: the stored value wins where it has one, else the seed.
+        const n2 = data.myNote || {};
+        // The stored note still carries the final diagnosis block, so compare
+        // against the same normalised shape docValues builds.
+        const hydratedNotes = n2.notes || notes;
+        setSavedDocBaseline(docSnapshotOf({
+          symptoms: n2.symptoms || symptoms,
+          historyOfPresentIllness: n2.historyOfPresentIllness || historyOfPresentIllness,
+          pastMedicalHistory: n2.pastMedicalHistory || pastMedicalHistory,
+          reviewOfOtherSystems: n2.reviewOfOtherSystems || reviewOfOtherSystems,
+          physicalExamination: n2.physicalExamination || physicalExamination,
+          diagnosis: n2.diagnosis || diagnosis,
+          differentialDiagnosis: n2.differentialDiagnosis || differentialDiagnosis,
+          assessment: n2.assessment || assessment,
+          treatmentPlan: n2.treatmentPlan || treatmentPlan,
+          notes: injectFinalDiagnosis(hydratedNotes, extractFinalDiagnosis(hydratedNotes)),
+          doctorSignature: n2.signature || doctorSignature,
+        }));
+        setSaveState({ status: "idle" });
 
       } catch { /* ignore */ }
 
@@ -946,15 +1300,50 @@ function ConsultationPanel({
 
         const data = await res.json();
 
-        if (data.labRequests) setLabResults(data.labRequests.filter((lr: any) => lr.status === "COMPLETED" && lr.results));
+        if (data.labRequests) {
+          setLabResults(data.labRequests.filter((lr: any) => lr.status === "COMPLETED" && lr.results));
+          // Same payload, filtered to this encounter, powers the "already
+          // ordered" list on the Orders section.
+          setOrderedLabTests(
+            Array.from(new Set(
+              data.labRequests
+                .filter((lr: any) => lr.encounterId === encounterId && lr.status !== "CANCELLED")
+                .map((lr: any) => lr.testName as string)
+            ))
+          );
+        }
 
         if (data.imagingRequests) setImagingResults(data.imagingRequests.filter((ir: any) => ir.status === "REPORTED" && (ir.findings || ir.impression || ir.conclusion)));
+
+        // Rebuild the Investigations list for this encounter from both
+        // departments, so the page survives a reload.
+        const seeded = [
+          ...(data.labRequests ?? [])
+            .filter((lr: any) => lr.encounterId === encounterId && lr.status !== "CANCELLED")
+            .map((lr: any) => ({
+              id: `lab-${lr.id}`,
+              department: "LAB",
+              what: lr.testName as string,
+              urgency: lr.priority || "ROUTINE",
+              status: lr.status as string,
+            })),
+          ...(data.imagingRequests ?? [])
+            .filter((ir: any) => ir.encounterId === encounterId && ir.status !== "CANCELLED")
+            .map((ir: any) => ({
+              id: `img-${ir.id}`,
+              department: ir.studyType === "X_RAY" ? "RADIOLOGY" : "SONOGRAPHY",
+              what: ir.studyType as string,
+              urgency: ir.priority || "ROUTINE",
+              status: ir.status as string,
+            })),
+        ];
+        setInvestigationRequests(seeded);
 
       } catch { /* ignore */ }
 
     })();
 
-  }, [patient.id]);
+  }, [patient.id, encounterId]);
 
 
 
@@ -1006,7 +1395,10 @@ function ConsultationPanel({
 
 
 
-  const handleAction = async (action: string, referralDept?: string) => {
+  // Returns true only when the server accepted the write. `keepOpen` stops the
+  // panel handing the doctor back to the queue, so the Outcome page can hold a
+  // finished file open for sharing and printing.
+  const handleAction = async (action: string, referralDept?: string, opts?: { keepOpen?: boolean }) => {
 
     // For lab/sonography/radiology, keep patient IN_CONSULTATION — just send orders
     const stayInConsultation = action === "referral" && referralDept && ["LAB", "SONOGRAPHY", "RADIOLOGY"].includes(referralDept);
@@ -1016,7 +1408,7 @@ function ConsultationPanel({
 
     try {
 
-      const body: Record<string, any> = { patientId: patient.id, encounterId, staffId, staffName, symptoms, historyOfPresentIllness, pastMedicalHistory, reviewOfOtherSystems, physicalExamination, diagnosis, differentialDiagnosis, assessment, treatmentPlan, notes, doctorSignature, prescriptions: rxDrafts.map((r) => ({ medication: r.medication, dosage: r.dosage, instructions: r.instructions, route: r.route, frequency: r.frequency, givenAt: r.givenAt, nextDose: r.nextDose })), labRequests: Array.from(labChecked).map((t) => ({ testName: t })), routeTo };
+      const body: Record<string, any> = { patientId: patient.id, encounterId, staffId, staffName, symptoms, historyOfPresentIllness, pastMedicalHistory, reviewOfOtherSystems, physicalExamination, diagnosis, differentialDiagnosis, assessment, treatmentPlan, notes: docValues.notes, doctorSignature, prescriptions: rxDrafts.map((r) => ({ medication: r.medication, dosage: r.dosage, instructions: r.instructions, route: r.route, frequency: r.frequency, givenAt: r.givenAt, nextDose: r.nextDose })), labRequests: Array.from(labChecked).map((t) => ({ testName: t })), routeTo };
 
       // For sonography/radiology referrals, include imaging orders
       if (stayInConsultation && (referralDept === "SONOGRAPHY" || referralDept === "RADIOLOGY")) {
@@ -1026,6 +1418,7 @@ function ConsultationPanel({
       const res = await fetch("/api/doctor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
       if (res.ok) {
+        markDocSaved(); setSaveState({ status: "saved", at: new Date() });
         if (stayInConsultation) {
           const labelMap: Record<string, string> = { LAB: "Laboratory", SONOGRAPHY: "Sonography", RADIOLOGY: "Radiology" };
           alert(`Orders sent to ${labelMap[referralDept!] || referralDept}. Patient stays in consultation.`);
@@ -1035,22 +1428,32 @@ function ConsultationPanel({
           if (action === "referral" && referralDept && onReferral) {
             onReferral(patient, referralDept);
           }
-          onComplete();
+          if (!opts?.keepOpen) onComplete();
         }
+        return true;
       } else {
         const err = await res.json();
         alert(`Error: ${err.error}`);
+        return false;
       }
 
-    } catch { alert("Network error completing consultation."); } finally { setSaving(false); setSavingAction(""); }
+    } catch { alert("Network error completing consultation."); return false; } finally { setSaving(false); setSavingAction(""); }
 
   };
 
 
 
-  /** Order lab tests without routing the patient away — keeps consultation open. */
-  const handleQuickLabOrder = async () => {
-    if (labChecked.size === 0) return;
+  /**
+   * Order lab tests without routing the patient away — keeps consultation open.
+   *
+   * `opts` is additive: the old call sites pass nothing and behave exactly as
+   * before. The Investigations page passes the tests it collected, the urgency
+   * and the clinical question, and `silent` so it can show its own inline
+   * result instead of an alert.
+   */
+  const handleQuickLabOrder = async (opts?: { tests?: string[]; priority?: string; clinicalNotes?: string; silent?: boolean }) => {
+    const tests = opts?.tests ?? Array.from(labChecked);
+    if (tests.length === 0) return false;
     setSaving(true); setSavingAction("ORDER_LAB");
     try {
       const res = await fetch("/api/doctor", {
@@ -1059,22 +1462,29 @@ function ConsultationPanel({
           patientId: patient.id, encounterId, staffId, staffName,
           symptoms, historyOfPresentIllness, pastMedicalHistory,
           reviewOfOtherSystems, physicalExamination, diagnosis,
-          differentialDiagnosis, assessment, treatmentPlan, notes, doctorSignature,
+          differentialDiagnosis, assessment, treatmentPlan,
+          notes: docValues.notes, doctorSignature,
           prescriptions: [],
-          labRequests: Array.from(labChecked).map((t) => ({ testName: t })),
+          labRequests: tests.map((t) => ({ testName: t })),
+          requestMeta: { priority: opts?.priority || "ROUTINE", clinicalNotes: opts?.clinicalNotes || null },
           routeTo: "SEND_ORDERS",
         }),
       });
       if (res.ok) {
-        alert(`${labChecked.size} test(s) ordered. Patient remains in consultation.`);
+        markDocSaved(); setSaveState({ status: "saved", at: new Date() });
+        if (!opts?.silent) alert(`${tests.length} test(s) ordered. Patient remains in consultation.`);
+        setOrderedLabTests((prev) => Array.from(new Set([...prev, ...tests])));
         setLabChecked(new Set());
         // NOTE: intentionally NOT calling onComplete() — doctor stays in the consultation
+        return true;
       } else {
         const err = await res.json();
-        alert(`Error: ${err.error}`);
+        if (!opts?.silent) alert(`Error: ${err.error}`);
+        return false;
       }
     } catch {
-      alert("Network error ordering lab tests.");
+      if (!opts?.silent) alert("Network error ordering lab tests.");
+      return false;
     } finally {
       setSaving(false);
       setSavingAction("");
@@ -1092,14 +1502,16 @@ function ConsultationPanel({
           patientId: patient.id, encounterId, staffId, staffName,
           symptoms, historyOfPresentIllness, pastMedicalHistory,
           reviewOfOtherSystems, physicalExamination, diagnosis,
-          differentialDiagnosis, assessment, treatmentPlan, notes, doctorSignature,
+          differentialDiagnosis, assessment, treatmentPlan, notes: docValues.notes, doctorSignature,
           prescriptions: [],
           labRequests: selectedTests.map((t) => ({ testName: t.name, testCode: t.code })),
           routeTo: "SEND_ORDERS",
         }),
       });
       if (res.ok) {
+        markDocSaved(); setSaveState({ status: "saved", at: new Date() });
         alert(`${selectedTests.length} test(s) ordered. Patient remains in consultation.`);
+        setOrderedLabTests((prev) => Array.from(new Set([...prev, ...selectedTests.map((t) => t.name)])));
         setShowLabOrderModal(false);
         // NOTE: intentionally NOT calling onComplete() — doctor stays in the consultation
       } else {
@@ -1115,8 +1527,9 @@ function ConsultationPanel({
   };
 
   /** Order sonography scans without routing the patient away — keeps consultation open. */
-  const handleQuickSonographyOrder = async () => {
-    if (sonographyChecked.size === 0) return;
+  const handleQuickSonographyOrder = async (opts?: { studies?: string[]; priority?: string; clinicalNotes?: string; silent?: boolean }) => {
+    const studies = opts?.studies ?? Array.from(sonographyChecked);
+    if (studies.length === 0) return false;
     setSaving(true); setSavingAction("ORDER_SONO");
     try {
       const res = await fetch("/api/doctor", {
@@ -1125,27 +1538,74 @@ function ConsultationPanel({
           patientId: patient.id, encounterId, staffId, staffName,
           symptoms, historyOfPresentIllness, pastMedicalHistory,
           reviewOfOtherSystems, physicalExamination, diagnosis,
-          differentialDiagnosis, assessment, treatmentPlan, notes, doctorSignature,
+          differentialDiagnosis, assessment, treatmentPlan,
+          notes: docValues.notes, doctorSignature,
           prescriptions: [],
           labRequests: [],
-          imagingOrders: Array.from(sonographyChecked),
+          imagingOrders: studies,
+          requestMeta: { priority: opts?.priority || "ROUTINE", clinicalNotes: opts?.clinicalNotes || null },
           routeTo: "SEND_ORDERS",
         }),
       });
       if (res.ok) {
-        alert(`${sonographyChecked.size} scan(s) ordered. Patient remains in consultation.`);
+        markDocSaved(); setSaveState({ status: "saved", at: new Date() });
+        if (!opts?.silent) alert(`${studies.length} scan(s) ordered. Patient remains in consultation.`);
         setSonographyChecked(new Set());
         // NOTE: intentionally NOT calling onComplete() — doctor stays in the consultation
+        return true;
       } else {
         const err = await res.json();
-        alert(`Error: ${err.error}`);
+        if (!opts?.silent) alert(`Error: ${err.error}`);
+        return false;
       }
     } catch {
-      alert("Network error ordering sonography.");
+      if (!opts?.silent) alert("Network error ordering sonography.");
+      return false;
     } finally {
       setSaving(false);
       setSavingAction("");
     }
+  };
+
+
+
+  /**
+   * The Investigations page's submit. Delegates to the same lab and sonography
+   * handlers the old order buttons used, then records the request in the local
+   * list. Guarded so a double click cannot file two requests.
+   */
+  const handleRequestInvestigation = async () => {
+    if (savingInvestigation) return;
+    const tests = Array.from(invTests);
+    if (tests.length === 0) return;
+    if (!invQuestion.trim()) return;
+
+    setSavingInvestigation(true);
+    const ok =
+      invDepartment === "LAB"
+        ? await handleQuickLabOrder({ tests, priority: invUrgency, clinicalNotes: invQuestion.trim(), silent: true })
+        : await handleQuickSonographyOrder({ studies: tests, priority: invUrgency, clinicalNotes: invQuestion.trim(), silent: true });
+
+    setSavingInvestigation(false);
+    if (!ok) return;
+
+    const DEPT_LABEL: Record<string, string> = {
+      LAB: "Laboratory",
+      SONOGRAPHY: "Sonography",
+      RADIOLOGY: "X-ray / Imaging",
+    };
+    setInvestigationRequests((prev) => [
+      ...prev,
+      ...tests.map((t, i) => ({
+        id: `new-${Date.now()}-${i}`,
+        department: DEPT_LABEL[invDepartment],
+        what: t,
+        urgency: invUrgency,
+        status: "REQUESTED",
+      })),
+    ]);
+    setInvTests(new Set());
+    setShowInvestigationForm(false);
   };
 
 
@@ -1157,9 +1617,9 @@ function ConsultationPanel({
 
     try {
 
-      const res = await fetch("/api/doctor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId: patient.id, encounterId, staffId, staffName, symptoms, historyOfPresentIllness, pastMedicalHistory, reviewOfOtherSystems, physicalExamination, diagnosis, differentialDiagnosis, assessment, treatmentPlan, notes, doctorSignature, prescriptions: rxDrafts.map((r) => ({ medication: r.medication, dosage: r.dosage, instructions: r.instructions, route: r.route, frequency: r.frequency, givenAt: r.givenAt, nextDose: r.nextDose })), labRequests: Array.from(labChecked).map((t) => ({ testName: t })), routeTo: "SHARE", shareTargets: selectedShareTargets }) });
+      const res = await fetch("/api/doctor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId: patient.id, encounterId, staffId, staffName, symptoms, historyOfPresentIllness, pastMedicalHistory, reviewOfOtherSystems, physicalExamination, diagnosis, differentialDiagnosis, assessment, treatmentPlan, notes: docValues.notes, doctorSignature, prescriptions: rxDrafts.map((r) => ({ medication: r.medication, dosage: r.dosage, instructions: r.instructions, route: r.route, frequency: r.frequency, givenAt: r.givenAt, nextDose: r.nextDose })), labRequests: Array.from(labChecked).map((t) => ({ testName: t })), routeTo: "SHARE", shareTargets: selectedShareTargets }) });
 
-      if (res.ok) { alert("Results shared successfully."); setShowShareModal(false); } else { const err = await res.json(); alert(`Error: ${err.error}`); }
+      if (res.ok) { markDocSaved(); setSaveState({ status: "saved", at: new Date() }); alert("Results shared successfully."); setShowShareModal(false); } else { const err = await res.json(); alert(`Error: ${err.error}`); }
 
     } catch { alert("Network error sharing results."); } finally { setSaving(false); setSavingAction(""); }
 
@@ -1322,6 +1782,1013 @@ function ConsultationPanel({
   const isBusy = saving;
 
 
+  // ── Draft autosave ──────────────────────────────────────────────────────
+  // Writes the attending clinician's ClinicalNote and nothing else. The full
+  // /api/doctor POST also creates Visits, prescriptions and orders, so autosave
+  // and "Save draft" must not go near it — that runs once, on Finalize.
+  const saveDraft = async (): Promise<boolean> => {
+    if (!encounterId) {
+      setSaveState({ status: "error", message: "Encounter not open" });
+      return false;
+    }
+    setSaveState({ status: "saving" });
+    try {
+      const res = await fetch("/api/doctor/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          encounterId,
+          staffId,
+          staffName,
+          ...docValues,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        setSaveState({ status: "error", message: err?.error || "Draft not saved" });
+        return false;
+      }
+      markDocSaved();
+      setSaveState({ status: "saved", at: new Date() });
+      return true;
+    } catch {
+      setSaveState({ status: "error", message: "Network error" });
+      return false;
+    }
+  };
+
+  // Autosave 1.5s after the last keystroke. Deliberately re-arms on every
+  // render (no dep array) so it debounces to "1.5s after typing stops".
+  // Gated on hasUnsavedEdits, which stays null until hydration resolves, so
+  // merely opening an encounter never writes a note.
+  useEffect(() => {
+    if (!encounterId || !hasUnsavedEdits) return;
+    const t = setTimeout(() => { void saveDraft(); }, 1500);
+    return () => clearTimeout(t);
+  });
+
+  // Warn before leaving with work that only exists in this form.
+  useEffect(() => {
+    if (!hasUnsavedEdits) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [hasUnsavedEdits]);
+
+  // Open each step on its first field so the keyboard follows the screen.
+  useEffect(() => {
+    pageBodyRef.current?.querySelector<HTMLElement>("[data-step-focus]")?.focus();
+  }, [currentPageId]);
+
+  // Ctrl/Cmd+Enter = the footer's primary action, from anywhere on the page.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        primaryActionRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // ── The ordered workflow ────────────────────────────────────────────────
+  const printDownloadRow = (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" onClick={handlePrint} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0a2e1a]/50">
+        <Printer size={15} /> Print
+      </button>
+      <button type="button" onClick={handleDownload} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0a2e1a]/50">
+        <FileText size={15} /> Download
+      </button>
+    </div>
+  );
+
+  // ── Page-turn rules ──
+  // Forward one page at a time, backward freely: the only controls are Previous
+  // and Next, so there is no way to skip ahead.
+  const pageRequired = REQUIRED_FIELDS[currentPageId] ?? [];
+  const isEmptyRequired = (f: string) => !(docValues[f] ?? "").trim();
+  const missingRequired = pageRequired.filter(isEmptyRequired);
+
+  // Gating is presentation only: canTurnPage below still uses the ungated
+  // missingRequired, so a hidden message can never let the page through.
+  const fieldErrors: Record<string, string> = {};
+  for (const f of missingRequired) {
+    if (!revealedPage[currentPageId] && !touchedField.has(f)) continue;
+    fieldErrors[f] =
+      PAGE_REQUIRED_MESSAGE[currentPageId] ??
+      `${KEY_FIELD_LABELS[f] ?? "This field"} is required to turn the page.`;
+  }
+
+  /**
+   * A blocked Next press: show every message on this page and put the caret in
+   * the first field that is holding it. It never navigates and never marks
+   * anything done.
+   */
+  const revealBlockedPage = () => {
+    setRevealedPage((p) => ({ ...p, [currentPageId]: true }));
+    const first = missingRequired[0];
+    if (!first) return;
+    pageBodyRef.current?.querySelector<HTMLElement>(`[data-required="${first}"]`)?.focus();
+  };
+
+  /** Entered and then left empty: reveal that one field's message. */
+  const markFieldTouched = (f: string) =>
+    setTouchedField((p) => (p.has(f) ? p : new Set(p).add(f)));
+
+  /** Does this optional page hold anything? Drives the "None" checkbox. */
+  const pageHasContent = (id: string) => {
+    if (id === "investigations") return investigationRequests.length > 0;
+    if (id === "rx") return !!docValues.treatmentPlan?.trim() || rxDrafts.length > 0;
+    if (id === "procedures")
+      return savedProcedures.length > 0 || !!procedureName.trim() || !!procedureNotes.trim();
+    if (id === "notes")
+      // Raw `notes`, not docValues.notes: the final diagnosis lives on the
+      // Results page and must not make this page look filled in.
+      return (
+        !!notes.trim() ||
+        !!doctorSignature.trim()
+      );
+    return false;
+  };
+
+  // A blank optional page is allowed, but only once the doctor has said so.
+  // As soon as the page holds content the acknowledgement stops counting, so
+  // the checkbox clears itself and the page unlocks.
+  const blockedByNone =
+    OPTIONAL_PAGES.includes(currentPageId) &&
+    !pageHasContent(currentPageId) &&
+    !noneAck[currentPageId];
+
+  const canTurnPage = missingRequired.length === 0 && !blockedByNone;
+
+  /**
+   * With "No investigations needed" ticked there is nothing to read back, so
+   * the Results page is stepped over instead of shown empty and re-blocked.
+   */
+  const skipResultsPage =
+    currentPageId === "investigations" &&
+    noneAck.investigations === true &&
+    investigationRequests.length === 0;
+
+  // Examination body systems as accordion rows — one open at a time, so a long
+  // system-by-system note reads as a list rather than a wall.
+  const examAccordionItems: AccordionItem[] = EXAM_SECTIONS.map((s) => ({
+    id: s.id,
+    title: s.name,
+    meta: (examParts[s.id] ?? "").trim() ? "recorded" : undefined,
+    children: (
+      <AutoTextarea
+        data-step-focus={s.id === (openSection.exam || "general") ? true : undefined}
+        data-required={s.id === "general" ? "physicalExamination" : undefined}
+        aria-label={`${s.name} examination findings`}
+        placeholder={`${s.name} findings...`}
+        value={examParts[s.id] ?? ""}
+        onChange={(e) => setExamPart(s.id, e.target.value)}
+        onBlur={() => s.id === "general" && markFieldTouched("physicalExamination")}
+      />
+    ),
+  }));
+
+  const pages: ConsultPage[] = [
+    {
+      id: "history",
+      label: "History",
+      icon: FileText,
+      subtitle: "The reason this patient presented today",
+      render: () => (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <SectionCard title="Presenting Complaint" className="lg:col-span-2">
+            <AutoTextarea
+              data-step-focus
+              data-required="symptoms"
+              aria-label="Presenting complaint"
+              placeholder="Patient's primary complaint..."
+              value={symptoms}
+              onChange={(e) => setSymptoms(e.target.value)}
+              onBlur={() => markFieldTouched("symptoms")}
+            />
+            {fieldErrors.symptoms ? (
+              <p role="alert" className="mt-1.5 text-xs font-semibold text-red-600">
+                {fieldErrors.symptoms}
+              </p>
+            ) : null}
+          </SectionCard>
+
+          <SectionCard title="History of Presenting Complaint" className="lg:col-span-2">
+            <AutoTextarea
+              aria-label="History of presenting complaint"
+              placeholder="Onset, duration, character, aggravating and relieving factors..."
+              value={historyOfPresentIllness}
+              onChange={(e) => setHistoryOfPresentIllness(e.target.value)}
+            />
+          </SectionCard>
+
+          <SectionCard title="Review of Systems">
+            <AutoTextarea
+              aria-label="Review of systems"
+              placeholder="Constitutional, respiratory, cardiovascular, GI..."
+              value={reviewOfOtherSystems}
+              onChange={(e) => setReviewOfOtherSystems(e.target.value)}
+            />
+          </SectionCard>
+
+          <SectionCard title="Past Medical / Surgical History">
+            <AutoTextarea
+              aria-label="Past medical and surgical history"
+              placeholder="Chronic illnesses, previous surgeries, drug history..."
+              value={pastMedicalHistory}
+              onChange={(e) => setPastMedicalHistory(e.target.value)}
+            />
+          </SectionCard>
+        </div>
+      ),
+    },
+    {
+      id: "exam",
+      label: "Examination",
+      icon: Stethoscope,
+      subtitle: "What you found on examination, system by system",
+      render: () => (
+        <div className="grid gap-3">
+          <Accordion
+            items={examAccordionItems}
+            openId={openSection.exam || "general"}
+            onToggle={(id) => setOpenSection((p) => ({ ...p, exam: id }))}
+          />
+
+          {fieldErrors.physicalExamination ? (
+            <p role="alert" className="text-xs font-semibold text-red-600">
+              {fieldErrors.physicalExamination}
+            </p>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      id: "diagnosis",
+      label: "Diagnosis",
+      icon: AlertCircle,
+      subtitle: "Your suspected diagnosis and clinical reasoning",
+      render: () => (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <SectionCard title="Provisional Diagnosis">
+            <AutoTextarea
+              data-step-focus
+              data-required="diagnosis"
+              aria-label="Provisional diagnosis"
+              placeholder="Suspected diagnosis based on history and examination..."
+              value={diagnosis}
+              onChange={(e) => setDiagnosis(e.target.value)}
+              onBlur={() => markFieldTouched("diagnosis")}
+            />
+            {fieldErrors.diagnosis ? (
+              <p role="alert" className="mt-1.5 text-xs font-semibold text-red-600">
+                {fieldErrors.diagnosis}
+              </p>
+            ) : null}
+          </SectionCard>
+
+          <SectionCard title="Differential Diagnosis">
+            <AutoTextarea
+              aria-label="Differential diagnosis"
+              placeholder="Other conditions to rule out..."
+              value={differentialDiagnosis}
+              onChange={(e) => setDifferentialDiagnosis(e.target.value)}
+            />
+          </SectionCard>
+
+          <SectionCard title="Clinical Assessment" className="lg:col-span-2">
+            <AutoTextarea
+              aria-label="Clinical assessment"
+              placeholder="Summary of findings and reasoning, and why the patient needs treatment or admission..."
+              value={assessment}
+              onChange={(e) => setAssessment(e.target.value)}
+            />
+          </SectionCard>
+        </div>
+      ),
+    },
+    {
+      id: "investigations",
+      label: "Investigations",
+      icon: Microscope,
+      subtitle: "Tests to confirm or rule out your suspected diagnosis",
+      render: () => {
+        const dept = INVESTIGATION_DEPARTMENTS.find((d) => d.value === invDepartment)!;
+        // Search narrows the groups; empty groups drop out so a query never
+        // leaves a dangling heading behind.
+        const q = invQuery.trim().toLowerCase();
+        const visibleGroups = q
+          ? dept.groups
+              .map((g) => ({ section: g.section, tests: g.tests.filter((t) => t.toLowerCase().includes(q)) }))
+              .filter((g) => g.tests.length > 0)
+          : dept.groups;
+        const visibleCount = visibleGroups.reduce((n, g) => n + g.tests.length, 0);
+        return (
+          <div className="grid gap-3">
+            <SectionCard title="Provisional Diagnosis" hint="Read-only">
+              <p className="text-sm leading-relaxed text-slate-700">
+                {diagnosis.trim() || "Not recorded yet — fill in the previous page first."}
+              </p>
+            </SectionCard>
+
+            {showInvestigationForm ? (
+              <SectionCard title="New investigation request">
+                <div className="grid gap-3">
+                  <div>
+                    <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Department</p>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      {INVESTIGATION_DEPARTMENTS.map((d) => {
+                        const DIcon = d.icon;
+                        const active = d.value === invDepartment;
+                        return (
+                          <button
+                            key={d.value}
+                            type="button"
+                            onClick={() => { setInvDepartment(d.value as typeof invDepartment); setInvTests(new Set()); setInvQuery(""); }}
+                            aria-pressed={active}
+                            className={`flex items-start gap-2 rounded-xl border p-3 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0a2e1a]/50 ${active ? "border-[#0a2e1a] bg-[#0a2e1a]/5" : "border-slate-200 bg-white hover:border-slate-300"}`}
+                          >
+                            <DIcon size={15} className="mt-0.5 flex-shrink-0 text-[#0a2e1a]" />
+                            <span className="min-w-0">
+                              <span className="block text-xs font-bold text-slate-700">{d.label}</span>
+                              <span className="block text-[10px] leading-snug text-slate-400">{d.hint}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      What is requested
+                      <span className="ml-1 font-normal normal-case text-slate-400">
+                        ({invTests.size} selected{q ? ` · ${visibleCount} matching` : ` · ${dept.groups.reduce((n, g) => n + g.tests.length, 0)} available`})
+                      </span>
+                    </p>
+
+                    <input
+                      type="search"
+                      aria-label={`Search ${dept.label} tests`}
+                      placeholder={`Search ${dept.label.toLowerCase()} tests...`}
+                      value={invQuery}
+                      onChange={(e) => setInvQuery(e.target.value)}
+                      className="mb-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#0a2e1a] focus:ring-2 focus:ring-[#0a2e1a]/20"
+                    />
+
+                    <div className="max-h-[30rem] space-y-3 overflow-y-auto pr-1">
+                      {visibleGroups.length === 0 ? (
+                        <p className="py-3 text-center text-sm text-slate-400">
+                          No {dept.label.toLowerCase()} test matches &ldquo;{invQuery.trim()}&rdquo;.
+                        </p>
+                      ) : (
+                        visibleGroups.map((g) => (
+                          <div key={g.section}>
+                            <p className="mb-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                              {g.section}
+                            </p>
+                            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                              {g.tests.map((t) => (
+                                <label
+                                  key={t}
+                                  className={`flex cursor-pointer items-center gap-2.5 rounded-lg border p-2 text-sm transition-colors ${invTests.has(t) ? "border-[#0a2e1a] bg-[#0a2e1a]/5" : "border-slate-200 bg-white hover:border-slate-300"}`}
+                                >
+                                  <input
+                                    // The imaging endpoint files one study per
+                                    // request, so imaging is picked one at a
+                                    // time. Lab takes a panel.
+                                    type={dept.singleChoice ? "radio" : "checkbox"}
+                                    name={dept.singleChoice ? "inv-study" : undefined}
+                                    className="accent-[#0a2e1a]"
+                                    checked={invTests.has(t)}
+                                    onChange={(e) => {
+                                      setInvTests(
+                                        e.target.checked
+                                          ? new Set<string>(dept.singleChoice ? [t] : [...invTests, t])
+                                          : new Set<string>()
+                                      );
+                                    }}
+                                  />
+                                  <span className="text-slate-700">{t}</span>
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    {dept.singleChoice ? (
+                      <p className="mt-1 text-[10px] text-slate-400">
+                        One study per request. Send another request to add a second study.
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div>
+                    <label htmlFor="inv-question" className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Clinical question <span className="text-red-500">*</span>
+                    </label>
+                    <AutoTextarea
+                      id="inv-question"
+                      data-step-focus
+                      aria-label="Clinical question"
+                      placeholder="What does this test need to answer?"
+                      value={invQuestion}
+                      onChange={(e) => setInvQuestion(e.target.value)}
+                    />
+                    <p className="mt-1 text-[10px] text-slate-400">
+                      Prefilled from the provisional diagnosis. This is what the department reads.
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Urgency</p>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { v: "ROUTINE", label: "Routine" },
+                        { v: "URGENT", label: "Urgent" },
+                        { v: "EMERGENCY", label: "Emergency" },
+                      ].map((u) => (
+                        <button
+                          key={u.v}
+                          type="button"
+                          onClick={() => setInvUrgency(u.v)}
+                          aria-pressed={invUrgency === u.v}
+                          className={`rounded-lg border px-3.5 py-2 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0a2e1a]/50 ${invUrgency === u.v ? "border-[#0a2e1a] bg-[#0a2e1a] text-white" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
+                        >
+                          {u.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleRequestInvestigation()}
+                      disabled={savingInvestigation || invTests.size === 0 || !invQuestion.trim()}
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#0a2e1a] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#0d3d24] disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0a2e1a]/50"
+                    >
+                      {savingInvestigation ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : <><Send size={14} /> Send to {dept.label}</>}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowInvestigationForm(false)}
+                      className="rounded-xl px-4 py-2.5 text-sm text-slate-500 transition-colors hover:text-slate-700"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </SectionCard>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setInvQuestion(diagnosis.trim()); setInvTests(new Set()); setInvQuery(""); setShowInvestigationForm(true); }}
+                className="inline-flex w-fit items-center gap-1.5 text-sm font-semibold text-[#0a2e1a] transition-colors hover:text-[#0d3d24] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0a2e1a]/50"
+              >
+                <Plus size={15} /> Request investigation
+              </button>
+            )}
+
+            <SectionCard title="Requests on this encounter" hint={`${investigationRequests.length}`}>
+              {investigationRequests.length === 0 ? (
+                <p className="py-4 text-center text-sm text-slate-400">
+                  Nothing requested yet. Use the button above, or tick the acknowledgement below.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {investigationRequests.map((r) => (
+                    <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3.5 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-700">{r.what}</p>
+                        <p className="text-xs text-slate-500">
+                          {r.department}
+                          {r.urgency && r.urgency !== "ROUTINE" ? ` · ${r.urgency.toLowerCase()}` : ""}
+                        </p>
+                      </div>
+                      <span className="whitespace-nowrap rounded-full bg-white px-2.5 py-0.5 text-[10px] font-semibold text-slate-500 ring-1 ring-slate-200">
+                        {REQUEST_STATUS_LABEL[r.status] ?? r.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SectionCard>
+          </div>
+        );
+      },
+    },
+    {
+      id: "results",
+      label: "Results & Diagnosis",
+      icon: FileText,
+      subtitle: "What the tests showed, and your final diagnosis",
+      render: () => (
+        <div className="grid gap-3">
+          {labResults.length === 0 && imagingResults.length === 0 ? (
+            <SectionCard title="Results">
+              <p className="py-4 text-center text-sm text-slate-400">
+                Results pending. You can continue and prescribe now, and come back to this page when they are ready.
+              </p>
+            </SectionCard>
+          ) : (
+            <>
+              {labResults.length > 0 ? (
+                <SectionCard title="Laboratory" hint={`${labResults.length}`} icon={Microscope}>
+                  <div className="space-y-2">
+                    {labResults.map((lr: any) => <LabResultDetail key={lr.id} lr={lr} />)}
+                  </div>
+                </SectionCard>
+              ) : null}
+              {imagingResults.length > 0 ? (
+                <SectionCard title="Imaging" hint={`${imagingResults.length}`} icon={Radio}>
+                  <div className="space-y-2">
+                    {imagingResults.map((ir: any) => <ImagingResultDetail key={ir.id} ir={ir} />)}
+                  </div>
+                </SectionCard>
+              ) : null}
+            </>
+          )}
+
+          <SectionCard title="Final Diagnosis" icon={CheckCircle}>
+            {!finalDiagnosis.trim() && diagnosis.trim() && !revealedPage.results ? (
+              <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="min-w-0 flex-1 text-xs text-slate-500">
+                  Your provisional diagnosis is <strong className="text-slate-700">{diagnosis.trim()}</strong>. Confirm it, or
+                  change it now that the results are in.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setFinalDiagnosis(diagnosis.trim())}
+                  className="whitespace-nowrap rounded-lg border border-[#0a2e1a]/30 bg-white px-3 py-1.5 text-xs font-semibold text-[#0a2e1a] transition-colors hover:bg-[#0a2e1a]/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0a2e1a]/50"
+                >
+                  Same as provisional
+                </button>
+              </div>
+            ) : null}
+            <AutoTextarea
+              data-step-focus
+              data-required="finalDiagnosis"
+              aria-label="Final diagnosis"
+              placeholder="Confirmed or changed diagnosis..."
+              value={finalDiagnosis}
+              onChange={(e) => setFinalDiagnosis(e.target.value)}
+              onBlur={() => markFieldTouched("finalDiagnosis")}
+            />
+            {fieldErrors.finalDiagnosis ? (
+              <p role="alert" className="mt-1.5 text-xs font-semibold text-red-600">
+                {fieldErrors.finalDiagnosis}
+              </p>
+            ) : null}
+          </SectionCard>
+        </div>
+      ),
+    },
+    {
+      id: "rx",
+      label: "Treatment & Rx",
+      icon: Pill,
+      subtitle: "Your treatment plan and medicines for this patient",
+      render: () => (
+        <div className="grid gap-3">
+          <SectionCard
+            title={finalDiagnosis.trim() ? "Final Diagnosis" : "Provisional Diagnosis"}
+            hint="Read-only"
+          >
+            <p className="text-sm leading-relaxed text-slate-700">
+              {finalDiagnosis.trim() || diagnosis.trim() || "Not recorded yet."}
+            </p>
+            {!finalDiagnosis.trim() && diagnosis.trim() ? (
+              <p className="mt-1 text-xs text-slate-400">
+                No final diagnosis recorded yet, so this is still the provisional one.
+              </p>
+            ) : null}
+          </SectionCard>
+
+          <SectionCard title="Treatment Plan">
+            <AutoTextarea
+              data-step-focus
+              aria-label="Treatment plan"
+              placeholder="Plan of care..."
+              value={treatmentPlan}
+              onChange={(e) => setTreatmentPlan(e.target.value)}
+            />
+          </SectionCard>
+
+          <SectionCard
+            title="Prescription"
+            icon={Pill}
+            hint={rxDrafts.length > 0 ? `${rxDrafts.length} medicine${rxDrafts.length === 1 ? "" : "s"}` : undefined}
+          >
+            {rxDrafts.length > 0 ? (
+              <div className="mb-3 space-y-2">
+                {rxDrafts.map((rx, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3.5 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-700">{rx.medication}</p>
+                      <p className="text-xs text-slate-500">{rx.dosage}{rx.route ? ` — ${rx.route}` : ""}{rx.frequency ? ` — ${rx.frequency}` : ""}</p>
+                      {rx.instructions ? <p className="text-xs text-slate-400">{rx.instructions}{rx.givenAt ? ` | Given: ${rx.givenAt}` : ""}{rx.nextDose ? ` | Next: ${rx.nextDose}` : ""}</p> : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setRxDrafts(rxDrafts.filter((_, j) => j !== i))}
+                      aria-label={`Remove ${rx.medication}`}
+                      className="flex-shrink-0 rounded-lg p-1.5 text-rose-400 transition-colors hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400/50"
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {showNewRx ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input
+                  data-step-focus
+                  aria-label="Medication name"
+                  type="text"
+                  placeholder="Medication name"
+                  className="rounded-lg border border-slate-200 p-2.5 text-sm outline-none focus:border-[#0a2e1a] focus:ring-2 focus:ring-[#0a2e1a]/20 sm:col-span-2"
+                  value={newRx.medication}
+                  onChange={(e) => setNewRx({ ...newRx, medication: e.target.value })}
+                />
+                <input aria-label="Dosage" type="text" placeholder="Dosage (e.g. 500mg)" className="rounded-lg border border-slate-200 p-2.5 text-sm outline-none focus:border-[#0a2e1a] focus:ring-2 focus:ring-[#0a2e1a]/20" value={newRx.dosage} onChange={(e) => setNewRx({ ...newRx, dosage: e.target.value })} />
+                <input aria-label="Route" type="text" placeholder="Route (e.g. PO, IV, IM)" className="rounded-lg border border-slate-200 p-2.5 text-sm outline-none focus:border-[#0a2e1a] focus:ring-2 focus:ring-[#0a2e1a]/20" value={newRx.route} onChange={(e) => setNewRx({ ...newRx, route: e.target.value })} />
+                <input aria-label="Frequency" type="text" placeholder="Frequency (e.g. TID, BD)" className="rounded-lg border border-slate-200 p-2.5 text-sm outline-none focus:border-[#0a2e1a] focus:ring-2 focus:ring-[#0a2e1a]/20" value={newRx.frequency} onChange={(e) => setNewRx({ ...newRx, frequency: e.target.value })} />
+                <input aria-label="Instructions" type="text" placeholder="Instructions" className="rounded-lg border border-slate-200 p-2.5 text-sm outline-none focus:border-[#0a2e1a] focus:ring-2 focus:ring-[#0a2e1a]/20" value={newRx.instructions} onChange={(e) => setNewRx({ ...newRx, instructions: e.target.value })} />
+                <input aria-label="Given at" type="text" placeholder="Given at (e.g. 8:00 AM)" className="rounded-lg border border-slate-200 p-2.5 text-sm outline-none focus:border-[#0a2e1a] focus:ring-2 focus:ring-[#0a2e1a]/20" value={newRx.givenAt} onChange={(e) => setNewRx({ ...newRx, givenAt: e.target.value })} />
+                <input aria-label="Next dose" type="text" placeholder="Next dose (e.g. 2025-03-21 14:00)" className="rounded-lg border border-slate-200 p-2.5 text-sm outline-none focus:border-[#0a2e1a] focus:ring-2 focus:ring-[#0a2e1a]/20" value={newRx.nextDose} onChange={(e) => setNewRx({ ...newRx, nextDose: e.target.value })} />
+                <div className="flex gap-2 sm:col-span-2">
+                  <button type="button" onClick={addRx} className="rounded-lg bg-[#0a2e1a] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#0d3d24] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0a2e1a]/50">Add Prescription</button>
+                  <button type="button" onClick={() => { setShowNewRx(false); setNewRx({ medication: "", dosage: "", instructions: "", route: "", frequency: "", givenAt: "", nextDose: "" }); }} className="rounded-lg px-4 py-2 text-sm text-slate-500 transition-colors hover:text-slate-700">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowNewRx(true)}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-[#0a2e1a] transition-colors hover:text-[#0d3d24] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0a2e1a]/50"
+              >
+                <Plus size={15} /> Add Prescription
+              </button>
+            )}
+          </SectionCard>
+        </div>
+      ),
+    },
+    {
+      id: "procedures",
+      label: "Procedures",
+      icon: Syringe,
+      subtitle: "Procedures carried out during this visit",
+      render: () => (
+        <div className="grid gap-3">
+          <SectionCard title="Record a Procedure">
+            {showProcedureForm ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input
+                  data-step-focus
+                  aria-label="Procedure name"
+                  type="text"
+                  placeholder="e.g. Wound Dressing, Lumbar Puncture"
+                  className="rounded-lg border border-slate-200 p-2.5 text-sm outline-none focus:border-[#0a2e1a] focus:ring-2 focus:ring-[#0a2e1a]/20 sm:col-span-2"
+                  value={procedureName}
+                  onChange={(e) => setProcedureName(e.target.value)}
+                />
+                <div className="sm:col-span-2">
+                  <AutoTextarea aria-label="Procedure notes" placeholder="Detailed description of the procedure..." value={procedureNotes} onChange={(e) => setProcedureNotes(e.target.value)} />
+                </div>
+                <div className="sm:col-span-2">
+                  <AutoTextarea aria-label="Treatment or follow-up" placeholder="Post-procedure treatment, wound care..." value={procedureTreatment} onChange={(e) => setProcedureTreatment(e.target.value)} />
+                </div>
+                <input aria-label="Performed by" type="text" placeholder="Doctor's name" className="rounded-lg border border-slate-200 p-2.5 text-sm outline-none focus:border-[#0a2e1a] focus:ring-2 focus:ring-[#0a2e1a]/20 sm:col-span-2" value={procedurePerformedBy} onChange={(e) => setProcedurePerformedBy(e.target.value)} />
+                <div className="flex gap-2 sm:col-span-2">
+                  <button type="button" onClick={handleSaveProcedure} disabled={savingProcedure} className="inline-flex items-center gap-2 rounded-lg bg-[#0a2e1a] px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#0d3d24] disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0a2e1a]/50">
+                    {savingProcedure ? <><Loader2 size={14} className="animate-spin" /> Saving...</> : <>Save Procedure</>}
+                  </button>
+                  <button type="button" onClick={() => { setShowProcedureForm(false); setProcedureName(""); setProcedureNotes(""); setProcedureTreatment(""); setProcedurePerformedBy(""); }} className="rounded-lg px-4 py-2.5 text-sm text-slate-500 transition-colors hover:text-slate-700">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowProcedureForm(true)}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-[#0a2e1a] transition-colors hover:text-[#0d3d24] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0a2e1a]/50"
+              >
+                <Plus size={15} /> Add New Procedure
+              </button>
+            )}
+          </SectionCard>
+
+          <SectionCard title="Procedure History" hint={`${savedProcedures.length} recorded`}>
+            {proceduresLoading ? (
+              <div className="py-6 text-center text-sm text-slate-400"><Loader2 size={14} className="mr-1 inline animate-spin" /> Loading procedures...</div>
+            ) : savedProcedures.length === 0 ? (
+              <div className="py-6 text-center"><Syringe size={24} className="mx-auto mb-2 text-slate-200" /><p className="text-sm text-slate-400">No procedures recorded for this patient</p></div>
+            ) : (
+              <div className="space-y-2">
+                {savedProcedures.map((proc: any, i: number) => (
+                  <div key={proc.id || i} className="rounded-xl border border-slate-100 p-3 transition-colors hover:border-slate-200">
+                    <div className="mb-1 flex items-start justify-between gap-2">
+                      <h5 className="text-sm font-semibold text-slate-700">{proc.procedureName}</h5>
+                      <span className="whitespace-nowrap text-[10px] text-slate-400">{new Date(proc.createdAt).toLocaleDateString("en-UG", { day: "numeric", month: "short", year: "numeric" })}</span>
+                    </div>
+                    {proc.procedureNotes ? <p className="mb-1 line-clamp-3 text-xs text-slate-600">{proc.procedureNotes}</p> : null}
+                    <div className="flex items-center gap-3 text-[10px] text-slate-400">
+                      {proc.performedBy ? <span>By: <strong className="text-slate-500">{proc.performedBy}</strong></span> : null}
+                      {proc.treatmentFollowUp ? <span className="truncate">Rx: {proc.treatmentFollowUp}</span> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+        </div>
+      ),
+    },
+    {
+      id: "notes",
+      label: "Notes & Orders",
+      icon: ClipboardList,
+      subtitle: "Notes, orders and your sign-off",
+      render: () => (
+        <div className="grid gap-3 lg:grid-cols-2">
+          <SectionCard title="Clinical Notes" className="lg:col-span-2">
+            <AutoTextarea
+              data-step-focus
+              aria-label="Clinical notes"
+              placeholder="Additional clinical notes, advice given, follow-up plan..."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </SectionCard>
+
+          <SectionCard
+            title="Investigations"
+            icon={Microscope}
+            className="lg:col-span-2"
+            hint={`${investigationRequests.length} requested`}
+          >
+            {investigationRequests.length === 0 ? (
+              <p className="text-sm text-slate-400">
+                No tests have been requested on this encounter.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {investigationRequests.map((r) => (
+                  <span
+                    key={r.id}
+                    className="rounded-full bg-purple-50 px-2.5 py-0.5 text-[11px] font-medium text-purple-700"
+                  >
+                    {r.what} · {r.department}
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="mt-3 text-xs leading-relaxed text-slate-500">
+              Tests are requested on the Investigations page, after the provisional diagnosis and before
+              the final one. Go back to that page to order or review them.
+            </p>
+          </SectionCard>
+
+          <SectionCard
+            title="Encounter Sign-Off"
+            className="lg:col-span-2"
+            hint={doctorSignature ? `Signed — ${doctorSignature}` : "Type your full name to sign"}
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label htmlFor="doctor-signature" className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-400">By Dr:</label>
+                <input
+                  id="doctor-signature"
+                  type="text"
+                  placeholder="Type your full name to sign..."
+                  className="w-full rounded-xl border border-slate-200 p-3 text-sm outline-none focus:border-[#0a2e1a] focus:ring-2 focus:ring-[#0a2e1a]/20"
+                  value={doctorSignature}
+                  onChange={(e) => setDoctorSignature(e.target.value)}
+                />
+                {doctorSignature ? (
+                  <div className="mt-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                    <p className="text-lg italic text-slate-700" style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive, sans-serif" }}>{doctorSignature}</p>
+                  </div>
+                ) : null}
+              </div>
+
+              <div>
+                <label htmlFor="encounter-date" className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-400">Date</label>
+                <input
+                  id="encounter-date"
+                  type="date"
+                  readOnly
+                  className="w-full rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-600 outline-none focus:border-[#0a2e1a] focus:ring-2 focus:ring-[#0a2e1a]/20"
+                  value={new Date().toISOString().split("T")[0]}
+                />
+                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                  Finalizing closes the clinical record and returns you to the queue.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 border-t border-slate-100 pt-3">{printDownloadRow}</div>
+          </SectionCard>
+        </div>
+      ),
+    },
+    {
+      id: "outcome",
+      label: "Outcome",
+      icon: CheckCircle,
+      subtitle: "What happens to this patient now?",
+      render: () => (
+        <div className="grid gap-3">
+          {outcomeState === "completed" ? (
+            <>
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <p className="flex items-center gap-2 text-sm font-bold text-emerald-800">
+                  <CheckCircle size={16} />
+                  Encounter completed
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-emerald-700">
+                  The clinical record is closed and the patient has been sent to the cashier.
+                  This page is now read-only.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowShareModal(true); setSelectedShareTargets([]); }}
+                  className="inline-flex items-center gap-2 rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-purple-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-600/50"
+                >
+                  <Share2 size={15} />
+                  Share &amp; Print
+                </button>
+              </div>
+
+              {printDownloadRow}
+
+              <button
+                type="button"
+                onClick={onBack}
+                className="inline-flex w-fit items-center gap-1.5 rounded-xl bg-green-800 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-green-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-800/50"
+              >
+                <ArrowLeft size={15} />
+                Back to Queue
+              </button>
+            </>
+          ) : (
+            <>
+              {outcomeState === "error" ? (
+                <p
+                  role="alert"
+                  className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm font-semibold text-red-700"
+                >
+                  {outcomeError}
+                </p>
+              ) : null}
+
+              <div className="grid gap-2 sm:grid-cols-2">
+                {[
+                  {
+                    key: "cashier",
+                    title: "Complete & send to cashier",
+                    desc: "Close the consultation and send the patient for billing.",
+                    icon: CreditCard,
+                    tone: "bg-[#0a2e1a]/10 text-[#0a2e1a]",
+                    busy: outcomeState === "submitting",
+                    run: () => { void handleCompleteToCashier(); },
+                  },
+                  {
+                    key: "admit",
+                    title: "Admit patient",
+                    desc: "Close the consultation and admit the patient to the ward.",
+                    icon: DoorOpen,
+                    tone: "bg-teal-50 text-teal-700",
+                    run: () => { void handleAction("ADMIT"); },
+                  },
+                  {
+                    key: "refer",
+                    title: "Refer patient",
+                    desc: "Close the consultation and send the patient to another department.",
+                    icon: ArrowRight,
+                    tone: "bg-blue-50 text-blue-700",
+                    run: () => { setShowReferralPicker(true); },
+                  },
+                  {
+                    key: "labs",
+                    title: "Order lab tests",
+                    desc: "Send the patient for laboratory tests and keep them in consultation.",
+                    icon: Microscope,
+                    tone: "bg-purple-50 text-purple-700",
+                    run: () => { setShowLabOrderModal(true); },
+                  },
+                ].map((card) => {
+                  const CardIcon = card.icon;
+                  // One flag disables every card, so a double-click on any of
+                  // them cannot fire a second submission.
+                  const locked = outcomeState === "submitting" || isBusy;
+
+                  return (
+                    <button
+                      key={card.key}
+                      type="button"
+                      onClick={card.run}
+                      disabled={locked}
+                      className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-left transition-colors hover:border-[#0a2e1a]/40 hover:bg-slate-50/60 disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0a2e1a]/50"
+                    >
+                      <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl ${card.tone}`}>
+                        {card.busy ? (
+                          <Loader2 size={17} className="animate-spin" />
+                        ) : (
+                          <CardIcon size={17} />
+                        )}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-bold text-slate-800">
+                          {card.busy ? "Completing…" : card.title}
+                        </span>
+                        <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
+                          {card.desc}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      ),
+    },
+  ];
+
+  const pageIndex = Math.max(0, pages.findIndex((p) => p.id === currentPageId));
+  const activePage = pages[pageIndex];
+  // The last page is Outcome, which hides its Next button and picks its own
+  // action from cards — so there is no "finalize" label left to generate.
+  const nextLabel = "Next page";
+
+  /**
+   * Move one page. Forward is gated by canTurnPage (required fields, plus the
+   * "None for this patient" acknowledgement on the optional pages); backward is
+   * always allowed, so an earlier page can be re-read and corrected at any
+   * point. There is no jump control, so a doctor can never skip ahead.
+   */
+  const turnPage = (move: "forward" | "back", steps = 1) => {
+    const target = move === "forward" ? pageIndex + steps : pageIndex - 1;
+    if (target < 0 || target >= pages.length) return;
+    if (move === "forward" && !canTurnPage) return;
+    setPageMove(move);
+    setCurrentPageId(pages[target].id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleNext = async () => {
+    // One guard against a double-fire (Ctrl+Enter plus a click) creating two
+    // Visits for the same encounter.
+    if (isBusy || saveState.status === "saving") return;
+    if (outcomeState === "completed") return;
+    if (!canTurnPage) {
+      // Blocked press: reveal the messages and focus the offending field.
+      // Never navigates, never saves, never marks the page done.
+      revealBlockedPage();
+      return;
+    }
+    const ok = await saveDraft();
+    if (!ok) return; // the failure is already on the header; don't advance
+    turnPage("forward", skipResultsPage ? 2 : 1);
+  };
+
+  /**
+   * The Outcome page's terminal action. Keeps the doctor on the page so the
+   * finished file can still be shared and printed, and reports success only
+   * once the server has actually accepted the write.
+   */
+  const handleCompleteToCashier = async () => {
+    if (outcomeState === "submitting" || outcomeState === "completed") return;
+    if (!window.confirm("Complete this encounter and send the patient to the cashier? The clinical record will be closed.")) return;
+    setOutcomeState("submitting");
+    setOutcomeError("");
+    const ok = await handleAction("CASHIER", undefined, { keepOpen: true });
+    if (ok) {
+      setOutcomeState("completed");
+    } else {
+      setOutcomeState("error");
+      setOutcomeError("The encounter could not be completed. Nothing was saved — check your connection and try again.");
+    }
+  };
+
+  // Keep a stable handle for the Ctrl+Enter shortcut without rebinding the
+  // listener on every keystroke.
+  primaryActionRef.current = handleNext;
+
+
+
 
   const REFERRAL_DEPARTMENTS = [
 
@@ -1352,6 +2819,7 @@ function ConsultationPanel({
           <div className={`px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full text-[10px] sm:text-xs font-semibold ${patient.isEmergency ? "bg-red-100 text-red-700" : "bg-blue-100 text-blue-700"}`}>
             {patient.patientNumber}
           </div>
+          <SaveStatus state={saveState} />
         </div>
       </div>
 
@@ -1411,289 +2879,74 @@ function ConsultationPanel({
         );
       })()}
 
-      <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
-        <div className="flex border-b border-slate-100 overflow-x-auto">
-          {(["history","exam","diagnosis","rx","procedures","notes"] as const).map((key) => {
-            const labels: Record<string, string> = { history: "History", exam: "Examination", diagnosis: "Diagnosis & Plan", rx: "Prescriptions & Plan", procedures: "Procedures", notes: "Notes & Orders" };
-            const icons: Record<string, React.ElementType> = { history: FileText, exam: Stethoscope, diagnosis: AlertCircle, rx: Pill, procedures: Syringe, notes: ClipboardList };
-            const Icon = icons[key];
-            return (
-              <button key={key} onClick={() => setTab(key)} className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-3 text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${tab === key ? "border-b-2 border-[#0a2e1a] text-[#0a2e1a] bg-[#0a2e1a]/5" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"}`}>
-                <Icon size={15} /> {labels[key]}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="p-4 sm:p-6">
-          {tab === "history" && (
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Presenting Complaint</label>
-                <textarea className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[60px]" placeholder="Patient's primary complaint..." value={symptoms} onChange={(e) => setSymptoms(e.target.value)} />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">History of Presenting Complaint</label>
-                <textarea className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[80px]" placeholder="Onset, duration, character..." value={historyOfPresentIllness} onChange={(e) => setHistoryOfPresentIllness(e.target.value)} />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Review of Other Systems</label>
-                  <textarea className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[100px]" placeholder="Constitutional, respiratory, CV, GI..." value={reviewOfOtherSystems} onChange={(e) => setReviewOfOtherSystems(e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Past Medical / Surgical History</label>
-                  <textarea className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[100px]" placeholder="Chronic illnesses, surgeries..." value={pastMedicalHistory} onChange={(e) => setPastMedicalHistory(e.target.value)} />
-                </div>
-              </div>
-
-              <div className="border-t border-slate-100 pt-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">By Dr:</label>
-                    <input type="text" placeholder="Type your full name to sign..." className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a]" value={doctorSignature} onChange={(e) => setDoctorSignature(e.target.value)} />
-                    {doctorSignature && <div className="mt-2 px-3 py-2 bg-white rounded-lg border border-slate-100"><p className="text-lg italic text-slate-700" style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive, sans-serif" }}>{doctorSignature}</p></div>}
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Date</label>
-                    <input type="date" className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] bg-white" value={new Date().toISOString().split("T")[0]} readOnly />
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-                <button onClick={handlePrint} className="w-full py-3 rounded-xl font-semibold text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"><Printer size={16} /> PRINT</button>
-                <button onClick={handleDownload} className="w-full py-3 rounded-xl font-semibold text-sm bg-[#0a2e1a] text-white hover:bg-[#0d3d24] transition-colors flex items-center justify-center gap-2"><FileText size={16} /> DOWNLOAD</button>
-              </div>
-            </div>
-          )}
-
-          {tab === "exam" && (
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Physical Examination Findings</label>
-                <textarea className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[200px]" placeholder="Document your physical examination findings systematically..." value={physicalExamination} onChange={(e) => setPhysicalExamination(e.target.value)} />
-              </div>
-            </div>
-          )}
-
-          {tab === "diagnosis" && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Diagnosis</label>
-                  <textarea className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[80px]" placeholder="Primary diagnosis..." value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Differential Diagnosis</label>
-                  <textarea className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[80px]" placeholder="Other possible diagnoses..." value={differentialDiagnosis} onChange={(e) => setDifferentialDiagnosis(e.target.value)} />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Assessment</label>
-                <textarea className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[100px]" placeholder="Clinical assessment..." value={assessment} onChange={(e) => setAssessment(e.target.value)} />
-              </div>
-            </div>
-          )}
-
-          {tab === "rx" && (
-            <div className="space-y-4">
-              {/* Treatment Plan at the top */}
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Treatment Plan</label>
-                <textarea className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[80px]" placeholder="Plan of care..." value={treatmentPlan} onChange={(e) => setTreatmentPlan(e.target.value)} />
-              </div>
-
-              {/* Prescription drafts */}
-              {rxDrafts.length > 0 && (
-                <div className="space-y-2">
-                  {rxDrafts.map((rx, i) => (
-                    <div key={i} className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-3 border border-slate-100">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-700">{rx.medication}</p>
-                        <p className="text-xs text-slate-500">{rx.dosage}{rx.route ? ` — ${rx.route}` : ""}{rx.frequency ? ` — ${rx.frequency}` : ""}</p>
-                        <p className="text-xs text-slate-400">{rx.instructions || ""}{rx.givenAt ? ` | Given: ${rx.givenAt}` : ""}{rx.nextDose ? ` | Next: ${rx.nextDose}` : ""}</p>
-                      </div>
-                      <button onClick={() => setRxDrafts(rxDrafts.filter((_, j) => j !== i))} className="text-rose-400 hover:text-rose-600 p-1"><X size={14} /></button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Add Prescription form with new fields */}
-              {showNewRx ? (
-                <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
-                  <input type="text" placeholder="Medication name" className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]" value={newRx.medication} onChange={(e) => setNewRx({ ...newRx, medication: e.target.value })} />
-                  <div className="flex gap-2">
-                    <input type="text" placeholder="Dosage (e.g. 500mg)" className="flex-1 p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]" value={newRx.dosage} onChange={(e) => setNewRx({ ...newRx, dosage: e.target.value })} />
-                    <input type="text" placeholder="Route (e.g. PO, IV, IM)" className="flex-1 p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]" value={newRx.route} onChange={(e) => setNewRx({ ...newRx, route: e.target.value })} />
-                  </div>
-                  <div className="flex gap-2">
-                    <input type="text" placeholder="Frequency (e.g. TID, BD)" className="flex-1 p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]" value={newRx.frequency} onChange={(e) => setNewRx({ ...newRx, frequency: e.target.value })} />
-                    <input type="text" placeholder="Instructions" className="flex-1 p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]" value={newRx.instructions} onChange={(e) => setNewRx({ ...newRx, instructions: e.target.value })} />
-                  </div>
-                  <div className="flex gap-2">
-                    <input type="text" placeholder="Given at (e.g. 8:00 AM)" className="flex-1 p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]" value={newRx.givenAt} onChange={(e) => setNewRx({ ...newRx, givenAt: e.target.value })} />
-                    <input type="text" placeholder="Next dose (e.g. 2025-03-21 14:00)" className="flex-1 p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]" value={newRx.nextDose} onChange={(e) => setNewRx({ ...newRx, nextDose: e.target.value })} />
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={addRx} className="bg-[#0a2e1a] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#0d3d24] transition-colors">Add Prescription</button>
-                    <button onClick={() => { setShowNewRx(false); setNewRx({ medication: "", dosage: "", instructions: "", route: "", frequency: "", givenAt: "", nextDose: "" }); }} className="text-slate-500 px-4 py-2 text-sm hover:text-slate-700">Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <button onClick={() => setShowNewRx(true)} className="flex items-center gap-2 text-[#0a2e1a] text-sm font-medium hover:text-[#0d3d24]"><Plus size={15} /> Add Prescription</button>
-              )}
-            </div>
-          )}
-
-          {tab === "procedures" && (
-            <div className="space-y-4">
-              {showProcedureForm ? (
-                <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
-                  <input type="text" placeholder="e.g. Wound Dressing, Lumbar Puncture" className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]" value={procedureName} onChange={(e) => setProcedureName(e.target.value)} />
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5 block">Procedure Notes <span className="text-red-500">*</span></label>
-                    <textarea placeholder="Detailed description of the procedure..." className="w-full p-3 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[150px]" value={procedureNotes} onChange={(e) => setProcedureNotes(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Treatment / Follow-Up</label>
-                    <textarea placeholder="Post-procedure treatment, wound care..." className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a] min-h-[60px]" value={procedureTreatment} onChange={(e) => setProcedureTreatment(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Performed By</label>
-                    <input type="text" placeholder="Doctor's name" className="w-full p-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#0a2e1a]" value={procedurePerformedBy} onChange={(e) => setProcedurePerformedBy(e.target.value)} />
-                  </div>
-                  <div className="flex gap-2 pt-1">
-                    <button onClick={handleSaveProcedure} disabled={savingProcedure} className="bg-[#0a2e1a] text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-[#0d3d24] transition-colors flex items-center gap-2 disabled:opacity-50">
-                      {savingProcedure ? <><Loader2 size={14} className="animate-spin" /> Saving...</> : <>Save Procedure</>}
-                    </button>
-                    <button onClick={() => { setShowProcedureForm(false); setProcedureName(""); setProcedureNotes(""); setProcedureTreatment(""); setProcedurePerformedBy(""); }} className="text-slate-500 px-4 py-2 text-sm hover:text-slate-700">Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <button onClick={() => setShowProcedureForm(true)} className="flex items-center gap-2 text-[#0a2e1a] text-sm font-medium hover:text-[#0d3d24]"><Plus size={15} /> Add New Procedure</button>
-              )}
-              <div className="border-t border-slate-100 pt-4">
-                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Procedure History</h4>
-                {proceduresLoading ? (
-                  <div className="text-center py-8 text-sm text-slate-400"><Loader2 size={14} className="animate-spin inline mr-1" /> Loading procedures...</div>
-                ) : savedProcedures.length === 0 ? (
-                  <div className="text-center py-8"><Syringe size={24} className="mx-auto text-slate-200 mb-2" /><p className="text-sm text-slate-400">No procedures recorded for this patient</p></div>
-                ) : (
-                  <div className="space-y-2">{savedProcedures.map((proc: any, i: number) => (
-                    <div key={proc.id || i} className="bg-white border border-slate-100 rounded-xl p-3 hover:border-slate-200 transition-colors">
-                      <div className="flex items-start justify-between gap-2 mb-1">
-                        <h5 className="text-sm font-semibold text-slate-700">{proc.procedureName}</h5>
-                        <span className="text-[10px] text-slate-400 whitespace-nowrap">{new Date(proc.createdAt).toLocaleDateString("en-UG", { day: "numeric", month: "short", year: "numeric" })}</span>
-                      </div>
-                      {proc.procedureNotes && <p className="text-xs text-slate-600 line-clamp-3 mb-1">{proc.procedureNotes}</p>}
-                      <div className="flex items-center gap-3 text-[10px] text-slate-400">
-                        {proc.performedBy && <span>By: <strong className="text-slate-500">{proc.performedBy}</strong></span>}
-                        {proc.treatmentFollowUp && <span className="truncate">Rx: {proc.treatmentFollowUp}</span>}
-                      </div>
-                    </div>
-                  ))}</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {tab === "notes" && (
-            <div className="space-y-5">
-              <div className="bg-[#faf9f5] rounded-xl p-4 border border-[#e8e3d5] space-y-4">
-                <div className="flex items-center gap-2 pb-1 border-b border-[#e8e3d5]">
-                  <FileText size={14} className="text-green-700" />
-                  <span className="text-xs font-bold text-green-800 uppercase tracking-wider">History of Presenting Complaint</span>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 mb-1 block">Presenting Complaint</label>
-                  <textarea className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[60px]" placeholder="Patient's primary complaint..." value={symptoms} onChange={(e) => setSymptoms(e.target.value)} />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-500 mb-1 block">History of Presenting Complaint</label>
-                  <textarea className="w-full p-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[80px]" placeholder="Onset, duration, character..." value={historyOfPresentIllness} onChange={(e) => setHistoryOfPresentIllness(e.target.value)} />
-                </div>
-              </div>
-              <div className="border-t border-slate-100 pt-4">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Clinical Notes</label>
-                <textarea className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] focus:ring-1 focus:ring-[#0a2e1a]/20 min-h-[120px]" placeholder="Additional clinical notes..." value={notes} onChange={(e) => setNotes(e.target.value)} />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block flex items-center gap-2">
-                  <Microscope size={13} /> Laboratory Orders
-                  {labChecked.size > 0 && <span className="text-[10px] bg-[#0a2e1a] text-white px-2 py-0.5 rounded-full">{labChecked.size}</span>}
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {DOCTOR_LAB_TESTS.map((t) => (
-                    <label key={t} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all ${labChecked.has(t) ? "border-[#0a2e1a] bg-[#0a2e1a]/5" : "border-slate-200 hover:border-slate-300 bg-white"}`}>
-                      <input type="checkbox" className="accent-[#0a2e1a]" checked={labChecked.has(t)} onChange={(e) => { const n = new Set(labChecked); e.target.checked ? n.add(t) : n.delete(t); setLabChecked(n); }} />
-                      <span className="text-sm text-slate-700">{t}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="mt-3">
-                  <button onClick={handleQuickLabOrder} disabled={isBusy || labChecked.size === 0} className={`py-2 px-4 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed ${isBusy && savingAction === "ORDER_LAB" ? "bg-emerald-100 text-emerald-700" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}>
-                    {isBusy && savingAction === "ORDER_LAB" ? <><Loader2 size={13} className="animate-spin" /> Ordering...</> : <><Send size={13} /> Order Lab Tests</>}
-                  </button>
-                </div>
-              <div className="mt-6">
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block flex items-center gap-2">
-                  <Waves size={13} /> Sonography Orders
-                  {sonographyChecked.size > 0 && <span className="text-[10px] bg-teal-700 text-white px-2 py-0.5 rounded-full">{sonographyChecked.size}</span>}
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {DOCTOR_SONOGRAPHY_TESTS.map((t) => (
-                    <label key={t} className={`flex items-center gap-3 p-2.5 rounded-lg border cursor-pointer transition-all ${sonographyChecked.has(t) ? "border-teal-600 bg-teal-50" : "border-slate-200 hover:border-slate-300 bg-white"}`}>
-                      <input type="checkbox" className="accent-teal-600" checked={sonographyChecked.has(t)} onChange={(e) => { const n = new Set(sonographyChecked); e.target.checked ? n.add(t) : n.delete(t); setSonographyChecked(n); }} />
-                      <span className="text-sm text-slate-700">{t}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="mt-3">
-                  <button onClick={handleQuickSonographyOrder} disabled={isBusy || sonographyChecked.size === 0} className={`py-2 px-4 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed ${isBusy && savingAction === "ORDER_SONO" ? "bg-teal-100 text-teal-700" : "bg-teal-600 text-white hover:bg-teal-700"}`}>
-                    {isBusy && savingAction === "ORDER_SONO" ? <><Loader2 size={13} className="animate-spin" /> Ordering...</> : <><Waves size={13} /> Order Sonography</>}
-                  </button>
-                </div>
-              </div>
-              </div>
-              <div className="border-t border-slate-100 pt-5">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">By Dr:</label>
-                    <input type="text" placeholder="Type your full name to sign..." className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a]" value={doctorSignature} onChange={(e) => setDoctorSignature(e.target.value)} />
-                    {doctorSignature && <div className="mt-2 px-3 py-2 bg-white rounded-lg border border-slate-100"><p className="text-lg italic text-slate-700" style={{ fontFamily: "'Brush Script MT', 'Segoe Script', cursive, sans-serif" }}>{doctorSignature}</p></div>}
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 block">Date</label>
-                    <input type="date" className="w-full p-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0a2e1a] bg-white" value={new Date().toISOString().split("T")[0]} readOnly />
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <button onClick={handlePrint} className="w-full py-3 rounded-xl font-semibold text-sm bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors flex items-center justify-center gap-2"><Printer size={16} /> PRINT</button>
-                <button onClick={handleDownload} className="w-full py-3 rounded-xl font-semibold text-sm bg-[#0a2e1a] text-white hover:bg-[#0d3d24] transition-colors flex items-center justify-center gap-2"><FileText size={16} /> DOWNLOAD</button>
-              </div>
-            </div>
-          )}
-        </div>
+      {/* Position marker only — no page names, and nothing to click. */}
+      <div className="mb-3">
+        <PageProgress current={pageIndex + 1} total={pages.length} />
       </div>
 
-      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        <button onClick={() => handleAction("ADMIT")} disabled={isBusy} className={`py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 ${isBusy && savingAction === "ADMIT" ? "bg-teal-100 text-teal-700" : "bg-teal-600 text-white hover:bg-teal-700"}`}>
-          {isBusy && savingAction === "ADMIT" ? <><Loader2 size={16} className="animate-spin" /> Admitting...</> : <><DoorOpen size={16} /> Admit Patient</>}
-        </button>
-        <button onClick={() => handleAction("CASHIER")} disabled={isBusy} className={`py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 ${isBusy && savingAction === "CASHIER" ? "bg-emerald-100 text-emerald-700" : "bg-emerald-600 text-white hover:bg-emerald-700"}`}>
-          {isBusy && savingAction === "CASHIER" ? <><Loader2 size={16} className="animate-spin" /> Finishing...</> : <><CheckCircle size={16} /> Finish Consultation</>}
-        </button>
-        <button onClick={() => { if (!isBusy) setShowLabOrderModal(true); }} disabled={isBusy} className={`py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 ${isBusy && savingAction === "ORDER_LAB" ? "bg-purple-100 text-purple-700" : "bg-purple-600 text-white hover:bg-purple-700"}`}>
-          {isBusy && savingAction === "ORDER_LAB" ? <><Loader2 size={16} className="animate-spin" /> Ordering...</> : <><Microscope size={16} /> Lab Tests</>}
-        </button>
-        <button onClick={() => { if (!isBusy) setShowReferralPicker(true); }} disabled={isBusy} className={`py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 ${isBusy && savingAction === "referral" ? "bg-blue-100 text-blue-700" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
-          {isBusy && savingAction === "referral" ? <><Loader2 size={16} className="animate-spin" /> Referring...</> : <><ArrowRight size={16} /> Referral</>}
-        </button>
-        <button onClick={() => { if (!isBusy) { setShowShareModal(true); setSelectedShareTargets([]); }}} disabled={isBusy} className="py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-50 bg-purple-600 text-white hover:bg-purple-700">
-          <Share2 size={16} /> Share &amp; Print
-        </button>
+      {/* The sheet. No overflow-hidden on this card on purpose: it would become
+          the nearest scrollport and break the footer's bottom pinning. */}
+      <div className="mx-auto max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-sm">
+        {/* key remounts the sheet on every turn so the animation replays */}
+        <div
+          key={currentPageId}
+          className={pageMove === "forward" ? "animate-page-in-right" : "animate-page-in-left"}
+        >
+          <header className="border-b border-slate-100 px-5 pb-4 pt-6 sm:px-8">
+            <h2 className="text-xl font-bold tracking-tight text-slate-800">
+              {activePage.label}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">{activePage.subtitle}</p>
+          </header>
+
+          <div ref={pageBodyRef} className="px-5 py-5 sm:px-8">
+            {activePage.render()}
+
+            {OPTIONAL_PAGES.includes(currentPageId) ? (
+              <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 accent-[#0a2e1a]"
+                  checked={!pageHasContent(currentPageId) && !!noneAck[currentPageId]}
+                  onChange={(e) =>
+                    setNoneAck((p) => ({ ...p, [currentPageId]: e.target.checked }))
+                  }
+                />
+                <span>
+                  <span className="font-semibold text-slate-800">
+                    {NONE_ACK_COPY[currentPageId]?.title ?? "None for this patient"}
+                  </span>
+                  <span className="block text-xs text-slate-500">
+                    {NONE_ACK_COPY[currentPageId]?.hint ??
+                      "Tick this to confirm there is genuinely nothing to record on this page."}
+                  </span>
+                </span>
+              </label>
+            ) : null}
+          </div>
+
+          <div className="border-t border-slate-100 px-5 py-2.5 text-center sm:px-8">
+            <span className="font-mono text-[11px] text-slate-400">{pageIndex + 1}</span>
+          </div>
+        </div>
+
+        {/* A completed encounter is read-only: no turning back to edit, no
+            second submission, no further draft writes. The Outcome page offers
+            its own finish and "Back to Queue" actions instead. */}
+        {outcomeState === "completed" ? null : (
+          <PageFooter
+            canGoBack={pageIndex > 0}
+            onPrevious={() => turnPage("back")}
+            onNext={() => void handleNext()}
+            onNextBlocked={revealBlockedPage}
+            nextLabel={nextLabel}
+            nextDisabled={!canTurnPage}
+            hideNext={currentPageId === "outcome"}
+            onSaveDraft={() => void saveDraft()}
+            savingDraft={saveState.status === "saving"}
+            busy={isBusy}
+          />
+        )}
       </div>
 
       {showReferralPicker && (
