@@ -109,8 +109,12 @@ export async function POST(request: Request) {
         };
         const encounterDept = deptMap[triageOutcome] || "DOCTOR";
         // Check for existing active encounter (e.g. from reception registration)
+        // Newest wins — a patient can hold more than one ACTIVE encounter once a
+        // doctor starts a follow-up, and an unordered findFirst could pick
+        // either. Matches app/api/encounters/active/route.ts.
         const existingEnc = await prisma.encounter.findFirst({
           where: { patientId: parseInt(patientId), status: "ACTIVE" },
+          orderBy: { openedAt: "desc" },
           select: { id: true },
         });
         if (existingEnc) {

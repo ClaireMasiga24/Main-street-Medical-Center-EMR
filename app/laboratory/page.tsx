@@ -23,7 +23,6 @@ import {
   getSectionFieldBounds,
   computeFlag,
   getFlagColor,
-  computeInterpretation,
   getReferenceRangeForPatient,
   REFERENCE_RANGE_TEST_IDS,
   type TestDefinition,
@@ -31,19 +30,51 @@ import {
   type PrintLayoutConfig,
   type ResultEntry,
 } from "../lib/lab-config";
+// Visit notes carry the doctor's Final Diagnosis in a reserved fenced block.
+// Never render that raw — see app/lib/finalDiagnosis.ts.
+import { extractFinalDiagnosis, notesWithoutFinalDiagnosis } from "../lib/finalDiagnosis";
 import {
   ResultEntryForm,
   generateLabReportHTML,
   type LabAttachment,
 } from "../components/lis";
+// One doctor request = one card. See app/lib/labRequestGroups.ts for how tests
+// that came in together are tied back to each other.
+import {
+  groupLabRequests,
+  labGroupMatches,
+  labGroupProgressLabel,
+  labPriorityRank,
+  labTestIsOpen,
+  labTestStatus,
+  labTestStatusLabel,
+  type LabRequestGroup,
+  type LabTestStatus,
+} from "../lib/labRequestGroups";
 
 // ─── Colors ──────────────────────────────────────────────────────────────
-const BRAND = "#166534";
+// The brand green is defined in exactly ONE place — the --brand-green CSS
+// variable in app/globals.css — so the sidebar and the welcome banner can
+// never drift apart. The trailing hex is only a safety fallback for the
+// (rare) case where the variable has not loaded; the variable always wins.
+const BRAND = "var(--brand-green, #166534)";
 const BRAND_LIGHT = "#e8f5e9";
 const BRAND_DARK = "#004d2b";
 
 const SPECIMEN_TYPES = ["BLOOD", "URINE", "STOOL", "CSF", "SWAB", "SPUTUM", "TISSUE", "SERUM", "PLASMA", "OTHER"];
-const PRIORITY_ORDER: Record<string, number> = { STAT: 0, URGENT: 1, ROUTINE: 2 };
+
+/**
+ * Per-test status badge used inside a grouped card. The dot colour and the
+ * label come from the same status so the card never shows a green dot next to
+ * the word "Rejected".
+ */
+const TEST_STATUS_STYLES: Record<LabTestStatus, { badge: string; dot: string }> = {
+  PENDING:    { badge: "text-gray-500 bg-gray-100 border-gray-200",     dot: "bg-gray-300" },
+  COLLECTED:  { badge: "text-blue-700 bg-blue-50 border-blue-200",      dot: "bg-blue-500" },
+  PROCESSING: { badge: "text-amber-700 bg-amber-50 border-amber-200",   dot: "bg-amber-500" },
+  RESULTED:   { badge: "text-green-700 bg-green-50 border-green-200",   dot: "bg-green-500" },
+  REJECTED:   { badge: "text-red-700 bg-red-50 border-red-200",         dot: "bg-red-500" },
+};
 
 // ─── Role → Department mapping for SHARE_RESULT ──────────────────────────
 // These targetDept strings match what the dashboards listen for
@@ -68,6 +99,26 @@ const formatShortDate = (iso: string) => {
 
 const formatAge = (age: number, unit: string) =>
   `${age} ${unit === "months" ? "mo" : "y"}`;
+
+/**
+ * The real reason a lab API call failed, for display.
+ *
+ * The route always answers a failure with `{ error: "<message>" }`, but the body
+ * is read as text first: if the response is an HTML crash page or an empty body
+ * (a 500 thrown before the handler's try/catch), `res.json()` would throw and
+ * the caller would report "Unexpected token < in JSON" instead of the cause.
+ */
+const readApiError = async (res: Response): Promise<string> => {
+  const fallback = `Request failed (${res.status})`;
+  let raw = "";
+  try { raw = await res.text(); } catch { return fallback; }
+  try {
+    const body = JSON.parse(raw);
+    return body?.error || body?.message || fallback;
+  } catch {
+    return raw.trim().slice(0, 300) || fallback;
+  }
+};
 
 const timeElapsed = (iso: string) => {
   if (!iso) return "";
@@ -102,10 +153,16 @@ interface LabRequestItem {
   results: string | null; resultEnteredAt: string | null;
   enteredByName: string | null; validatedByName: string | null;
   validatedAt: string | null; isCritical: boolean; criticalNote: string | null;
+  interpretation: string | null;
   analyzerType: string | null; analyzerModel: string | null;
   analyzerImportStatus: string | null;
   chainOfCustody: string | null; attachments: string | null;
   status: string; createdAt: string; updatedAt: string;
+  // Which doctor submission this test belongs to. `requestGroupId` is set on
+  // rows created from now on; the three below are the fallback identity used
+  // for rows written before that column existed.
+  requestGroupId: string | null;
+  encounterId: number | null; visitId: number | null; requestedById: number | null;
 }
 
 	// ─── Note: LabAttachment type moved to app/components/lis/types.ts ─
@@ -134,6 +191,10 @@ export default function LaboratoryPage() {
   // Workflow state
   const [selectedRequest, setSelectedRequest] = useState<LabRequestItem | null>(null);
   const [workflowStep, setWorkflowStep] = useState(0);
+  // The doctor request the open workflow belongs to. Steps 1-3 always act on
+  // ONE test (selectedRequest); this is what lets the technician switch between
+  // the tests that arrived in the same order.
+  const [activeGroupKey, setActiveGroupKey] = useState<string | null>(null);
 
   // Step 1: Sample collection
   const [specimenType, setSpecimenType] = useState("");
@@ -145,6 +206,8 @@ export default function LaboratoryPage() {
   const [activeSection, setActiveSection] = useState(0);
   const [savingResults, setSavingResults] = useState(false);
   const [resultsSaved, setResultsSaved] = useState(false);
+  // Remarks / interpretation — written by the technician, printed verbatim.
+  const [interpretation, setInterpretation] = useState("");
 
   // Step 3: Share results — multi-select roles
   const [selectedDepts, setSelectedDepts] = useState<string[]>([]);
@@ -166,6 +229,9 @@ export default function LaboratoryPage() {
 
   // Rejection state (currently rejecting)
   const [rejectingId, setRejectingId] = useState<number | null>(null);
+  // Whole-request rejection ("Reject all") runs one call per test; this marks
+  // which card is mid-flight so its button can show a spinner.
+  const [rejectingGroupKey, setRejectingGroupKey] = useState<string | null>(null);
 
   // Patient history (cross-department)
   const [patientHistoryData, setPatientHistoryData] = useState<any>(null);
@@ -187,7 +253,7 @@ export default function LaboratoryPage() {
     try {
       setError(null);
       const res = await fetch("/api/laboratory");
-      if (!res.ok) throw new Error("Failed to load");
+      if (!res.ok) throw new Error(await readApiError(res));
       const data = await res.json();
       if (data.success) setAllRequests(data.requests);
     } catch (err: any) { setError(err.message); }
@@ -210,6 +276,17 @@ export default function LaboratoryPage() {
       .catch(() => { /* fetch failed — the critical section falls back to free text */ });
   }, [isAuthed]);
 
+  // Keep the open workflow pointed at the freshest row for the loaded test.
+  // Saving a specimen, results or a rejection refetches the queue, and the
+  // header (Lab ID, specimen type, status) has to follow without the technician
+  // reopening the card. The identity check stops this from looping: once
+  // selectedRequest IS the row from allRequests there is nothing left to do.
+  useEffect(() => {
+    if (!selectedRequest) return;
+    const fresh = allRequests.find(r => r.id === selectedRequest.id);
+    if (fresh && fresh !== selectedRequest) setSelectedRequest(fresh);
+  }, [allRequests, selectedRequest]);
+
   // ── API helper ────────────────────────────────────────────────────────
   const callLabApi = async (action: string, payload: any) => {
     const res = await fetch("/api/laboratory", {
@@ -217,7 +294,10 @@ export default function LaboratoryPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, payload }),
     });
-    if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Request failed"); }
+    // The route answers every failure with { error: "<real message>" }. Parse
+    // defensively: a crash that bypasses the handler, an empty body or an HTML
+    // error page must not replace the real cause with "Unexpected token <".
+    if (!res.ok) throw new Error(await readApiError(res));
     return res.json();
   };
 
@@ -241,70 +321,72 @@ export default function LaboratoryPage() {
   }, []);
 
   // ── Derived data ──────────────────────────────────────────────────────
-  const completedRequests = useMemo(() =>
-    allRequests.filter(r => r.status === "COMPLETED" && !r.specimenRejected),
-  [allRequests]);
+  // The whole queue is grouped once, here, and every view and every count is
+  // read off these four lists — so a number in the sidebar can never disagree
+  // with the list it labels.
+  const allGroups = useMemo(() => groupLabRequests(allRequests), [allRequests]);
 
-  const pendingRequests = useMemo(() =>
-    allRequests.filter(r =>
-      (r.status === "PENDING" || r.status === "SPECIMEN_COLLECTED" || r.status === "PROCESSING" || r.status === "AWAITING_VALIDATION") &&
-      !r.specimenRejected
-    ),
-  [allRequests]);
+  const completedGroups = useMemo(() => allGroups.filter(g => g.status === "COMPLETED"), [allGroups]);
+  const activeGroups = useMemo(() => allGroups.filter(g => g.status === "ACTIVE"), [allGroups]);
+  const rejectedGroups = useMemo(() => allGroups.filter(g => g.status === "REJECTED"), [allGroups]);
 
-  const rejectedRequests = useMemo(() =>
-    allRequests.filter(r => r.specimenRejected),
-  [allRequests]);
+  // The request the open workflow belongs to, kept as a key rather than an
+  // object so it stays in step with every refetch.
+  const activeGroup = useMemo(
+    () => (activeGroupKey ? (allGroups.find(g => g.key === activeGroupKey) ?? null) : null),
+    [allGroups, activeGroupKey]
+  );
 
   // ── Queue ─────────────────────────────────────────────────────────────
-  const queueItems = useMemo(() => {
-    // Main queue: lab tech's active work — pending, collected, processing, awaiting validation
-    let items = [...pendingRequests];
-    if (viewFilter === "ALL") items = [...pendingRequests, ...completedRequests];
-    if (viewFilter === "URGENT") items = items.filter(r => r.priority === "URGENT" || r.priority === "STAT");
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      items = items.filter(r =>
-        `${r.firstName} ${r.lastName}`.toLowerCase().includes(q) ||
-        r.patientNumber?.toLowerCase().includes(q) ||
-        r.testName?.toLowerCase().includes(q)
-      );
-    }
+  const queueGroups = useMemo(() => {
+    // Main queue: lab tech's active work — anything not finished yet.
+    let items = [...activeGroups];
+    if (viewFilter === "ALL") items = [...activeGroups, ...completedGroups];
+    if (viewFilter === "URGENT") items = items.filter(g => g.priority === "URGENT" || g.priority === "STAT");
+    if (searchQuery) items = items.filter(g => labGroupMatches(g, searchQuery));
     items.sort((a, b) => {
-      const pa = PRIORITY_ORDER[a.priority] ?? 99;
-      const pb = PRIORITY_ORDER[b.priority] ?? 99;
+      const pa = labPriorityRank(a.priority);
+      const pb = labPriorityRank(b.priority);
       if (pa !== pb) return pa - pb;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
     return items;
-  }, [completedRequests, pendingRequests, viewFilter, searchQuery]);
+  }, [activeGroups, completedGroups, viewFilter, searchQuery]);
+
+  // Urgent is the same set the Urgent tab lists, counted in one place so the
+  // badge and the list cannot drift apart.
+  const urgentGroupCount = useMemo(
+    () => [...activeGroups, ...completedGroups].filter(g => g.priority === "URGENT" || g.priority === "STAT").length,
+    [activeGroups, completedGroups]
+  );
 
   // ── Lab Records ──────────────────────────────────────────────────────
   const filteredRecords = useMemo(() => {
-    let items = [...allRequests];
-    if (recordsFilter === "COMPLETED") items = items.filter(r => r.status === "COMPLETED");
-    else if (recordsFilter === "PENDING") items = items.filter(r => r.status === "PENDING" || r.status === "SPECIMEN_COLLECTED" || r.status === "PROCESSING" || r.status === "AWAITING_VALIDATION");
-    else if (recordsFilter === "REJECTED") items = items.filter(r => r.specimenRejected);
-    else if (recordsFilter === "CRITICAL") items = items.filter(r => r.isCritical);
-    if (recordsSearch) {
-      const q = recordsSearch.toLowerCase();
-      items = items.filter(r =>
-        `${r.firstName} ${r.lastName}`.toLowerCase().includes(q) ||
-        r.patientNumber?.toLowerCase().includes(q) ||
-        r.testName?.toLowerCase().includes(q) ||
-        r.specimenId?.toLowerCase().includes(q)
-      );
-    }
+    let items = [...allGroups];
+    if (recordsFilter === "COMPLETED") items = items.filter(g => g.status === "COMPLETED");
+    else if (recordsFilter === "PENDING") items = items.filter(g => g.status === "ACTIVE");
+    else if (recordsFilter === "REJECTED") items = items.filter(g => g.status === "REJECTED");
+    else if (recordsFilter === "CRITICAL") items = items.filter(g => g.isCritical);
+    if (recordsSearch) items = items.filter(g => labGroupMatches(g, recordsSearch));
     items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     return items;
-  }, [allRequests, recordsFilter, recordsSearch]);
+  }, [allGroups, recordsFilter, recordsSearch]);
 
   // ── Open patient workflow ─────────────────────────────────────────────
-  const openWorkflow = (req: LabRequestItem) => {
+  /**
+   * Load ONE test into Steps 1-3. Runs when a card is opened, and again every
+   * time the technician switches to another test of the same request — the
+   * specimen, results and remarks on screen always belong to the loaded test.
+   */
+  const loadTestIntoWorkflow = (req: LabRequestItem) => {
     setSelectedRequest(req);
     setWorkflowStep(1);
     setSpecimenType(req.specimenType || "");
     setCollectorName(req.collectedByName || user?.fullName || "");
+    // Hydrated here (not near the early returns below) so every exit path of
+    // openWorkflow carries the saved remarks — otherwise going back to Step 2
+    // and saving again would submit an empty string and wipe them.
+    setInterpretation(req.interpretation || "");
     setResultsSaved(false);
     setSentSuccess(false);
     setSelectedDepts([]);
@@ -346,10 +428,24 @@ export default function LaboratoryPage() {
     setActiveSection(0);
   };
 
+  /**
+   * Open a grouped card. Lands on the first test that still needs work so the
+   * usual case — collect the sample, enter the result — needs no extra click;
+   * the "Tests in this request" strip above the workflow switches from there.
+   */
+  const openGroup = (group: LabRequestGroup<LabRequestItem>) => {
+    const target = group.tests.find(labTestIsOpen) ?? group.tests[0];
+    if (!target) return;
+    setActiveGroupKey(group.key);
+    loadTestIntoWorkflow(target);
+  };
+
   const closeWorkflow = () => {
     setSelectedRequest(null);
+    setActiveGroupKey(null);
     setWorkflowStep(0);
     setResults([]);
+    setInterpretation("");
     setResultsSaved(false);
     setSentSuccess(false);
     setSpecimenType("");
@@ -480,6 +576,7 @@ export default function LaboratoryPage() {
         enteredByName: user?.fullName || "Lab Technician",
         isCritical: isCrit,
         criticalNote: isCrit ? `Abnormal results: ${criticalFlags.map(r => r.test).join(", ")}` : null,
+        interpretation: interpretation.trim() ? interpretation : null,
       });
       await fetchRequests();
       setResultsSaved(true);
@@ -488,6 +585,61 @@ export default function LaboratoryPage() {
       alert(err.message);
     } finally {
       setSavingResults(false);
+    }
+  };
+
+  // ── Rejection — per test, and for the whole request ───────────────────
+  /**
+   * Reject ONE test. Rejection lives on the LabRequest row, so a request for
+   * four tests can have one thrown away while the other three are reported
+   * normally — the group survives, with a different per-test status.
+   */
+  const rejectTest = async (testId: number, reason?: string) => {
+    setRejectingId(testId);
+    try {
+      await callLabApi("REJECT_SPECIMEN", {
+        id: testId,
+        rejectionReason: reason || "Rejected by lab technician",
+        rejectedBy: user?.fullName || "Lab Technician",
+      });
+      await fetchRequests();
+    } catch (err: any) {
+      alert("Failed to reject: " + (err.message || "Unknown error"));
+    } finally {
+      setRejectingId(null);
+    }
+  };
+
+  /**
+   * "Reject all" — every test of the request that has not produced a result.
+   * Tests that already have a result are left alone (entered work is never
+   * discarded by a bulk action) and already-rejected tests are skipped.
+   */
+  const rejectAllInGroup = async (group: LabRequestGroup<LabRequestItem>) => {
+    const outstanding = group.tests.filter(labTestIsOpen);
+    if (outstanding.length === 0) {
+      alert("Nothing left to reject in this request.");
+      return;
+    }
+    if (!window.confirm(
+      `Reject all ${outstanding.length} outstanding test${outstanding.length > 1 ? "s" : ""}?\n\n` +
+      outstanding.map(t => `• ${t.testName}`).join("\n")
+    )) return;
+
+    setRejectingGroupKey(group.key);
+    try {
+      for (const test of outstanding) {
+        await callLabApi("REJECT_SPECIMEN", {
+          id: test.id,
+          rejectionReason: "Rejected by lab technician",
+          rejectedBy: user?.fullName || "Lab Technician",
+        });
+      }
+      await fetchRequests();
+    } catch (err: any) {
+      alert("Failed to reject all: " + (err.message || "Unknown error"));
+    } finally {
+      setRejectingGroupKey(null);
     }
   };
 
@@ -649,6 +801,7 @@ export default function LaboratoryPage() {
       parsedResults,
       fresh.enteredByName,
       fresh.validatedByName,
+      fresh.interpretation,
       printDef.printLayout,
     );
     w.document.write(html);
@@ -789,6 +942,72 @@ export default function LaboratoryPage() {
         </div>
 
 
+        {/* ── Tests in this request ──────────────────────────────────────
+            One doctor request can carry several tests. Steps 1-3 always act on
+            the test selected here, so switching between them never mixes up
+            specimens, results or remarks. Hidden for single-test requests,
+            which behave exactly as they did before grouping. */}
+        {activeGroup && activeGroup.tests.length > 1 && (
+          <div className="max-w-4xl mx-auto px-4 pb-4">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2 flex-wrap">
+                <ClipboardList className="w-4 h-4 text-gray-500" />
+                <span className="text-sm font-semibold text-gray-700">Tests in this request</span>
+                <span className="text-[10px] font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+                  {labGroupProgressLabel(activeGroup)}
+                </span>
+                <span className="ml-auto text-[10px] text-gray-400">
+                  {formatDate(activeGroup.createdAt)}
+                </span>
+              </div>
+              <div className="divide-y divide-gray-50">
+                {activeGroup.tests.map(test => {
+                  const testStatus = labTestStatus(test);
+                  const style = TEST_STATUS_STYLES[testStatus];
+                  const isCurrent = selectedRequest.id === test.id;
+                  return (
+                    <div
+                      key={test.id}
+                      className={`flex items-center gap-3 px-5 py-2.5 transition-colors ${isCurrent ? "bg-green-50/60" : "hover:bg-gray-50"}`}
+                    >
+                      <button
+                        onClick={() => loadTestIntoWorkflow(test)}
+                        className="flex items-center gap-2.5 flex-1 min-w-0 text-left"
+                      >
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${style.dot}`} />
+                        <span className={`text-sm truncate ${isCurrent ? "font-semibold text-gray-900" : "font-medium text-gray-700"}`}>
+                          {test.testName}
+                        </span>
+                        <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ${style.badge}`}>
+                          {labTestStatusLabel(testStatus)}
+                        </span>
+                        {isCurrent && (
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-green-700 flex-shrink-0">Open</span>
+                        )}
+                      </button>
+                      {labTestIsOpen(test) && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); rejectTest(test.id); }}
+                          disabled={rejectingId === test.id}
+                          title="Reject this test"
+                          className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-red-600 bg-red-50 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-2 py-1 rounded-md transition-all duration-200 disabled:opacity-50 flex-shrink-0"
+                        >
+                          {rejectingId === test.id ? (
+                            <span className="w-2.5 h-2.5 border-2 border-red-300 border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <XCircle className="w-2.5 h-2.5" />
+                          )}
+                          Reject
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── Clinical Summary Panel ──────────────────────────────────── */}
         <div className="max-w-4xl mx-auto px-4 pb-4">
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -859,7 +1078,10 @@ export default function LaboratoryPage() {
                       </span>
                     </div>
                     <div className="space-y-2">
-                      {patientHistoryData.visits.map((v: any, i: number) => (
+                      {patientHistoryData.visits.map((v: any, i: number) => {
+                        const visitNotes = notesWithoutFinalDiagnosis(v.notes);
+                        const finalDiagnosis = extractFinalDiagnosis(v.notes);
+                        return (
                         <div key={v.id} className="bg-amber-50/30 rounded-lg border border-amber-100 px-3 py-2.5">
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">
@@ -875,11 +1097,15 @@ export default function LaboratoryPage() {
                           {v.assessment && (
                             <p className="text-xs mb-0.5"><span className="font-semibold text-gray-500">Assessment:</span> {v.assessment}</p>
                           )}
-                          {v.notes && (
-                            <p className="text-xs text-gray-500"><span className="font-semibold text-gray-400">Clinical Notes:</span> {v.notes}</p>
+                          {visitNotes && (
+                            <p className="text-xs text-gray-500"><span className="font-semibold text-gray-400">Clinical Notes:</span> {visitNotes}</p>
+                          )}
+                          {finalDiagnosis && (
+                            <p className="text-xs mb-0.5"><span className="font-semibold text-green-700">Final Diagnosis:</span> {finalDiagnosis}</p>
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
                       {patientHistoryData?.review && (
                         <div key={`review-${patientHistoryData.review.id}`} className="bg-amber-50/30 rounded-lg border border-amber-100 px-3 py-2.5">
                           <div className="flex items-center justify-between mb-1">
@@ -1003,6 +1229,8 @@ export default function LaboratoryPage() {
               onDownloadAttachment={downloadAttachment}
               onSaveResults={handleSaveResults}
               savingResults={savingResults}
+              interpretation={interpretation}
+              onInterpretationChange={setInterpretation}
               onBack={() => setWorkflowStep(1)}
             />
           )}
@@ -1368,13 +1596,18 @@ export default function LaboratoryPage() {
           <p className="text-white/50 text-[10px] text-center">Main Street Medical Center</p>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+        {/* Navigation. Deliberately NOT flex-1: growing the nav to fill the
+            sidebar pushed Logout to the very bottom and left a large empty gap
+            under "Messages". Without it the nav takes its content height and
+            Logout sits directly beneath. */}
+        <nav className="p-3 space-y-1 overflow-y-auto">
           <p className="text-[10px] font-bold text-white/40 uppercase tracking-wider px-4 mb-2 mt-2">Navigation</p>
-          <NavItem id="queue" label="Active Queue" icon={Home} count={pendingRequests.length} />
-          <NavItem id="records" label="All Records" icon={FileText} count={allRequests.length} />
-          <NavItem id="completed" label="Completed" icon={CheckCircle} count={completedRequests.length} />
-          <NavItem id="rejected" label="Rejected" icon={Ban} count={rejectedRequests.length} />
+          {/* Counted in requests, not tests, so the badge matches the number of
+              cards the view it opens actually draws. */}
+          <NavItem id="queue" label="Active Queue" icon={Home} count={activeGroups.length} />
+          <NavItem id="records" label="All Records" icon={FileText} count={allGroups.length} />
+          <NavItem id="completed" label="Completed" icon={CheckCircle} count={completedGroups.length} />
+          <NavItem id="rejected" label="Rejected" icon={Ban} count={rejectedGroups.length} />
 
           <div className="my-3 border-t border-white/10" />
 
@@ -1382,8 +1615,8 @@ export default function LaboratoryPage() {
           <NavItem id="messages" label="Messages" icon={MessageSquareText} />
         </nav>
 
-        {/* Logout at bottom */}
-        <div className="p-3 border-t border-white/10">
+        {/* Logout — close under the navigation, not pinned to the bottom */}
+        <div className="flex-shrink-0 px-3 pt-1 pb-3 border-t border-white/10">
           <button
             onClick={endSession}
             className="w-full flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition-all"
@@ -1444,7 +1677,7 @@ export default function LaboratoryPage() {
                   }`}
                   style={viewFilter === "PENDING" ? { backgroundColor: BRAND, color: "white" } : {}}
                 >
-                  Pending ({pendingRequests.length})
+                  Pending ({activeGroups.length})
                 </button>
                 <button
                   onClick={() => setViewFilter("ALL")}
@@ -1453,7 +1686,7 @@ export default function LaboratoryPage() {
                   }`}
                   style={viewFilter === "ALL" ? { backgroundColor: BRAND, color: "white" } : {}}
                 >
-                  All ({pendingRequests.length + completedRequests.length})
+                  All ({activeGroups.length + completedGroups.length})
                 </button>
                 <button
                   onClick={() => setViewFilter("URGENT")}
@@ -1462,7 +1695,7 @@ export default function LaboratoryPage() {
                   }`}
                   style={viewFilter === "URGENT" ? { backgroundColor: BRAND, color: "white" } : {}}
                 >
-                  Urgent ({[...pendingRequests, ...completedRequests].filter(r => r.priority === "URGENT" || r.priority === "STAT").length})
+                  Urgent ({urgentGroupCount})
                 </button>
               </div>
               <div className="flex items-center gap-2">
@@ -1486,7 +1719,7 @@ export default function LaboratoryPage() {
                 </div>
                 {searchQuery && (
                   <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-2 py-1 rounded whitespace-nowrap">
-                    {queueItems.length} result{queueItems.length !== 1 ? "s" : ""}
+                    {queueGroups.length} result{queueGroups.length !== 1 ? "s" : ""}
                   </span>
                 )}
               </div>
@@ -1521,7 +1754,7 @@ export default function LaboratoryPage() {
                   Retry
                 </button>
               </div>
-            ) : queueItems.length === 0 ? (
+            ) : queueGroups.length === 0 ? (
               <div className="bg-white rounded-2xl border border-gray-100 p-16 text-center" style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
                 <div className="w-24 h-24 mx-auto mb-5 rounded-full bg-green-50 flex items-center justify-center">
                   <CheckCircle className="w-12 h-12" style={{ color: BRAND }} />
@@ -1531,61 +1764,24 @@ export default function LaboratoryPage() {
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {queueItems.map(req => {
-                  const isUrgent = req.priority === "URGENT" || req.priority === "STAT";
-                  const isRoutine = req.priority === "ROUTINE";
-                  const isCompleted = req.status === "COMPLETED";
-                  const hasAbnormal = req.isCritical;
-
-                  // Determine top strip color
-                  let stripColor = BRAND;
-                  if (isUrgent) stripColor = "#dc2626";
-                  else if (hasAbnormal) stripColor = "#f59e0b";
-
-                  // Priority pill
-                  const PriorityPill = () => {
-                    if (isUrgent && req.priority === "STAT") {
-                      return (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-white bg-red-600 px-2.5 py-0.5 rounded-full animate-pulse">
-                          <span className="w-1.5 h-1.5 rounded-full bg-white/80" />
-                          STAT
-                        </span>
-                      );
-                    }
-                    if (isUrgent) {
-                      return (
-                        <span className="text-[10px] font-bold text-white bg-red-600 px-2.5 py-0.5 rounded-full">
-                          URGENT
-                        </span>
-                      );
-                    }
-                    return (
-                      <span className="text-[10px] font-medium text-gray-500 border border-gray-300 px-2.5 py-0.5 rounded-full">
-                        ROUTINE
-                      </span>
-                    );
-                  };
-
-                  // Status progress
-                  const statusSteps = [
-                    { key: "sample", label: "S", done: req.specimenCollectedAt !== null || req.status !== "PENDING", title: "Sample" },
-                    { key: "processing", label: "P", done: req.processingStartedAt !== null || req.status === "PROCESSING" || req.status === "AWAITING_VALIDATION" || req.status === "COMPLETED", title: "Processing" },
-                    { key: "results", label: "R", done: req.results !== null || req.status === "AWAITING_VALIDATION" || req.status === "COMPLETED", title: "Results" },
-                    { key: "sent", label: "S", done: req.status === "COMPLETED", title: "Sent" },
-                  ];
-
-                  const currentStepIndex = statusSteps.findIndex(s => !s.done);
-                  const activeStepIndex = currentStepIndex === -1 ? 3 : Math.max(0, currentStepIndex - 1);
+                {queueGroups.map(group => {
+                  const isUrgent = group.priority === "URGENT" || group.priority === "STAT";
+                  const isCompletedGroup = group.status === "COMPLETED";
+                  // One urgent test makes the whole request urgent — that is the
+                  // point of grouping. The card shows the priority of the most
+                  // urgent test, not of whichever row happened to come first.
+                  const stripColor = isUrgent ? "#dc2626" : group.isCritical ? "#f59e0b" : BRAND;
+                  const hasOutstanding = group.tests.some(labTestIsOpen);
+                  const busyWithGroup = rejectingGroupKey === group.key;
 
                   return (
                     <div
-                      key={req.id}
-                      onClick={() => openWorkflow(req)}
+                      key={group.key}
+                      onClick={() => openGroup(group)}
                       className="relative bg-white rounded-2xl overflow-hidden cursor-pointer transition-all duration-200 ease group flex flex-col"
                       style={{
                         boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
                         border: "0.5px solid #e5e7eb",
-                        maxHeight: "160px",
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.boxShadow = "0 8px 30px rgba(22,101,52,0.12)";
@@ -1608,120 +1804,121 @@ export default function LaboratoryPage() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <h3 className="text-sm font-bold text-gray-900 truncate leading-tight">
-                              {req.lastName}, {req.firstName}
+                              {group.lastName}, {group.firstName}
                             </h3>
                             <span className="text-[10px] text-gray-400 mt-0.5 block">
-                              {timeElapsed(req.createdAt)}
+                              {timeElapsed(group.createdAt)} · {formatShortDate(group.createdAt)}
                             </span>
                           </div>
                           <div className="flex-shrink-0 mt-0.5">
-                            <PriorityPill />
-                          </div>
-                        </div>
-
-                        {/* Middle section: details stacked */}
-                        <div className="space-y-[3px]">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] font-mono font-medium" style={{ color: BRAND }}>
-                              {req.patientNumber}
-                            </span>
-                            <span className="text-[11px] text-gray-400">|</span>
-                            <span className="text-[11px] text-gray-500">
-                              {req.gender} / {formatAge(req.age, req.ageUnit)}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <FlaskConical className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                            <span className="text-[12px] font-semibold text-gray-700 truncate">
-                              {req.testName}
-                            </span>
-                          </div>
-                          {(req.clinicalNotes || req.referralNotes) && (
-                            <div className="flex items-start gap-1.5 mt-0.5">
-                              <FileText className="w-2.5 h-2.5 text-gray-300 mt-0.5 flex-shrink-0" />
-                              <span className="text-[10px] text-gray-400 line-clamp-1 leading-tight">
-                                {req.clinicalNotes || req.referralNotes}
+                            {isUrgent && group.priority === "STAT" ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-white bg-red-600 px-2.5 py-0.5 rounded-full animate-pulse">
+                                <span className="w-1.5 h-1.5 rounded-full bg-white/80" />
+                                STAT
                               </span>
-                            </div>
-                          )}
+                            ) : isUrgent ? (
+                              <span className="text-[10px] font-bold text-white bg-red-600 px-2.5 py-0.5 rounded-full">
+                                URGENT
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-medium text-gray-500 border border-gray-300 px-2.5 py-0.5 rounded-full">
+                                ROUTINE
+                              </span>
+                            )}
+                          </div>
                         </div>
 
-                        {/* Bottom row: progress strip + Open button */}
-                        <div className="flex items-center justify-between mt-auto pt-1">
-                          <div className="flex items-center gap-1">
-                            {statusSteps.map((step, idx) => {
-                              const isActive = idx === activeStepIndex;
-                              const isDone = step.done;
-                              const isLast = idx === statusSteps.length - 1;
-                              return (
-                                <React.Fragment key={step.key}>
-                                  <div
-                                    className={`w-[14px] h-[14px] rounded-full flex items-center justify-center text-[7px] font-bold transition-all duration-300 ${
-                                      isDone
-                                        ? "bg-green-500 text-white"
-                                        : isActive
-                                        ? "bg-[#166534] text-white animate-pulse"
-                                        : "bg-gray-200 text-gray-400"
-                                    }`}
-                                    title={step.title}
-                                  >
-                                    {step.label}
-                                  </div>
-                                  {!isLast && (
-                                    <div className={`w-[10px] h-[1.5px] ${isDone ? "bg-green-400" : "bg-gray-200"}`} />
-                                  )}
-                                </React.Fragment>
-                              );
-                            })}
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {!isCompleted && (
-                              <>
-                                <button
-                                  onClick={async (e) => {
-                                    e.stopPropagation();
-                                    if (rejectingId === req.id) return;
-                                    setRejectingId(req.id);
-                                    try {
-                                      await callLabApi("REJECT_SPECIMEN", {
-                                        id: req.id,
-                                        rejectionReason: "Rejected by lab technician",
-                                        rejectedBy: user?.fullName || "Lab Technician",
-                                      });
-                                      fetchRequests();
-                                    } catch (err: any) {
-                                      alert("Failed to reject: " + (err.message || "Unknown error"));
-                                    } finally {
-                                      setRejectingId(null);
-                                    }
-                                  }}
-                                  className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-red-600 bg-red-50 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-2 py-1 rounded-md transition-all duration-200 disabled:opacity-50"
-                                  disabled={rejectingId === req.id}
-                                >
-                                  {rejectingId === req.id ? (
-                                    <span className="w-2.5 h-2.5 border-2 border-red-300 border-t-transparent rounded-full animate-spin" />
-                                  ) : (
-                                    <XCircle className="w-2.5 h-2.5" />
-                                  )}
-                                  {rejectingId === req.id ? "Rejecting..." : "Reject"}
-                                </button>
-                                <span
-                                  className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-white px-2 py-1 rounded-md transition-all duration-200"
-                                  style={{ backgroundColor: BRAND }}
-                                >
-                                  Open
-                                  <ChevronRight className="w-2.5 h-2.5" />
+                        {/* Patient identity */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-mono font-medium" style={{ color: BRAND }}>
+                            {group.patientNumber}
+                          </span>
+                          <span className="text-[11px] text-gray-400">|</span>
+                          <span className="text-[11px] text-gray-500">
+                            {group.gender} / {formatAge(group.age, group.ageUnit)}
+                          </span>
+                        </div>
+
+                        {/* Every test of the request, each with its own status */}
+                        <div className="space-y-1">
+                          {group.tests.map(test => {
+                            const testStatus = labTestStatus(test);
+                            const style = TEST_STATUS_STYLES[testStatus];
+                            return (
+                              <div key={test.id} className="flex items-center gap-1.5">
+                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${style.dot}`} />
+                                <span className="text-[11px] font-medium text-gray-700 truncate flex-1">
+                                  {test.testName}
                                 </span>
-                              </>
-                            )}
-                            {isCompleted && (
+                                <span className={`text-[9px] font-semibold px-1.5 py-[1px] rounded border flex-shrink-0 ${style.badge}`}>
+                                  {labTestStatusLabel(testStatus)}
+                                </span>
+                                {testStatus === "RESULTED" && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); openPrintWindow(test); }}
+                                    className="p-0.5 rounded text-gray-300 hover:text-white hover:bg-[#166534] transition-colors flex-shrink-0"
+                                    title="Print this report"
+                                  >
+                                    <Printer className="w-3 h-3" />
+                                  </button>
+                                )}
+                                {labTestIsOpen(test) && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); rejectTest(test.id); }}
+                                    disabled={rejectingId === test.id}
+                                    className="p-0.5 rounded text-gray-300 hover:text-white hover:bg-red-600 transition-colors flex-shrink-0 disabled:opacity-50"
+                                    title="Reject this test"
+                                  >
+                                    {rejectingId === test.id ? (
+                                      <span className="block w-3 h-3 border-2 border-red-300 border-t-transparent rounded-full animate-spin" />
+                                    ) : (
+                                      <XCircle className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {group.clinicalNotes && (
+                          <div className="flex items-start gap-1.5">
+                            <FileText className="w-2.5 h-2.5 text-gray-300 mt-0.5 flex-shrink-0" />
+                            <span className="text-[10px] text-gray-400 line-clamp-1 leading-tight">
+                              {group.clinicalNotes}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Bottom row: "3 of 6 resulted" + actions */}
+                        <div className="flex items-center justify-between mt-auto pt-1 gap-2">
+                          <span className="text-[10px] font-semibold text-gray-500">
+                            {labGroupProgressLabel(group)}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            {hasOutstanding && (
                               <button
-                                onClick={(e) => { e.stopPropagation(); openPrintWindow(req); }}
-                                className="p-1 rounded text-gray-300 hover:text-white hover:bg-[#166534] transition-colors"
-                                title="Print Report"
+                                onClick={(e) => { e.stopPropagation(); rejectAllInGroup(group); }}
+                                disabled={busyWithGroup}
+                                className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-red-600 bg-red-50 hover:text-white hover:bg-red-600 border border-red-200 hover:border-red-600 px-2 py-1 rounded-md transition-all duration-200 disabled:opacity-50"
+                                title="Reject every outstanding test in this request"
                               >
-                                <Printer className="w-3 h-3" />
+                                {busyWithGroup ? (
+                                  <span className="w-2.5 h-2.5 border-2 border-red-300 border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <Ban className="w-2.5 h-2.5" />
+                                )}
+                                {busyWithGroup ? "Rejecting..." : "Reject all"}
                               </button>
+                            )}
+                            {!isCompletedGroup && (
+                              <span
+                                className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-white px-2 py-1 rounded-md transition-all duration-200"
+                                style={{ backgroundColor: BRAND }}
+                              >
+                                Open
+                                <ChevronRight className="w-2.5 h-2.5" />
+                              </span>
                             )}
                           </div>
                         </div>
@@ -1785,76 +1982,75 @@ export default function LaboratoryPage() {
                     <div className="col-span-2">Date</div>
                     <div className="col-span-1 text-right">Priority</div>
                   </div>
-                  {filteredRecords.map(req => {
-                    const isRejected = req.specimenRejected;
-                    const isUrgent = req.priority === "URGENT" || req.priority === "STAT";
-                    const isCrit = req.isCritical;
+                  {filteredRecords.map(group => {
+                    const isUrgent = group.priority === "URGENT" || group.priority === "STAT";
+                    const isCrit = group.isCritical;
+                    const testsWithSpecimen = group.tests.filter(t => t.specimenId).length;
+                    const groupStatusLabel =
+                      group.status === "COMPLETED" ? "Completed" :
+                      group.status === "REJECTED" ? "Rejected" : "In Progress";
                     return (
                       <button
-                        key={req.id}
-                        onClick={() => openWorkflow(req)}
+                        key={group.key}
+                        onClick={() => openGroup(group)}
                         className="w-full grid grid-cols-1 sm:grid-cols-12 gap-1 sm:gap-3 px-5 py-3.5 border-b border-gray-50 hover:bg-gray-50 transition-colors text-left"
                       >
                         {/* Mobile view */}
                         <div className="sm:hidden flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <span className="font-semibold text-gray-800 text-sm">{req.lastName}, {req.firstName}</span>
+                            <span className="font-semibold text-gray-800 text-sm">{group.lastName}, {group.firstName}</span>
                             {isUrgent && <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">URGENT</span>}
                             {isCrit && <AlertCircle className="w-3 h-3 text-red-500" />}
                           </div>
                           <span className={`text-[10px] font-medium ${
-                            isRejected ? "text-red-600" : req.status === "COMPLETED" ? "text-green-600" : "text-gray-500"
+                            group.status === "REJECTED" ? "text-red-600" : group.status === "COMPLETED" ? "text-green-600" : "text-gray-500"
                           }`}>
-                            {isRejected ? "REJECTED" : req.status}
+                            {groupStatusLabel}
                           </span>
                         </div>
                         <div className="sm:hidden flex items-center gap-2 text-xs text-gray-400 mt-0.5">
-                          <span>{req.testName}</span>
+                          <span>{group.tests.length} test{group.tests.length !== 1 ? "s" : ""}</span>
                           <span>|</span>
-                          <span>{req.patientNumber}</span>
+                          <span>{group.patientNumber}</span>
                           <span>|</span>
-                          <span>{formatShortDate(req.createdAt)}</span>
+                          <span>{formatShortDate(group.createdAt)}</span>
                         </div>
 
-                        {/* Desktop grid */}
+                        {/* Desktop grid — one row per request, not per test */}
                         <div className="hidden sm:flex col-span-3 items-center gap-2 min-w-0">
                           <User className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-700 truncate">{req.lastName}, {req.firstName}</span>
+                          <span className="text-sm font-medium text-gray-700 truncate">{group.lastName}, {group.firstName}</span>
                         </div>
-                        <div className="hidden sm:flex col-span-2 items-center text-sm text-gray-600 truncate">
+                        <div className="hidden sm:flex col-span-2 items-center text-sm text-gray-600 min-w-0">
                           <FlaskConical className="w-3 h-3 mr-1.5 text-gray-400 flex-shrink-0" />
-                          {req.testName}
-                        </div>
-                        <div className="hidden sm:flex col-span-2 items-center text-xs text-gray-500">
-                          {req.specimenId ? (
-                            <><span className="font-mono">{req.specimenId}</span> {req.specimenType && <span className="ml-1 text-gray-400">({req.specimenType})</span>}</>
-                          ) : <span className="italic text-gray-300">Not collected</span>}
-                        </div>
-                        <div className="hidden sm:flex col-span-2 items-center">
-                          {isRejected ? (
-                            <span className="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200">REJECTED</span>
-                          ) : (
-                            <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${
-                              req.status === "COMPLETED" ? "text-green-700 bg-green-50 border border-green-200" :
-                              req.status === "AWAITING_VALIDATION" ? "text-amber-700 bg-amber-50 border border-amber-200" :
-                              req.status === "REJECTED" ? "text-red-700 bg-red-50 border border-red-200" :
-                              "text-gray-500 bg-gray-50 border border-gray-200"
-                            }`}>
-                              {req.status === "COMPLETED" ? "Completed" :
-                               req.status === "AWAITING_VALIDATION" ? "Awaiting Validation" :
-                               req.status === "SPECIMEN_COLLECTED" ? "Collected" :
-                               req.status === "PROCESSING" ? "Processing" :
-                               req.status === "REJECTED" ? "Rejected" : "Pending"}
+                          <span className="truncate">{group.tests[0]?.testName}</span>
+                          {group.tests.length > 1 && (
+                            <span className="ml-1.5 text-[9px] font-bold text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded flex-shrink-0">
+                              +{group.tests.length - 1}
                             </span>
                           )}
                         </div>
                         <div className="hidden sm:flex col-span-2 items-center text-xs text-gray-500">
-                          {formatShortDate(req.createdAt)}
+                          {testsWithSpecimen > 0 ? (
+                            <span>{testsWithSpecimen} of {group.tests.length} collected</span>
+                          ) : <span className="italic text-gray-300">Not collected</span>}
+                        </div>
+                        <div className="hidden sm:flex col-span-2 items-center">
+                          <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${
+                            group.status === "COMPLETED" ? "text-green-700 bg-green-50 border border-green-200" :
+                            group.status === "REJECTED" ? "text-red-700 bg-red-50 border border-red-200" :
+                            "text-gray-500 bg-gray-50 border border-gray-200"
+                          }`}>
+                            {groupStatusLabel}
+                          </span>
+                        </div>
+                        <div className="hidden sm:flex col-span-2 items-center text-xs text-gray-500">
+                          {formatShortDate(group.createdAt)}
                         </div>
                         <div className="hidden sm:flex col-span-1 items-center justify-end gap-1">
                           {isUrgent && <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">URG</span>}
                           {isCrit && <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
-                          {req.priority === "ROUTINE" && !isCrit && (
+                          {group.priority === "ROUTINE" && !isCrit && (
                             <span className="text-[9px] text-gray-400">R</span>
                           )}
                         </div>
@@ -1872,9 +2068,9 @@ export default function LaboratoryPage() {
               <div className="flex items-center gap-2 mb-4">
                 <Ban className="w-5 h-5 text-red-500" />
                 <h2 className="text-base font-bold text-gray-700">Rejected Specimens</h2>
-                <span className="text-xs text-gray-400">({rejectedRequests.length} total)</span>
+                <span className="text-xs text-gray-400">({rejectedGroups.length} total)</span>
               </div>
-              {rejectedRequests.length === 0 ? (
+              {rejectedGroups.length === 0 ? (
                 <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
                   <CheckCircle className="w-16 h-16 text-green-300 mx-auto mb-3" />
                   <h3 className="text-lg font-semibold text-gray-500">No Rejected Specimens</h3>
@@ -1882,10 +2078,10 @@ export default function LaboratoryPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {rejectedRequests.map(req => (
+                  {rejectedGroups.map(group => (
                     <button
-                      key={req.id}
-                      onClick={() => openWorkflow(req)}
+                      key={group.key}
+                      onClick={() => openGroup(group)}
                       className="w-full bg-white rounded-xl border border-red-200 px-5 py-4 text-left hover:shadow-md transition-all group"
                     >
                       <div className="flex items-center gap-4">
@@ -1894,14 +2090,16 @@ export default function LaboratoryPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="font-semibold text-gray-800">{req.lastName}, {req.firstName}</span>
+                            <span className="font-semibold text-gray-800">{group.lastName}, {group.firstName}</span>
                             <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded">REJECTED</span>
                           </div>
-                          <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                            <span className="font-mono">{req.patientNumber}</span>
-                            <span>{req.testName}</span>
-                            {req.rejectionReason && <span className="text-red-500">Reason: {req.rejectionReason}</span>}
-                            {req.rejectedAt && <span>{formatDate(req.rejectedAt)}</span>}
+                          <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 flex-wrap">
+                            <span className="font-mono">{group.patientNumber}</span>
+                            <span>
+                              {group.tests.length} test{group.tests.length !== 1 ? "s" : ""}: {group.tests.map(t => t.testName).join(", ")}
+                            </span>
+                            {group.tests[0]?.rejectionReason && <span className="text-red-500">Reason: {group.tests[0].rejectionReason}</span>}
+                            {group.tests[0]?.rejectedAt && <span>{formatDate(group.tests[0].rejectedAt)}</span>}
                           </div>
                         </div>
                         <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-gray-500 transition-colors flex-shrink-0" />
@@ -1919,9 +2117,9 @@ export default function LaboratoryPage() {
               <div className="flex items-center gap-2 mb-4">
                 <CheckCircle className="w-5 h-5 text-green-600" />
                 <h2 className="text-base font-bold text-gray-700">Completed Lab Results</h2>
-                <span className="text-xs text-gray-400">({completedRequests.length} total)</span>
+                <span className="text-xs text-gray-400">({completedGroups.length} total)</span>
               </div>
-              {completedRequests.length === 0 ? (
+              {completedGroups.length === 0 ? (
                 <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
                   <ClipboardList className="w-16 h-16 text-gray-300 mx-auto mb-3" />
                   <h3 className="text-lg font-semibold text-gray-500">No Completed Results</h3>
@@ -1937,56 +2135,68 @@ export default function LaboratoryPage() {
                     <div className="col-span-2">Completed</div>
                     <div className="col-span-1 text-right">Priority</div>
                   </div>
-                  {completedRequests.map(req => {
-                    const isUrgent = req.priority === "URGENT" || req.priority === "STAT";
-                    const isCrit = req.isCritical;
-                    let resultCount = 0;
-                    try { const r = JSON.parse(req.results || "[]"); if (Array.isArray(r)) resultCount = r.length; } catch {}
+                  {completedGroups.map(group => {
+                    const isUrgent = group.priority === "URGENT" || group.priority === "STAT";
+                    const isCrit = group.isCritical;
+                    const collectedCount = group.tests.filter(t => t.specimenId).length;
+                    // The card is "completed" when the last test finished — that
+                    // is the date worth showing, not the day the order was written.
+                    const finishedAt = group.tests
+                      .map(t => t.validatedAt || t.resultEnteredAt || t.updatedAt)
+                      .filter(Boolean)
+                      .sort()
+                      .pop();
                     return (
                       <button
-                        key={req.id}
-                        onClick={() => openWorkflow(req)}
+                        key={group.key}
+                        onClick={() => openGroup(group)}
                         className="w-full grid grid-cols-1 sm:grid-cols-12 gap-1 sm:gap-3 px-5 py-3.5 border-b border-gray-50 hover:bg-gray-50 transition-colors text-left"
                       >
                         {/* Mobile */}
                         <div className="sm:hidden flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <span className="font-semibold text-gray-800 text-sm">{req.lastName}, {req.firstName}</span>
+                            <span className="font-semibold text-gray-800 text-sm">{group.lastName}, {group.firstName}</span>
                             {isCrit && <AlertCircle className="w-3 h-3 text-red-500" />}
                           </div>
-                          <span className="text-[10px] font-medium text-green-600">COMPLETED</span>
+                          <span className="text-[10px] font-medium text-green-600">
+                            {labGroupProgressLabel(group)}
+                          </span>
                         </div>
                         <div className="sm:hidden flex items-center gap-2 text-xs text-gray-400 mt-0.5">
-                          <span>{req.testName}</span>
+                          <span>{group.tests.length} test{group.tests.length !== 1 ? "s" : ""}</span>
                           <span>|</span>
-                          <span>{req.patientNumber}</span>
+                          <span>{group.patientNumber}</span>
                           <span>|</span>
-                          <span>{formatShortDate(req.validatedAt || req.updatedAt)}</span>
+                          <span>{formatShortDate(finishedAt || group.createdAt)}</span>
                         </div>
 
-                        {/* Desktop grid — read-only, no click-to-edit call to action */}
+                        {/* Desktop grid — one row per request, read-only */}
                         <div className="hidden sm:flex col-span-3 items-center gap-2 min-w-0">
                           <User className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-                          <span className="text-sm font-medium text-gray-700 truncate">{req.lastName}, {req.firstName}</span>
+                          <span className="text-sm font-medium text-gray-700 truncate">{group.lastName}, {group.firstName}</span>
                         </div>
-                        <div className="hidden sm:flex col-span-2 items-center text-sm text-gray-600 truncate">
+                        <div className="hidden sm:flex col-span-2 items-center text-sm text-gray-600 min-w-0">
                           <FlaskConical className="w-3 h-3 mr-1.5 text-gray-400 flex-shrink-0" />
-                          {req.testName}
-                        </div>
-                        <div className="hidden sm:flex col-span-2 items-center text-xs text-gray-500">
-                          {req.specimenId ? (
-                            <><span className="font-mono">{req.specimenId}</span> {req.specimenType && <span className="ml-1 text-gray-400">({req.specimenType})</span>}</>
-                          ) : <span className="italic text-gray-300">N/A</span>}
-                        </div>
-                        <div className="hidden sm:flex col-span-2 items-center text-xs text-gray-500">
-                          {resultCount > 0 ? (
-                            <span className="text-green-600">{resultCount} parameter{resultCount !== 1 ? "s" : ""}</span>
-                          ) : (
-                            <span className="text-gray-300">No data</span>
+                          <span className="truncate">{group.tests[0]?.testName}</span>
+                          {group.tests.length > 1 && (
+                            <span className="ml-1.5 text-[9px] font-bold text-gray-500 bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded flex-shrink-0">
+                              +{group.tests.length - 1}
+                            </span>
                           )}
                         </div>
                         <div className="hidden sm:flex col-span-2 items-center text-xs text-gray-500">
-                          {formatShortDate(req.validatedAt || req.updatedAt)}
+                          {collectedCount > 0
+                            ? <span>{collectedCount} of {group.tests.length} collected</span>
+                            : <span className="italic text-gray-300">N/A</span>}
+                        </div>
+                        <div className="hidden sm:flex col-span-2 items-center text-xs text-gray-500 gap-2">
+                          <span className="text-green-600">{group.resultedCount} resulted</span>
+                          {group.rejectedCount > 0 && (
+                            <span className="text-red-500">{group.rejectedCount} rejected</span>
+                          )}
+                        </div>
+                        <div className="hidden sm:flex col-span-2 items-center text-xs text-gray-500">
+                          {formatShortDate(finishedAt || group.createdAt)}
                         </div>
                         <div className="hidden sm:flex col-span-1 items-center justify-end gap-1">
                           {isUrgent && <span className="text-[9px] font-bold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">URG</span>}

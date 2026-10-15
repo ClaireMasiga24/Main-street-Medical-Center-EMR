@@ -22,6 +22,31 @@ export async function GET(req: NextRequest) {
             orderBy: { createdAt: "desc" },
           },
           DentalImage: {
+            // Explicit column list. A bare `orderBy` include pulls EVERY
+            // column, including the imageData and thumbnailData bytea blobs —
+            // full-resolution dental films dragged over a connection with
+            // ~1.3s of latency, for a list that only renders metadata. The
+            // bytes themselves are served on demand by /api/dental/images/[id].
+            select: {
+              id: true,
+              dentalRecordId: true,
+              patientId: true,
+              imageType: true,
+              imageSubType: true,
+              fileName: true,
+              fileSize: true,
+              mimeType: true,
+              imageUrl: true,
+              toothNumbers: true,
+              findings: true,
+              isComparison: true,
+              comparisonWith: true,
+              sortOrder: true,
+              uploadedBy: true,
+              uploadedAt: true,
+              createdAt: true,
+              updatedAt: true,
+            },
             orderBy: { sortOrder: "asc" },
           },
           Visit: true,

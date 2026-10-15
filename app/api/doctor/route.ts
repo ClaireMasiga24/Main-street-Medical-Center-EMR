@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
 import { PatientStatus, Prisma } from "@prisma/client";
 import { createNotification } from "../../lib/notifications";
+import { normalizeDept } from "../../lib/departments";
 import {
   ROUTE_TO_ENCOUNTER,
   routeEncounterToDept,
@@ -21,6 +22,11 @@ const ROUTE_TO_STATUS: Record<string, PatientStatus> = {
   TREATMENT:   "ADMITTED",
   SEND_ORDERS: "IN_CONSULTATION",
   SHARE:       "IN_CONSULTATION", // share doesn't change status
+  // Referred out of this hospital to a named external facility. Not a
+  // department we can route to, so it closes the encounter like a discharge —
+  // but the facility name is recorded on the timeline for accountability, and
+  // the label stays distinct from DISCHARGE in the audit trail.
+  REFERRAL_OUT: "DISCHARGED",
 };
 
 // GET — fetch patients waiting for the doctor or already in consultation
@@ -52,8 +58,12 @@ export async function POST(req: NextRequest) {
     const {
       patientId,
       encounterId, // new: optional encounter ID
-      staffId,
-      staffName,
+      staffId: rawStaffId,
+      staffName: rawStaffName,
+      // The consultation stepper sends the attending clinician as
+      // activeStaffId / activeStaffName; older callers use staffId / staffName.
+      activeStaffId,
+      activeStaffName,
       symptoms,
       historyOfPresentIllness,
       pastMedicalHistory,
@@ -68,6 +78,9 @@ export async function POST(req: NextRequest) {
       prescriptions,
       labRequests,
       imagingOrders,
+      // Urgency + clinical question for the requests in this call. Both columns
+      // already exist on LabRequest and ImagingRequest, so this adds no schema.
+      requestMeta,
       routeTo,
       action,
       procedureName,
@@ -76,7 +89,16 @@ export async function POST(req: NextRequest) {
       performedBy,
       // Share-specific fields
       shareTargets,
+      // Name of the external facility the patient was referred to. Required
+      // when routeTo is REFERRAL_OUT, and recorded on the timeline.
+      referredToFacility,
     } = await req.json();
+
+    // Accept either key so the ClinicalNote upsert below actually runs for the
+    // consultation flow, not just the admitted-discharge caller. Resolved up
+    // here, before the SAVE_PROCEDURE early return, so both paths agree.
+    const staffId = rawStaffId ?? activeStaffId;
+    const staffName = rawStaffName ?? activeStaffName;
 
     // ── SAVE_PROCEDURE action ──
     if (action === "SAVE_PROCEDURE") {
@@ -97,6 +119,26 @@ export async function POST(req: NextRequest) {
 
     if (!patientId || !routeTo || !(routeTo in ROUTE_TO_STATUS)) {
       return NextResponse.json({ error: "Missing required fields." }, { status: 400 });
+    }
+
+    // A referral is only accountable if it names somewhere. Reject a blank one
+    // rather than closing the encounter with no record of where the patient went.
+    const referralFacility = (referredToFacility || "").trim();
+    if (routeTo === "REFERRAL_OUT" && !referralFacility) {
+      return NextResponse.json(
+        { error: "A referral facility name is required." },
+        { status: 400 }
+      );
+    }
+
+    // staffId keys the ClinicalNote upsert (encounterId_authorStaffId). Without
+    // it the note was silently skipped and the visit saved with no clinical
+    // record attached — fail loudly instead.
+    if (!staffId) {
+      return NextResponse.json(
+        { error: "staffId is required to save the clinical note. The attending clinician could not be identified." },
+        { status: 400 }
+      );
     }
 
     const performerName = staffName || "Doctor";
@@ -213,14 +255,24 @@ export async function POST(req: NextRequest) {
       }
 
       if (labRequests?.length && resolvedStaffId) {
+        // One id for every test in THIS submission: the laboratory queue draws
+        // a single card per doctor request, and this is what ties the rows
+        // together. Each row still carries its own status and results.
+        const requestGroupId = crypto.randomUUID();
         await tx.labRequest.createMany({
           data: labRequests.map((l: { testName: string }) => ({
             patientId,
             encounterId: encounterId || null,
             visitId:       visit.id,
             requestedById: resolvedStaffId,
+            requestGroupId,
             testName:      l.testName,
             referralSource: "Doctor",
+            // Urgency and the clinical question ride along when the caller sends
+            // them (the Investigations page does). Absent, both fall back to the
+            // previous defaults.
+            priority:       requestMeta?.priority || "ROUTINE",
+            clinicalNotes:  requestMeta?.clinicalNotes || null,
             status:        "PENDING",
           })),
         });
@@ -284,7 +336,7 @@ export async function POST(req: NextRequest) {
         if (labRequests?.length) {
           await tx.notification.create({
             data: {
-              department: "LAB",
+              department: normalizeDept("LAB"),
               title: "New Lab Orders",
               message: `Dr. ${performerName} ordered ${labRequests.length} test(s) for ${patName}`,
               type: "LAB_ORDER",
@@ -296,7 +348,7 @@ export async function POST(req: NextRequest) {
         if (prescriptions?.length) {
           await tx.notification.create({
             data: {
-              department: "PHARMACY",
+              department: normalizeDept("PHARMACY"),
               title: "New Prescriptions",
               message: `Dr. ${performerName} prescribed ${prescriptions.length} medication(s) for ${patName}`,
               type: "RX_ORDER",
@@ -314,15 +366,15 @@ export async function POST(req: NextRequest) {
               visitId: visit.id,
               requestedById: staffId,
               studyType: imagingOrders[0] || "ULTRASOUND",
-              priority: "ROUTINE",
+              priority: requestMeta?.priority || "ROUTINE",
               referralSource: "DOCTOR",
-              clinicalNotes: symptoms || null,
+              clinicalNotes: requestMeta?.clinicalNotes || symptoms || null,
               status: "ORDERED",
             },
           });
           await tx.notification.create({
             data: {
-              department: "Sonography",
+              department: normalizeDept("Sonography"),
               title: "New Sonography Order",
               message: `Dr. ${performerName} ordered ${imagingOrders.length} scan(s) for ${patName}`,
               type: "IMAGING_ORDER",
@@ -342,7 +394,7 @@ export async function POST(req: NextRequest) {
           };
           await tx.notification.create({
             data: {
-              department: deptMap[target] || target,
+              department: normalizeDept(deptMap[target] || target),
               title: "Clinical Results Shared",
               message: `Dr. ${performerName} shared consultation results.`,
               type: "RESULT_SHARED",
@@ -353,14 +405,17 @@ export async function POST(req: NextRequest) {
       }
 
       // ── Determine what status to set ──
+      // Declared before newStatus because the admitted branch below needs it:
+      // an admitted patient must still leave the ward when referred out.
+      const beingDischarged =
+        effectiveRoute === "DISCHARGE" || effectiveRoute === "REFERRAL_OUT";
       const isAdmitted = patient?.currentStatus === "ADMITTED";
       const newStatus = isAdmitted
-        ? (effectiveRoute === "DISCHARGE" ? "DISCHARGED" : "ADMITTED" as PatientStatus)
+        ? (beingDischarged ? "DISCHARGED" : "ADMITTED" as PatientStatus)
         : ROUTE_TO_STATUS[effectiveRoute];
 
       const goingToTreatment = effectiveRoute === "TREATMENT" || (isAdmitted && effectiveRoute === "NURSE");
       const beingAdmitted = effectiveRoute === "ADMIT";
-      const beingDischarged = effectiveRoute === "DISCHARGE";
       const updateData: any = { currentStatus: newStatus };
       if (goingToTreatment) updateData.sentToTreatmentRoom = true;
       if (beingDischarged) updateData.sentToTreatmentRoom = false;
@@ -376,7 +431,7 @@ export async function POST(req: NextRequest) {
 
       // ── Update Encounter if encounterId is provided and not SHARE ──
       if (encounterId) {
-        if (effectiveRoute === "ADMIT" || effectiveRoute === "DISCHARGE") {
+        if (effectiveRoute === "ADMIT" || effectiveRoute === "DISCHARGE" || effectiveRoute === "REFERRAL_OUT") {
           await closeEncounter(encounterId, tx);
         } else if (effectiveRoute === "SHARE") {
           // Share doesn't change encounter state
@@ -396,6 +451,7 @@ export async function POST(req: NextRequest) {
 	    effectiveRoute === "ADMIT" ? "ADMITTED" :
 	    effectiveRoute === "CASHIER" ? "FINISHED" :
 	    effectiveRoute === "DISCHARGE" ? "DISCHARGED" :
+	    effectiveRoute === "REFERRAL_OUT" ? "REFERRED OUT" :
 	    effectiveRoute === "TREATMENT" ? "SENT TO TREATMENT ROOM" :
 	    effectiveRoute === "SEND_ORDERS" ? "ORDERS_SENT" :
 	    effectiveRoute === "SHARE" ? "SHARED" : "REFERRED";
@@ -409,6 +465,7 @@ export async function POST(req: NextRequest) {
 	        toDepartment:   effectiveRoute === "ADMIT" ? "WARD" :
 	                        effectiveRoute === "CASHIER" ? "CASHIER" :
 	                        effectiveRoute === "DISCHARGE" ? "DISCHARGE" :
+	                        effectiveRoute === "REFERRAL_OUT" ? "REFERRAL" :
 	                        effectiveRoute === "TREATMENT" ? "TREATMENT_ROOM" :
 	                        effectiveRoute === "SEND_ORDERS" ? "MULTIPLE" :
 	                        effectiveRoute === "SHARE" ? "SHARE" :
@@ -417,6 +474,8 @@ export async function POST(req: NextRequest) {
 	          ? `Orders sent — ${labRequests?.length || 0} lab test(s), ${prescriptions?.length || 0} prescription(s). Diagnosis: ${diagnosis || "N/A"}`
 	          : effectiveRoute === "SHARE"
 	            ? `Results shared with ${(shareTargets || []).join(", ") || "departments"}`
+	            : effectiveRoute === "REFERRAL_OUT"
+	              ? `Patient referred out to ${referralFacility} — consultation closed. Diagnosis: ${diagnosis || "Not yet diagnosed"}`
 	            : `Consultation completed — ${actionLabel}. Diagnosis: ${diagnosis || "Not yet diagnosed"}`,
 	        metadata:      JSON.stringify({
 	          visitId:       visit.id,
@@ -427,6 +486,9 @@ export async function POST(req: NextRequest) {
 	          labCount:          labRequests?.length || 0,
 	          routeTo: effectiveRoute,
 	          shareTargets: shareTargets || [],
+	          // The facility the patient was sent to, for the Treated list and
+	          // the record header. Blank for every other route.
+	          referredTo: referralFacility || null,
 	        }),
 	        performedBy:   performerName,
 	        performedById: staffId || null,

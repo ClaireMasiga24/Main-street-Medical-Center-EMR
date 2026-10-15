@@ -2,6 +2,31 @@ import { NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
 import { Prisma } from "@prisma/client";
 import { createNotification, sendLabNotificationEmail, labResultEmailHtml, getDepartmentEmails } from "../../lib/notifications";
+import { notificationDeptWhere, normalizeDept } from "../../lib/departments";
+
+/**
+ * The real reason a Prisma call failed, as a single line.
+ *
+ * Prisma prefixes its errors with the whole invocation, the source location and
+ * sometimes a code frame, so "Unknown argument `interpretation`" arrived buried
+ * under twenty lines of query dump — which is what made this bug unreadable in
+ * the first place. Keep the sentence that names the cause, drop the rest, and
+ * the route can return the real message in JSON for the UI to show.
+ */
+function apiErrorMessage(error: any, fallback = "Server error"): string {
+  const raw: string = (typeof error?.message === "string" ? error.message : "").trim();
+  if (!raw) return fallback;
+
+  // Prisma's message is: "\nInvalid `prisma.x()` invocation in\n<file>:<line>\n\n
+  // <code frame>\n<cause sentence>". The sentence naming the cause is always
+  // last — everything before it is the query dump that buried this bug.
+  if (raw.startsWith("Invalid `prisma.")) {
+    const lines = raw.split("\n").map((line) => line.trim()).filter(Boolean);
+    const cause = lines[lines.length - 1];
+    if (cause && !/\.(?:ts|tsx|js|mjs):\d+/.test(cause)) return cause;
+  }
+  return raw.split("\n").map((line) => line.trim()).find(Boolean) ?? fallback;
+}
 
 // ─── GET: Fetch lab requests ──────────────────────────────────────────
 export async function GET(req: Request) {
@@ -200,6 +225,12 @@ export async function GET(req: Request) {
       isEmergency: r.Patient.isEmergency, testName: r.testName, testPanel: r.testPanel,
       priority: r.priority, referralSource: r.referralSource,
       referralNotes: r.referralNotes, clinicalNotes: r.clinicalNotes,
+      // The queue draws one card per doctor submission, so the client needs the
+      // fields that identify a submission alongside the display ones:
+      // requestGroupId for new rows, and encounter/visit + requesting doctor as
+      // the fallback key for rows written before that column existed.
+      requestGroupId: r.requestGroupId, encounterId: r.encounterId, visitId: r.visitId,
+      requestedById: r.requestedById,
       requestedBy: r.Staff.fullName, requestedDepartment: r.Staff.department,
       specimenType: r.specimenType, specimenId: r.specimenId,
       specimenCollectedAt: r.specimenCollectedAt?.toISOString() ?? null,
@@ -211,7 +242,7 @@ export async function GET(req: Request) {
       results: r.results, resultEnteredAt: r.resultEnteredAt?.toISOString() ?? null,
       enteredByName: r.enteredByName, validatedByName: r.validatedByName,
       validatedAt: r.validatedAt?.toISOString() ?? null, isCritical: r.isCritical,
-      criticalNote: r.criticalNote, analyzerType: r.analyzerType,
+      criticalNote: r.criticalNote, interpretation: r.interpretation, analyzerType: r.analyzerType,
       analyzerModel: r.analyzerModel, analyzerImportStatus: r.analyzerImportStatus,
       chainOfCustody: r.chainOfCustody, attachments: r.attachments,
       status: r.status, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(),
@@ -220,7 +251,8 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: true, requests: shaped });
   } catch (error: any) {
     console.error("[LABORATORY_GET]", error);
-    return NextResponse.json({ success: false, message: error.message || "Failed to load" }, { status: 500 });
+    const message = apiErrorMessage(error, "Failed to load");
+    return NextResponse.json({ success: false, error: message, message }, { status: 500 });
   }
 }
 
@@ -250,6 +282,61 @@ async function generateUniqueSpecimenId(): Promise<string> {
   });
   if (!taken) return fallback;
   throw new Error("Could not generate a unique Lab specimen ID");
+}
+
+// Shape a LabRequest (with its Patient) into the payload the notification
+// inbox renders. Kept separate from the query so GET_NOTIFICATIONS can build
+// every payload from one findMany instead of one query per notification.
+type LabRequestWithPatient = {
+  id: number;
+  testName: string;
+  testPanel: string | null;
+  results: string | null;
+  priority: string;
+  clinicalNotes: string | null;
+  criticalNote: string | null;
+  interpretation: string | null;
+  isCritical: boolean;
+  enteredByName: string | null;
+  resultEnteredAt: Date | null;
+  validatedByName: string | null;
+  validatedAt: Date | null;
+  specimenType: string | null;
+  specimenId: string | null;
+  attachments: string | null;
+  analyzerResults: string | null;
+  analyzerType: string | null;
+  analyzerModel: string | null;
+  Patient: { id: number; firstName: string; lastName: string; patientNumber: string };
+};
+
+function buildLabRequestPayload(labReq: LabRequestWithPatient) {
+  let attachments: any[] = [];
+  try {
+    if (labReq.attachments) attachments = JSON.parse(labReq.attachments);
+  } catch {}
+  return {
+    testName: labReq.testName,
+    testPanel: labReq.testPanel,
+    results: labReq.results,
+    priority: labReq.priority,
+    clinicalNotes: labReq.clinicalNotes,
+    criticalNote: labReq.criticalNote,
+    interpretation: labReq.interpretation,
+    isCritical: labReq.isCritical,
+    enteredByName: labReq.enteredByName,
+    resultEnteredAt: labReq.resultEnteredAt,
+    validatedByName: labReq.validatedByName,
+    validatedAt: labReq.validatedAt,
+    specimenType: labReq.specimenType,
+    specimenId: labReq.specimenId,
+    attachments,
+    analyzerResults: labReq.analyzerResults,
+    analyzerType: labReq.analyzerType,
+    analyzerModel: labReq.analyzerModel,
+    patientName: `${labReq.Patient.firstName} ${labReq.Patient.lastName}`,
+    patientNumber: labReq.Patient.patientNumber,
+  };
 }
 
 export async function POST(req: Request) {
@@ -411,7 +498,7 @@ export async function POST(req: Request) {
       }
 
       case "ENTER_RESULTS": {
-        const { id, results, enteredByName, isCritical, criticalNote } = payload;
+        const { id, results, enteredByName, isCritical, criticalNote, interpretation } = payload;
         if (!id || !results) return NextResponse.json({ error: "id and results are required" }, { status: 400 });
         const updated = await prisma.labRequest.update({
           where: { id: parseInt(id) },
@@ -419,6 +506,7 @@ export async function POST(req: Request) {
             results: typeof results === "string" ? results : JSON.stringify(results),
             resultEnteredAt: new Date(), enteredByName: enteredByName || null,
             isCritical: isCritical || false, criticalNote: criticalNote || null,
+            interpretation: interpretation ?? null,
             status: "AWAITING_VALIDATION",
           },
         });
@@ -723,7 +811,7 @@ export async function POST(req: Request) {
         if (recipientDept) {
           await prisma.notification.create({
             data: {
-              department: recipientDept,
+              department: normalizeDept(recipientDept),
               title: `Lab Communication: ${messageType.replace(/_/g, " ")}`,
               message: `${senderName}: ${message.substring(0, 200)}`,
               type: "COMMUNICATION", referenceId: comm.id, referenceType: "communication",
@@ -741,53 +829,47 @@ export async function POST(req: Request) {
 
       case "GET_NOTIFICATIONS": {
         const { department } = payload;
+        // Alias-aware: rows written by earlier releases under a different
+        // spelling of the same department ("DOCTOR", "LAB", "PHARMACY") are
+        // still delivered to the right inbox instead of being orphaned.
         const deptNotifs = await prisma.notification.findMany({
-          where: department ? { department } : {},
+          where: notificationDeptWhere(department),
           orderBy: { createdAt: "desc" }, take: 50,
         });
 
-        // Enrich lab-request notifications with full lab findings
-        const enriched = await Promise.all(
-          deptNotifs.map(async (n) => {
-            if (n.referenceType === "lab_request" && n.referenceId) {
-              const labReq = await prisma.labRequest.findUnique({
-                where: { id: n.referenceId },
-                include: { Patient: { select: { id: true, firstName: true, lastName: true, patientNumber: true } } },
-              });
-              if (labReq) {
-                let attachments: any[] = [];
-                try {
-                  if (labReq.attachments) attachments = JSON.parse(labReq.attachments);
-                } catch {}
-                return {
-                  ...n,
-                  labRequest: {
-                    testName: labReq.testName,
-                    testPanel: labReq.testPanel,
-                    results: labReq.results,
-                    priority: labReq.priority,
-                    clinicalNotes: labReq.clinicalNotes,
-                    criticalNote: labReq.criticalNote,
-                    isCritical: labReq.isCritical,
-                    enteredByName: labReq.enteredByName,
-                    resultEnteredAt: labReq.resultEnteredAt,
-                    validatedByName: labReq.validatedByName,
-                    validatedAt: labReq.validatedAt,
-                    specimenType: labReq.specimenType,
-                    specimenId: labReq.specimenId,
-                    attachments,
-                    analyzerResults: labReq.analyzerResults,
-                    analyzerType: labReq.analyzerType,
-                    analyzerModel: labReq.analyzerModel,
-                    patientName: `${labReq.Patient.firstName} ${labReq.Patient.lastName}`,
-                    patientNumber: labReq.Patient.patientNumber,
-                  },
-                };
-              }
-            }
-            return n;
-          })
-        );
+        // Enrich lab-request notifications with full lab findings.
+        //
+        // This was a Promise.all of one findUnique per notification — up to 50
+        // separate statements. Through Supabase's pooler that serialized into
+        // tens of seconds and starved every other route (P2024). One findMany
+        // over the collected ids is a single statement regardless of how many
+        // notifications are in the inbox.
+        const labRefIds = [
+          ...new Set(
+            deptNotifs
+              .filter((n) => n.referenceType === "lab_request" && n.referenceId)
+              .map((n) => n.referenceId as number)
+          ),
+        ];
+
+        const labReqById = new Map<number, Awaited<ReturnType<typeof buildLabRequestPayload>>>();
+        if (labRefIds.length > 0) {
+          const labReqs = await prisma.labRequest.findMany({
+            where: { id: { in: labRefIds } },
+            include: { Patient: { select: { id: true, firstName: true, lastName: true, patientNumber: true } } },
+          });
+          for (const labReq of labReqs) {
+            if (labReq) labReqById.set(labReq.id, buildLabRequestPayload(labReq));
+          }
+        }
+
+        const enriched = deptNotifs.map((n) => {
+          const labRequest =
+            n.referenceType === "lab_request" && n.referenceId
+              ? labReqById.get(n.referenceId)
+              : undefined;
+          return labRequest ? { ...n, labRequest } : n;
+        });
 
         return NextResponse.json({ success: true, notifications: enriched });
       }
@@ -800,7 +882,9 @@ export async function POST(req: Request) {
 
       case "MARK_ALL_NOTIF_READ": {
         const { department } = payload;
-        await prisma.notification.updateMany({ where: { department, isRead: false }, data: { isRead: true, readAt: new Date() } });
+        // Must match the same set the inbox lists, otherwise rows surfaced by
+        // the alias filter could never be cleared and would sit unread forever.
+        await prisma.notification.updateMany({ where: { ...notificationDeptWhere(department), isRead: false }, data: { isRead: true, readAt: new Date() } });
         return NextResponse.json({ success: true });
       }
 
@@ -865,6 +949,6 @@ export async function POST(req: Request) {
     }
   } catch (error: any) {
     console.error("[LABORATORY_POST]", error);
-    return NextResponse.json({ error: error.message || "Server error" }, { status: 500 });
+    return NextResponse.json({ error: apiErrorMessage(error) }, { status: 500 });
   }
 }

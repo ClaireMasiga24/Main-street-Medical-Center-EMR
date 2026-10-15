@@ -242,6 +242,12 @@ export default function PatientFileModal({ patient, onClose, onRoutePatient }: P
                 {l.enteredByName && <div className="text-[9px] text-slate-400">Entered by: {l.enteredByName} {l.resultEnteredAt ? `· ${formatDateTime(l.resultEnteredAt)}` : ""}</div>}
                 {l.validatedByName && <div className="text-[9px] text-slate-400">Validated by: {l.validatedByName} {l.validatedAt ? `· ${formatDateTime(l.validatedAt)}` : ""}</div>}
                 {l.criticalNote && <div className="text-[9px] text-red-600 bg-red-50 rounded-lg p-2">{l.criticalNote}</div>}
+                {l.interpretation && (
+                  <div className="text-[10px] text-slate-700 bg-emerald-50 border border-emerald-100 rounded-lg p-2 whitespace-pre-wrap">
+                    <span className="block text-[9px] font-bold text-emerald-700 uppercase tracking-wider mb-0.5">Remarks / Interpretation</span>
+                    {l.interpretation}
+                  </div>
+                )}
                 {l.analyzerResults && <div className="text-[9px] text-slate-400">Analyzer: {l.analyzerType} ({l.analyzerModel})</div>}
               </div>
             ))}

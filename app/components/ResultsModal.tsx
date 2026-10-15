@@ -6,6 +6,7 @@ import {
   FlaskConical, RadioTower, Stethoscope, HeartPulse,
   Pill, AlertTriangle,
 } from "lucide-react";
+import { escapeHtml } from "../lib/escapeHtml";
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ interface LabTestResult {
   results: string | null;
   isCritical: boolean;
   criticalNote: string | null;
+  interpretation: string | null;
   enteredByName: string | null;
   resultEnteredAt: string | null;
   validatedByName: string | null;
@@ -262,6 +264,7 @@ export default function ResultsModal({
               <table style="width:100%;border-collapse:collapse">${renderLabResultsTable(lab.analyzerResults)}</table>
             ` : ""}
             ${lab.criticalNote ? `<p style="font-size:9px;color:#dc2626;margin:4px 0 0 0;font-style:italic">${lab.criticalNote}</p>` : ""}
+            ${lab.interpretation ? `<p style="font-size:9px;color:#334155;margin:4px 0 0 0;white-space:pre-wrap"><strong>Remarks / Interpretation:</strong> ${escapeHtml(lab.interpretation)}</p>` : ""}
             ${lab.clinicalNotes ? `<p style="font-size:9px;color:#334155;margin:4px 0 0 0">Notes: ${lab.clinicalNotes}</p>` : ""}
             <p style="font-size:8px;color:#475569;margin:4px 0 0 0">
               ${lab.enteredByName ? `Entered by ${lab.enteredByName}` : ""}${lab.resultEnteredAt ? ` on ${formatDateTime(lab.resultEnteredAt)}` : ""}
@@ -565,6 +568,7 @@ export default function ResultsModal({
                         </div>
                         {lab.specimenId && <p className="text-[9px] text-slate-400 mb-1">Specimen: {lab.specimenId}{lab.specimenType ? ` (${lab.specimenType})` : ""}</p>}
                         <LabResultsView results={lab.results} />
+                        {lab.interpretation && <p className="text-[10px] text-slate-700 mt-1 whitespace-pre-wrap bg-emerald-50 border border-emerald-100 rounded px-2 py-1"><span className="font-bold text-emerald-700">Remarks / Interpretation: </span>{lab.interpretation}</p>}
                         {lab.criticalNote && <p className="text-[10px] text-red-600 mt-1 italic">{lab.criticalNote}</p>}
                         {lab.clinicalNotes && <p className="text-[9px] text-slate-500 mt-1">Notes: {lab.clinicalNotes}</p>}
                         <p className="text-[8px] text-slate-400 mt-1">

@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/* ── Brand palette ─────────────────────────────────────────────────────────
+   Single source of truth for the primary brand green. The laboratory sidebar
+   AND the welcome banner both render this value (through the BRAND constant in
+   app/laboratory/page.tsx), so the two backgrounds can never drift apart. */
+:root {
+  --brand-green: #166534;
+}
+
 body {
   margin: 0;
   padding: 0;
@@ -22,6 +30,35 @@ body {
 }
 .animate-slide-in {
   animation: slide-in 0.2s ease-out;
+}
+
+/* ── Consultation page-turn ──
+   The key is the current page id, so turning a page remounts the sheet and the
+   animation replays. Forward pages enter from the right, backward from the left,
+   matching the direction of travel through the file. */
+@keyframes page-in-right {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes page-in-left {
+  from { opacity: 0; transform: translateX(-24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-page-in-right {
+  animation: page-in-right 0.3s ease-out both;
+}
+.animate-page-in-left {
+  animation: page-in-left 0.3s ease-out both;
+}
+
+/* The turn is decorative — the content changes either way, so drop it entirely
+   for anyone who has asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-page-in-right,
+  .animate-page-in-left,
+  .animate-slide-in {
+    animation: none;
+  }
 }
 
 /* ── Print styles with logo watermark ── */

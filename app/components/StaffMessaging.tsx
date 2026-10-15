@@ -124,6 +124,18 @@ export default function StaffMessaging({
   }, [currentUserName, currentUserDept]);
 
   // ── Fetch messages ──────────────────────────────────────────────────────
+  // Read through refs so this callback is stable across polls.
+  //
+  // It used to depend on lastSeenId/isOpen, but the effect below depends on
+  // this callback — so every poll that saw a message called setLastSeenId,
+  // rebuilt the callback, tore the interval down and immediately refetched. That
+  // was a tight refetch loop hammering /api/staff-messages, which is one of the
+  // things starving the shared connection pool (P2024).
+  const lastSeenIdRef = useRef(lastSeenId);
+  const isOpenRef = useRef(isOpen);
+  useEffect(() => { lastSeenIdRef.current = lastSeenId; }, [lastSeenId]);
+  useEffect(() => { isOpenRef.current = isOpen; }, [isOpen]);
+
   const fetchMessages = useCallback(async () => {
     try {
       const params = filterDept !== "ALL" ? `?department=${encodeURIComponent(filterDept)}` : "";
@@ -133,20 +145,31 @@ export default function StaffMessaging({
         setMessages(data.messages);
         // Track unread: messages newer than lastSeenId
         if (data.messages.length > 0) {
+          const seen = lastSeenIdRef.current;
           const maxId = Math.max(...data.messages.map((m: StaffMsg) => m.id));
-          if (!isOpen) {
-            setUnreadCount((prev) => Math.max(prev, data.messages.filter((m: StaffMsg) => m.id > lastSeenId).length));
+          if (!isOpenRef.current) {
+            setUnreadCount((prev) => Math.max(prev, data.messages.filter((m: StaffMsg) => m.id > seen).length));
           }
           setLastSeenId(maxId);
         }
       }
     } catch {}
-  }, [filterDept, lastSeenId, isOpen]);
+  }, [filterDept]);
 
   useEffect(() => {
     fetchMessages();
-    const interval = setInterval(fetchMessages, 30_000);
+    // Closed panel only needs the unread badge, so it polls slowly.
+    const interval = setInterval(fetchMessages, isOpen ? 15000 : 60000);
     return () => clearInterval(interval);
+  }, [fetchMessages, isOpen]);
+
+  // Don't poll while the tab is in the background, and catch up on return.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") fetchMessages();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [fetchMessages]);
 
   // Reset unread when panel opens

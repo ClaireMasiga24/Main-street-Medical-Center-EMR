@@ -92,6 +92,8 @@ model Encounter {
 
   @@index([patientId])
   @@index([currentOwnerDept, currentStatus, status])
+  // "Sent away, not finished" query filters dept+status then orders by updatedAt.
+  @@index([currentOwnerDept, status, updatedAt])
 }
 
 model ClinicalNote {
@@ -148,6 +150,10 @@ model Visit {
   Patient                 Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
 
   @@index([createdAt, doctorId])
+  // Doctor dashboard fetches the latest Visit per patient, and separately counts
+  // a doctor's visits for today. Both need patientId / doctorId to lead.
+  @@index([patientId, createdAt])
+  @@index([doctorId, createdAt])
 }
 
 model Triage {
@@ -180,6 +186,9 @@ model Triage {
   updatedAt           DateTime @updatedAt
   Patient             Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
   Visit               Visit?   @relation(fields: [visitId], references: [id])
+
+  // Doctor dashboard loads the latest Triage per patient on every poll.
+  @@index([patientId, createdAt])
 }
 
 model ImagingRequest {
@@ -218,6 +227,13 @@ model ImagingRequest {
   @@index([status])
   @@index([patientId])
   @@index([encounterId])
+  // Doctor dashboard counts pending imaging per patient in one grouped query.
+  @@index([status, encounterId])
+  // Same roll-up as the lab equivalent below: patientId first, status second,
+  // so the `status NOT IN ('REPORTED','CANCELLED')` test is answered from the
+  // index. Created by the hand-written migration
+  // 20250323000000_doctor_dashboard_rpc, hence the pinned name.
+  @@index([patientId, status], map: "idx_imagingrequest_patient_status")
 }
 
 model DentalRecord {
@@ -510,6 +526,13 @@ model Appointment {
   Staff           Staff?            @relation("StaffAppointments", fields: [staffId], references: [id])
 
   @@index([appointmentDate, department, status])
+  // Doctor dashboard resolves the earliest appointment today per patient.
+  @@index([patientId])
+  // Same lookup with the department/date predicate visible to the index, so it
+  // is an index-only scan instead of a heap fetch per patient. The name is
+  // pinned with `map:` because it is created by the hand-written migration
+  // 20250323000000_doctor_dashboard_rpc.
+  @@index([patientId, department, appointmentDate], map: "idx_appointment_patient_dept_date")
 }
 
 model StaffAttendance {
@@ -536,6 +559,13 @@ model LabRequest {
   encounterId           Int?
   visitId               Int?
   requestedById         Int
+  // Groups the rows of ONE doctor submission into a single laboratory card.
+  // A doctor ordering six tests creates six LabRequest rows sharing one
+  // requestGroupId; each row keeps its own status, specimen and results.
+  // Null on rows written before this column existed — the lab queue falls
+  // back to grouping those by patient + requesting doctor + encounter/visit
+  // + creation minute (see app/lib/labRequestGroups.ts).
+  requestGroupId        String?
   testName              String
   testCode              String?
   orderedBy             String?
@@ -547,6 +577,7 @@ model LabRequest {
   clinicalNotes         String?
   collectedByName       String?
   criticalNote          String?
+  interpretation        String?
   enteredByName         String?
   isCritical            Boolean                @default(false)
   priority              String                 @default("ROUTINE")
@@ -583,6 +614,21 @@ model LabRequest {
   @@index([status])
   @@index([patientId])
   @@index([encounterId])
+  // The laboratory queue loads every row and groups the ones belonging to the
+  // same doctor submission; this lets Postgres bring those rows back together.
+  @@index([requestGroupId])
+  // Doctor dashboard counts pending labs per encounter in one grouped query.
+  @@index([status, encounterId])
+  // Lab queue lists pending work newest-first, and the dashboard stats page
+  // counts by status within a date window.
+  @@index([status, createdAt])
+  // "Everything I ordered" — the doctor's own lab list.
+  @@index([requestedById])
+  // Doctor dashboard rolls pending labs up per patient; putting status second
+  // lets the index cover the `status <> 'COMPLETED'` test instead of fetching
+  // each row from the heap. Created by the hand-written migration
+  // 20250323000000_doctor_dashboard_rpc, hence the pinned name.
+  @@index([patientId, status], map: "idx_labrequest_patient_status")
 }
 
 model CriticalNotification {
@@ -635,6 +681,10 @@ model Notification {
   createdAt     DateTime  @default(now())
   patientId     Int?
   Patient       Patient?  @relation(fields: [patientId], references: [id])
+
+  // Last 24h notifications for a department, newest first. This table had no
+  // index at all, so the doctor dashboard was doing a full scan on every poll.
+  @@index([department, createdAt])
 }
 
 model ResultShare {
@@ -652,6 +702,10 @@ model ResultShare {
   LabRequest    LabRequest @relation(fields: [labRequestId], references: [id], onDelete: Cascade)
   Patient       Patient    @relation(fields: [patientId], references: [id], onDelete: Cascade)
   Staff         Staff?     @relation(fields: [sharedById], references: [id])
+
+  // The lab reads back every share on a request when a result is shared or
+  // amended. Previously unindexed.
+  @@index([labRequestId])
 }
 
 model Prescription {
@@ -670,6 +724,10 @@ model Prescription {
   status       PrescriptionStatus @default(PENDING)
   Patient      Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
   Visit        Visit?             @relation(fields: [visitId], references: [id])
+
+  // Patient history and the pharmacy queue both filter prescriptions by
+  // patient. This table previously had no index at all.
+  @@index([patientId])
 }
 
 model Drug {
@@ -719,6 +777,10 @@ model Billing {
   updatedAt     DateTime      @updatedAt
   Patient       Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
   Visit         Visit?        @relation(fields: [visitId], references: [id])
+
+  // The cashier screens outstanding balances per patient, and billing history is
+  // read on every patient record view. Previously unindexed.
+  @@index([patientId])
 }
 
 model Staff {
@@ -757,6 +819,10 @@ model StaffMessage {
   message    String
   targetDept String?
   createdAt  DateTime @default(now())
+
+  // /api/staff-messages filters on targetDept and orders newest-first. This
+  // table previously had no index at all, so every poll sorted the whole table.
+  @@index([targetDept, createdAt])
 }
 
 model MedicalProcedure {

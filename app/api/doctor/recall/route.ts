@@ -19,17 +19,36 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Patient not found" }, { status: 404 });
     }
 
-    // ── Integrity checks: refuse if any lab/imaging request has progressed ──
+    // ── Integrity checks: refuse if work on THIS visit has progressed ───────
+    // Scoped to the encounter (plus encounter-less requests raised after it
+    // opened, e.g. orders created at reception). The previous check looked at
+    // every request the patient had ever had, so a single lab test completed
+    // during an earlier visit blocked recall for that patient permanently.
+    const visitScope: any[] = [];
+    if (encounterId) {
+      visitScope.push({ encounterId });
+      const encounter = await prisma.encounter.findUnique({
+        where: { id: encounterId },
+        select: { openedAt: true },
+      });
+      if (encounter?.openedAt) {
+        visitScope.push({ encounterId: null, createdAt: { gte: encounter.openedAt } });
+      }
+    }
+
     const startedLabs = await prisma.labRequest.findFirst({
       where: {
         patientId,
         status: { notIn: ["PENDING", "CANCELLED"] },
+        // With no encounter to scope to, fall back to the conservative
+        // whole-patient check rather than skipping the guard entirely.
+        ...(visitScope.length ? { OR: visitScope } : {}),
       },
       select: { id: true },
     });
     if (startedLabs) {
       return NextResponse.json(
-        { error: "Cannot recall — lab work has already started for this patient.", code: "ALREADY_PROCESSED" },
+        { error: "Cannot recall — lab work on this visit has already started.", code: "ALREADY_PROCESSED" },
         { status: 409 },
       );
     }
@@ -38,12 +57,13 @@ export async function PATCH(req: NextRequest) {
       where: {
         patientId,
         status: { notIn: ["ORDERED", "CANCELLED"] },
+        ...(visitScope.length ? { OR: visitScope } : {}),
       },
       select: { id: true },
     });
     if (startedImaging) {
       return NextResponse.json(
-        { error: "Cannot recall — imaging has already started for this patient.", code: "ALREADY_PROCESSED" },
+        { error: "Cannot recall — imaging on this visit has already started.", code: "ALREADY_PROCESSED" },
         { status: 409 },
       );
     }

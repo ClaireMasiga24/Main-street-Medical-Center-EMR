@@ -1,0 +1,16 @@
+# Line-ending policy, so it holds regardless of anyone's core.autocrlf setting.
+#
+# git stores these files with LF endings in the repository and checks them out
+# with CRLF in the working tree. That is what core.autocrlf=true already does
+# here; stating it explicitly means a machine with a different setting cannot
+# start committing CRLF into the history.
+* text=auto eol=crlf
+
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.woff binary
+*.woff2 binary

@@ -1,4 +1,5 @@
 import type { ResultEntry, PrintLayoutConfig } from "../../lib/lab-config/types";
+import { escapeHtml } from "../../lib/escapeHtml";
 
 /**
  * Generate the full HTML for a printable lab report.
@@ -17,6 +18,7 @@ export function generateLabReportHTML(
   results: ResultEntry[],
   enteredByName: string | null,
   validatedByName: string | null,
+  interpretation: string | null,
   printLayout?: PrintLayoutConfig,
 ) {
   const now = new Date().toLocaleString("en-UG", {
@@ -74,36 +76,36 @@ export function generateLabReportHTML(
     })
     .join("");
 
-  // Find flagged rows for interpretation
-  const flagged = results.filter(
-    (r) => r.flag === "HIGH" || r.flag === "LOW"
-  );
+  // Two independent things live under "Remarks / Interpretation":
+  //
+  //  1. A fixed, non-editable safety line. NEVER imply an all-clear while some
+  //     results could not be verified — a silent "No remarks." on an
+  //     unverifiable value is the exact false-normal this system must avoid.
+  //     (This rationale lived in lib/lab-config/registry.ts alongside the old
+  //     auto-generated text, which the technician's own remarks now replace.)
+  //  2. The technician's remarks / interpretation, printed verbatim.
+  //
+  // The whole block is omitted only when BOTH are absent.
   const unverified = results.filter((r) => r.flag === "UNVERIFIED");
-  const interpretationHtml =
-    flagged.length > 0
-      ? `<div style="margin-top:16px;">
-        <p style="font-size:11px;font-weight:700;color:#111827;margin:0 0 4px 0;">Remarks / Interpretation:</p>
-        <p style="font-size:11px;color:#374151;margin:0;line-height:1.5;">
-          Abnormal results detected: ${flagged
-            .map((r) => `${r.test} (${r.result}, ${r.flag})`)
-            .join("; ")}.
-          Clinical correlation advised.
-        </p>
-       </div>`
-      : unverified.length > 0
-        ? `<div style="margin-top:16px;">
-        <p style="font-size:11px;font-weight:700;color:#111827;margin:0 0 4px 0;">Remarks / Interpretation:</p>
-        <p style="font-size:11px;color:#374151;margin:0;line-height:1.5;font-style:italic;">
+  const unverifiedHtml =
+    unverified.length > 0
+      ? `<p style="font-size:11px;color:#374151;margin:0;line-height:1.5;font-style:italic;">
           Reference range unavailable for: ${unverified
             .map((r) => `${r.test} (${r.result})`)
             .join("; ")}.
           Values not verified — clinical correlation advised.
-        </p>
-       </div>`
-        : `<div style="margin-top:16px;">
+        </p>`
+      : "";
+  const remarksHtml = interpretation && interpretation.trim()
+    ? `<p style="font-size:11px;color:#374151;margin:${unverifiedHtml ? "6px" : "0"} 0 0 0;line-height:1.5;white-space:pre-wrap;">${escapeHtml(interpretation)}</p>`
+    : "";
+  const interpretationHtml =
+    unverifiedHtml || remarksHtml
+      ? `<div style="margin-top:16px;">
         <p style="font-size:11px;font-weight:700;color:#111827;margin:0 0 4px 0;">Remarks / Interpretation:</p>
-        <p style="font-size:11px;color:#6b7280;margin:0;font-style:italic;">No remarks.</p>
-       </div>`;
+        ${unverifiedHtml}${remarksHtml}
+       </div>`
+      : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
