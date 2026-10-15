@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../../lib/prisma";
 import { createNotification } from "../../../lib/notifications";
+import { normalizeDept } from "../../../lib/departments";
 
 // POST /api/pharmacy/prescriptions
 // Standalone endpoint to send prescriptions to pharmacy from any department
@@ -79,7 +80,7 @@ export async function POST(request: Request) {
       // 2. Create notification for Pharmacy department
       await tx.notification.create({
         data: {
-          department: "PHARMACY",
+          department: normalizeDept("PHARMACY"),
           patientId: patient.id,
           title: "New Prescriptions",
           message: `${performerRole} ${performerName} prescribed ${sanitizedPrescriptions.length} medication(s) for ${patName}`,

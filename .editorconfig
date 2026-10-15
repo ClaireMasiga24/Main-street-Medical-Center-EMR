@@ -1,0 +1,27 @@
+# One style for every editor that opens this repo.
+#
+# The doubled carriage returns that had to be cleaned out of
+# app/Doctors/page.tsx and app/laboratory/page.tsx came from an editor
+# rewriting already-CRLF lines without dropping the original CR, which left
+# \r\r\r\r\r\n endings. That made git read the whole file as rewritten and made
+# TypeScript's line numbers disagree with the editor. end_of_line is the rule
+# that matters most here.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.md]
+# Two trailing spaces are a hard line break in Markdown, so leave them alone.
+trim_trailing_whitespace = false
+
+[*.sql]
+indent_size = 2
+
+[*.{yml,yaml}]
+indent_size = 2

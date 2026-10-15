@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
         orderBy: { resultEnteredAt: "desc" },
         select: {
           id: true, testName: true, testPanel: true, results: true,
-          isCritical: true, criticalNote: true, enteredByName: true,
+          isCritical: true, criticalNote: true, interpretation: true, enteredByName: true,
           resultEnteredAt: true, validatedByName: true, validatedAt: true,
           analyzerResults: true, analyzerType: true, analyzerModel: true,
           specimenType: true, specimenId: true, attachments: true,
@@ -499,8 +499,13 @@ export async function POST(req: Request) {
           });
 
           // Update or create encounter for this patient
+          // Newest wins. A patient can now hold more than one ACTIVE encounter
+          // (a doctor-started follow-up creates a second), and without an
+          // explicit orderBy this findFirst could pick either — and move the
+          // wrong one. Matches app/api/encounters/active/route.ts.
           const existingEnc = await tx.encounter.findFirst({
             where: { patientId, status: "ACTIVE" },
+            orderBy: { openedAt: "desc" },
             select: { id: true, currentOwnerDept: true },
           });
           const targetOwnerDept = statusToDept[nextStatus]

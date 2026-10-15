@@ -110,6 +110,31 @@ export async function createEncounter(
   });
 }
 
+/**
+ * Departments that can hand an encounter back to the doctor.
+ *
+ * Lifted from app/api/doctor/dashboard/route.ts so the dashboard and the
+ * doctor-side follow-up guard read the same list and cannot drift apart.
+ * CASHIER is deliberately absent: routing to the cashier is what pressing
+ * "Finish Consultation" does, so anything sitting there has been finished.
+ */
+export const AWAITING_RETURN_DEPTS = [
+  "LAB", "LABORATORY", "SONOGRAPHY", "RADIOLOGY",
+  "NURSE", "NURSE_MIDWIFE", "PHARMACY", "DENTIST",
+] as const;
+
+/**
+ * What counts as "an open encounter" for a follow-up: either with the doctor
+ * right now, or in flight with a department that can return it.
+ *
+ * This cannot simply be `status: "ACTIVE"`. Encounters are reused for life —
+ * closeEncounter() runs only for ADMIT/DISCHARGE, and reception's queueing
+ * reuses an existing ACTIVE row rather than closing it — so a patient keeps one
+ * ACTIVE encounter forever. Guarding on ACTIVE alone would make every treated
+ * patient permanently un-follow-up-able.
+ */
+export const IN_FLIGHT_ENCOUNTER_DEPTS = ["DOCTOR", ...AWAITING_RETURN_DEPTS] as const;
+
 /** Map from the old PatientStatus / routeTo to Encounter status + dept */
 export const ROUTE_TO_ENCOUNTER: Record<string, { status: string; dept: string }> = {
   LAB:        { status: "AWAITING_LAB",       dept: "LAB" },

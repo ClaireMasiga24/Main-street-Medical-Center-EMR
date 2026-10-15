@@ -156,3 +156,29 @@ export const LAB_TEST_CATALOG: LabTestCatalogItem[] = [
   { code: "LAB048", name: "Electrolytes",                        specimenType: "BLOOD", section: "Biochemistry", template: "GENERAL",   defaultPrice: 40000 },
   { code: "LAB033", name: "Prostate Specific Antigen (PSA)",     specimenType: "BLOOD", section: "Biochemistry", template: "GENERAL",   defaultPrice: 50000 },
 ];
+
+// ─── What the Investigations page shows ─────────────────────────────────────
+// The doctor picker lists the registered catalogue and nothing else. It is
+// deliberately NOT merged with DOCTOR_LAB_TESTS above: that is a legacy
+// display list of 39 differently-spelled names ("Liver Function Test (LFT)"
+// vs "Liver Function Test (LFTs)", "Serum Electrolytes" vs "Electrolytes"),
+// several of which are not in the catalogue at all. Merging them produced
+// near-duplicate pairs and pushed the count to 76. If the lab later wants a
+// legacy name kept, add it to LAB_TEST_CATALOG with its own code and price
+// rather than widening this list.
+export interface LabTestGroup {
+  section: string;
+  tests: string[];
+}
+
+export const DOCTOR_LAB_TESTS_GROUPED: LabTestGroup[] = (() => {
+  const bySection = new Map<string, string[]>();
+  for (const t of LAB_TEST_CATALOG) {
+    if (!bySection.has(t.section)) bySection.set(t.section, []);
+    bySection.get(t.section)!.push(t.name);
+  }
+  return Array.from(bySection, ([section, tests]) => ({ section, tests }));
+})();
+
+/** Flat list of every registered test, for callers that just need the names. */
+export const ALL_LAB_TEST_NAMES: string[] = LAB_TEST_CATALOG.map((t) => t.name);

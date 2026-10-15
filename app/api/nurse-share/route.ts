@@ -88,8 +88,12 @@ export async function POST(request: Request) {
       });
 
       // Update encounter routing if an active encounter exists
+      // Newest wins — a patient can hold more than one ACTIVE encounter once a
+      // doctor starts a follow-up, and an unordered findFirst could pick
+      // either. Matches app/api/encounters/active/route.ts.
       const activeEncounter = await tx.encounter.findFirst({
         where: { patientId: pid, status: "ACTIVE" },
+        orderBy: { openedAt: "desc" },
         select: { id: true },
       });
       if (activeEncounter) {

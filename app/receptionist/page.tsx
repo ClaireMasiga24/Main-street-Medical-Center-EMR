@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Image from "next/image";
 import NotificationInbox from "../components/NotificationInbox";
+import FollowUpBadge, { type FollowUpFlag } from "../components/FollowUpBadge";
 import StaffMessaging from "../components/StaffMessaging";
 import SessionLoading from "@/app/components/SessionLoading";
 import { endSession, useSessionGuard } from "@/app/lib/session";
@@ -2082,6 +2083,33 @@ function CashierPOS({ patients, directBillPatient, onBillingComplete }: { patien
       })),
   ];
 
+  // ── Follow-up badges (display only) ──
+  // One batched read for the whole queue, never one per row. A failure leaves
+  // the map empty, so every row renders exactly as it does today — this must
+  // never be able to break the cashier's queue.
+  const [followUpFlags, setFollowUpFlags] = useState<Record<string, FollowUpFlag>>({});
+  const queueKey = useMemo(() => mergedQueue.map((p) => p.id).join(","), [mergedQueue]);
+
+  useEffect(() => {
+    const ids = queueKey ? queueKey.split(",") : [];
+    if (ids.length === 0) {
+      setFollowUpFlags({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/follow-up/flags?patientIds=${ids.join(",")}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.json();
+        if (!cancelled) setFollowUpFlags(body.flags ?? {});
+      } catch {
+        if (!cancelled) setFollowUpFlags({});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [queueKey]);
+
   return (
     <div className="flex flex-col gap-5">
       {/* ── Awaiting Cashier Queue ── */}
@@ -2122,6 +2150,7 @@ function CashierPOS({ patients, directBillPatient, onBillingComplete }: { patien
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-slate-800 truncate">{p.lastName}, {p.firstName}</div>
                     <div className="text-xs text-slate-400">
+                      <FollowUpBadge flag={followUpFlags[String(p.id)]} className="mb-1" />
                       {p.queueType === "partial" && (
                         <span className="font-bold text-rose-500">
                           Balance: {formatUGX(p.balanceDue)} &middot;{" "}
@@ -2247,6 +2276,7 @@ function CashierPOS({ patients, directBillPatient, onBillingComplete }: { patien
                   <ShieldAlert size={10} /> Emergency
                 </span>
               )}
+              <FollowUpBadge flag={followUpFlags[String(selectedPatient.id)]} />
               <button
                 onClick={() => setResultsModalPatient({
                   name: `${selectedPatient.lastName}, ${selectedPatient.firstName}`,

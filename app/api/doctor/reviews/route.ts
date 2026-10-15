@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../lib/prisma";
+import { normalizeDept } from "../../../lib/departments";
 
 // GET — fetch all reviews for a patient
 export async function GET(req: NextRequest) {
@@ -119,9 +120,14 @@ export async function POST(req: NextRequest) {
     let labCount = 0;
     let createdLabRequests: any[] = [];
     if (labOrders?.length) {
+      // One id for the whole order: the laboratory queue draws a single card
+      // per doctor request, and this is what ties the rows together. Each row
+      // still carries its own status, specimen and results.
+      const requestGroupId = crypto.randomUUID();
       const labData = labOrders.map((name: string, i: number) => ({
         patientId,
         requestedById: resolvedStaffId,
+        requestGroupId,
         testName: name,
         testCode: testCode?.[i] || null,
         priority: "ROUTINE",
@@ -162,7 +168,7 @@ export async function POST(req: NextRequest) {
     if (labCount > 0) {
       await prisma.notification.create({
         data: {
-          department: "Laboratory",
+          department: normalizeDept("Laboratory"),
           patientId,
           title: "New Lab Orders from Doctor",
           message: `Dr. ${doctorName} ordered ${labCount} test(s) for patient`,
@@ -177,7 +183,7 @@ export async function POST(req: NextRequest) {
         : "Radiology";
       await prisma.notification.create({
         data: {
-          department: imgDept,
+          department: normalizeDept(imgDept),
           patientId,
           title: "New Imaging Orders from Doctor",
           message: `Dr. ${doctorName} ordered ${imagingCount} study/studies for patient`,
@@ -205,7 +211,7 @@ export async function POST(req: NextRequest) {
         }
 
         await prisma.notification.create({
-          data: { department: deptName, patientId, title, message, type: "RESULT_READY" },
+          data: { department: normalizeDept(deptName), patientId, title, message, type: "RESULT_READY" },
         });
       }
     }

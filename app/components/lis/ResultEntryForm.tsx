@@ -53,6 +53,10 @@ export interface ResultEntryFormProps {
   onSaveResults: () => void;
   /** Whether a save operation is in progress */
   savingResults: boolean;
+  /** Technician-authored remarks / interpretation, printed verbatim on the report */
+  interpretation: string;
+  /** Called when the remarks text changes */
+  onInterpretationChange: (value: string) => void;
   /** Optional: go back to the previous workflow step */
   onBack?: () => void;
 }
@@ -78,6 +82,8 @@ export function ResultEntryForm({
   onDownloadAttachment,
   onSaveResults,
   savingResults,
+  interpretation,
+  onInterpretationChange,
   onBack,
 }: ResultEntryFormProps) {
   const isFileTest = def.fields.every((f) => f.inputType === "file");
@@ -296,7 +302,7 @@ export function ResultEntryForm({
                         .filter(
                           (r) => r.flag === "HIGH" || r.flag === "LOW"
                         )
-                        .map((r) => `${r.test} (${r.flag}`)
+                        .map((r) => `${r.test}: ${r.flag}`)
                         .join(", ")}
                     </p>
                   </div>
@@ -305,6 +311,25 @@ export function ResultEntryForm({
             )}
           </>
         )}
+
+        {/* Remarks / Interpretation — written by the technician, printed verbatim.
+            Shown for every test type, including file-based tests. */}
+        <div className="mt-6">
+          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+            Remarks / Interpretation
+          </label>
+          <p className="text-xs text-gray-400 mb-2">
+            Optional. Whatever is written here is printed on the lab report exactly as typed.
+          </p>
+          <textarea
+            value={interpretation}
+            onChange={(e) => onInterpretationChange(e.target.value)}
+            rows={4}
+            placeholder="Write your remarks / interpretation for this report..."
+            className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:outline-none resize-y"
+            style={{ borderColor: interpretation ? "#166534" : "#d1d5db" }}
+          />
+        </div>
 
         {/* Attachments summary (shown for non-file tests too) */}
         {!isFileTest && attachments.length > 0 && (

@@ -16,27 +16,34 @@ interface Attachment {
   data?: string;
 }
 
+/**
+ * One lab request as the API returns it. Every optional text field is
+ * `| null` because that is what the columns and the JSON round trip give: the
+ * render below already guards each one, so a null and an absent field are the
+ * same thing here.
+ */
 interface LabRequest {
   id: number | string;
   testName?: string;
-  testPanel?: string;
+  testPanel?: string | null;
   isCritical?: boolean;
-  criticalNote?: string;
-  results?: string | LabResult[];
-  attachments?: string | Attachment[];
-  specimenType?: string;
-  specimenId?: string;
-  collectedByName?: string;
-  specimenCollectedAt?: string;
-  enteredByName?: string;
-  validatedByName?: string;
-  validatedAt?: string;
-  resultEnteredAt?: string;
-  priority?: string;
-  analyzerResults?: string;
-  analyzerModel?: string;
-  analyzerType?: string;
-  analyzerImportStatus?: string;
+  criticalNote?: string | null;
+  interpretation?: string | null;
+  results?: string | LabResult[] | null;
+  attachments?: string | Attachment[] | null;
+  specimenType?: string | null;
+  specimenId?: string | null;
+  collectedByName?: string | null;
+  specimenCollectedAt?: string | null;
+  enteredByName?: string | null;
+  validatedByName?: string | null;
+  validatedAt?: string | null;
+  resultEnteredAt?: string | null;
+  priority?: string | null;
+  analyzerResults?: string | null;
+  analyzerModel?: string | null;
+  analyzerType?: string | null;
+  analyzerImportStatus?: string | null;
 }
 
 function FlagBadge({ flag }: { flag?: string }) {
@@ -303,6 +310,18 @@ export default function LabResultDetail({ lr }: { lr: LabRequest }) {
             </table>
           )}
         </div>
+
+      {/* Technician's remarks / interpretation */}
+      {lr.interpretation && lr.interpretation.trim() && (
+        <div className="mx-3 mt-2 mb-1 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-1.5">
+          <p className="text-[9px] font-bold text-emerald-700 uppercase tracking-wider mb-0.5">
+            Remarks / Interpretation
+          </p>
+          <p className="text-[10px] text-slate-700 whitespace-pre-wrap leading-relaxed">
+            {lr.interpretation}
+          </p>
+        </div>
+      )}
 
       {/* Attachments */}
       {attachments.length > 0 && (

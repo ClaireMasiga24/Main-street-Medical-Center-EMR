@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../lib/prisma";
+import { normalizeDept } from "../../lib/departments";
 import { Prisma } from "@prisma/client";
 
 export async function GET() {
@@ -112,7 +113,7 @@ export async function PATCH(request: Request) {
       if (stockLow) {
         await tx.notification.create({
           data: {
-            department: "Admin",
+            department: normalizeDept("Admin"),
             patientId: prescription.patientId,
             title: "Low Stock Alert",
             message: `${drug!.name} is running low at ${drug!.stockQuantity - 1} units remaining (reorder level: ${drug!.reorderLevel}).`,
@@ -134,7 +135,7 @@ export async function PATCH(request: Request) {
       if (!drug) {
         await tx.notification.create({
           data: {
-            department: "Admin",
+            department: normalizeDept("Admin"),
             patientId: prescription.patientId,
             title: "Drug Not Found in Inventory",
             message: `"${prescription.medication}" prescribed for ${patientName || `Patient #${prescription.patientId}`} was not found in pharmacy inventory. It was still dispensed by ${perfName}.`,

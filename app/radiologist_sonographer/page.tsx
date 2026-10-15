@@ -65,6 +65,7 @@ interface ImagingRequest {
   machineModel: string | null;
   createdAt: string;
   updatedAt: string;
+  reportedByName: string | null;
   Patient: Patient;
   Visit: Visit | null;
   Staff: ReferringStaff | null;
@@ -111,6 +112,14 @@ const REFERRAL_LABELS: Record<string, string> = {
   EMERGENCY: "Emergency Unit", SPECIALIST: "Specialist Clinic", WARD: "Ward",
 };
 
+// Departments a report can be pushed to. Mirrors the list in
+// app/components/StaffMessaging.tsx so the sonographer sees the same names as
+// everyone else in the building.
+const SHARE_DEPARTMENTS = [
+  "Doctor", "Reception", "Nurse/Midwife", "Pharmacy", "Laboratory",
+  "Dentist", "Ward", "Administration",
+];
+
 // ─── Helpers ────────────────────────────────────────────────────────────
 
 const studyTypeLabel = (v: string) => STUDY_TYPES.find(s => s.value === v)?.label ?? v;
@@ -135,6 +144,24 @@ const inputStyle = (abnormal = false): React.CSSProperties => ({
   width: "100%", padding: "10px 12px", border: `1px solid ${abnormal ? "#f87171" : "#d0d5dd"}`,
   borderRadius: "8px", fontSize: "13px", outline: "none", boxSizing: "border-box",
   fontFamily: "inherit",
+});
+
+/**
+ * Pick just the report fields out of a save response.
+ *
+ * The PATCH echoes back a narrowed `Patient` (it omits phoneNumber and
+ * isEmergency), so spreading the whole response over a worklist row would
+ * silently blank those two columns.
+ */
+const reportFields = (src: any) => ({
+  findings: src.findings ?? null,
+  impression: src.impression ?? null,
+  conclusion: src.conclusion ?? null,
+  radiologistNotes: src.radiologistNotes ?? null,
+  status: src.status,
+  reportedAt: src.reportedAt ?? null,
+  reportedById: src.reportedById ?? null,
+  reportedByName: src.reportedByName ?? null,
 });
 
 // ─── Component ──────────────────────────────────────────────────────────
@@ -166,6 +193,11 @@ function RadiologyDashboardInner() {
   const [measurementValues, setMeasurementValues] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState("");
   const [routeToReception, setRouteToReception] = useState(false);
+
+  // ── Share Report ─────────────────────────────────────────────────────
+  const [shareDept, setShareDept] = useState("Doctor");
+  const [shareNote, setShareNote] = useState("");
+  const [isSharing, setIsSharing] = useState(false);
 
   // ── Prescriptions ──────────────────────────────────────────────────────
   const [rxDrafts, setRxDrafts] = useState<{ medication: string; dosage: string; instructions: string }[]>([]);
@@ -275,6 +307,7 @@ function RadiologyDashboardInner() {
     setImageUrls([]);
     setSuccessMessage("");
     setRouteToReception(false);
+    setShareNote("");
 
     // Pre-fill findings template if empty
     if (!req.findings) {
@@ -338,16 +371,28 @@ function RadiologyDashboardInner() {
     if (!selectedRequest) return;
     setIsSaving(true);
     try {
+      // One request carries the report, the routing and the notification.
+      // Splitting them across two PATCHes meant the notification went out
+      // while the patient was never actually handed back to the doctor.
       const payload: any = {
         id: selectedRequest.id,
         findings,
         impression,
         conclusion,
         radiologistNotes,
+        // The session only holds the User id; the server resolves the Staff
+        // record that signs the report.
+        reporterUserId: staffId,
       };
       if (finalize) {
         payload.status = "REPORTED";
+        payload.routeToDoctor = !routeToReception;
         payload.routeToReception = routeToReception;
+        // Only the Reception case needs a department here — the Doctor case is
+        // notified by the routing branch, which also attaches the patient and
+        // report ids so the doctor can deep-link straight to it.
+        if (routeToReception) payload.notifyDepartment = "Reception";
+        payload.notifyMessage = `${studyTypeLabel(selectedRequest.studyType)} report for ${selectedRequest.Patient.firstName} ${selectedRequest.Patient.lastName}. Patient routed to ${routeToReception ? "Reception for billing" : "Doctor"}.`;
       } else if (!selectedRequest.findings && findings) {
         payload.status = "AWAITING_INTERPRETATION";
       }
@@ -357,28 +402,19 @@ function RadiologyDashboardInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error("Save failed");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || "Save failed");
+      }
       const updated = await res.json();
+      const patch = reportFields(updated);
 
-      setRequests(prev => prev.map(r => r.id === selectedRequest.id ? { ...r, ...updated } : r));
-      setSelectedRequest(prev => prev ? { ...prev, ...updated } : null);
+      setRequests(prev => prev.map(r => r.id === selectedRequest.id ? { ...r, ...patch } : r));
+      setSelectedRequest(prev => prev ? { ...prev, ...patch } : null);
       if (finalize) {
-        // Notify the relevant department based on routing choice
-        const notifyDept = routeToReception ? "Reception" : "DOCTOR";
-        try {
-          await fetch("/api/imaging", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id: selectedRequest.id,
-              notifyDepartment: notifyDept,
-              notifyMessage: `Imaging report ready: ${studyTypeLabel(selectedRequest.studyType)} for ${selectedRequest.Patient.firstName} ${selectedRequest.Patient.lastName}.\nPatient routed to ${routeToReception ? "Reception for billing" : "Doctor"}.`,
-            }),
-          });
-        } catch { /* silent */ }
         setSuccessMessage(routeToReception
           ? "Report finalized and sent. Patient routed to Reception for billing."
-          : "Report finalized and sent to referring clinician");
+          : "Report finalized and sent to the referring doctor.");
       } else {
         setSuccessMessage("Draft saved.");
       }
@@ -387,6 +423,55 @@ function RadiologyDashboardInner() {
       alert(`Error: ${err.message}`);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // ── Share Report to a Department ──────────────────────────────────────
+  const shareReport = async () => {
+    if (!selectedRequest) return;
+    setIsSharing(true);
+    try {
+      // Persist whatever is in the editor first, otherwise the receiving
+      // department reads a stale report from the database.
+      if (findings || impression || conclusion) {
+        const save = await fetch("/api/imaging", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: selectedRequest.id,
+            findings, impression, conclusion, radiologistNotes,
+            reporterUserId: staffId,
+          }),
+        });
+        if (!save.ok) {
+          const body = await save.json().catch(() => ({}));
+          throw new Error(body?.error || "Could not save the report before sharing");
+        }
+      }
+
+      const res = await fetch("/api/imaging/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imagingRequestId: selectedRequest.id,
+          targetDept: shareDept,
+          note: shareNote.trim() || null,
+          reporterUserId: staffId,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || "Share failed");
+
+      setSuccessMessage(body.message || `Report shared with ${shareDept}.`);
+      setShareNote("");
+      const patch = reportFields({ findings, impression, conclusion, radiologistNotes });
+      setSelectedRequest(prev => prev ? { ...prev, ...patch } : null);
+      setRequests(prev => prev.map(r => r.id === selectedRequest.id ? { ...r, ...patch } : r));
+      fetchRequests();
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setIsSharing(false);
     }
   };
 
@@ -439,6 +524,11 @@ function RadiologyDashboardInner() {
     const today = new Date().toLocaleDateString("en-UG", { day: "numeric", month: "long", year: "numeric" });
     const studyLbl = studyTypeLabel(selectedRequest.studyType);
     const referral = referralLabel(selectedRequest.referralSource);
+    // Pre-filled once the report is finalized, so a printed copy is signed
+    // rather than leaving a blank rule for someone to remember.
+    const reporterName = selectedRequest.status === "REPORTED"
+      ? (selectedRequest.reportedByName || staffName || "")
+      : "";
 
     // Build measurements table HTML if any saved
     let measurementsHtml = "";
@@ -501,7 +591,7 @@ function RadiologyDashboardInner() {
     <div style="margin-top:40px;border-top:1px solid #ccc;padding-top:20px;display:flex;justify-content:space-between">
       <div>
         <p style="font-size:12px;color:#00703C;font-weight:bold;margin-bottom:4px">Reported By:</p>
-        <div style="border-bottom:1px solid #000;display:inline-block;min-width:220px;padding:3px 8px">&nbsp;</div>
+        <div style="border-bottom:1px solid #000;display:inline-block;min-width:220px;padding:3px 8px">${reporterName || "&nbsp;"}</div>
       </div>
       <div style="text-align:right">
         <p style="font-size:12px;color:#00703C;font-weight:bold;margin-bottom:4px">Date</p>
@@ -1017,6 +1107,12 @@ function RadiologyDashboardInner() {
                         <span>{selectedRequest.Patient.gender} · {selectedRequest.Patient.age} yrs</span>
                         {selectedRequest.Patient.phoneNumber && <span>{selectedRequest.Patient.phoneNumber}</span>}
                         <span>Arrived: {formatShortDate(selectedRequest.createdAt)}</span>
+                        {selectedRequest.status === "REPORTED" && (
+                          <span style={{ color: "#166534", fontWeight: "bold" }}>
+                            Reported by {selectedRequest.reportedByName || staffName || "Imaging Staff"}
+                            {selectedRequest.reportedAt ? ` · ${formatShortDate(selectedRequest.reportedAt)}` : ""}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1303,10 +1399,27 @@ function RadiologyDashboardInner() {
                       <CheckCircle size={15} /> {isSaving ? "Finalizing..." : "Finalize Report"}
                     </button>
                     {selectedRequest.status === "REPORTED" && (
-                      <button onClick={() => alert("Report sent to referring clinician.")}
-                        style={{ padding: "10px 20px", borderRadius: "8px", border: "none", backgroundColor: "#6366f1", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "bold", color: "white" }}>
-                        <Send size={15} /> Send Report
-                      </button>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                        <select
+                          value={shareDept}
+                          onChange={e => setShareDept(e.target.value)}
+                          style={{ padding: "9px 12px", borderRadius: "8px", border: "1px solid #6366f1", backgroundColor: "white", fontSize: "12px", fontWeight: "bold", color: "#4338ca", cursor: "pointer", fontFamily: "inherit" }}
+                        >
+                          {SHARE_DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                        <input
+                          type="text"
+                          value={shareNote}
+                          onChange={e => setShareNote(e.target.value)}
+                          placeholder="Note (optional)"
+                          style={{ padding: "9px 12px", borderRadius: "8px", border: "1px solid #d0d5dd", fontSize: "12px", outline: "none", fontFamily: "inherit", width: "180px" }}
+                        />
+                        <button onClick={shareReport} disabled={isSharing}
+                          style={{ padding: "10px 18px", borderRadius: "8px", border: "none", backgroundColor: "#6366f1", cursor: isSharing ? "wait" : "pointer", display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: "bold", color: "white", opacity: isSharing ? 0.6 : 1 }}>
+                          {isSharing ? <RefreshCw size={15} className="animate-spin" /> : <Send size={15} />}
+                          {isSharing ? "Sharing..." : "Share Report"}
+                        </button>
+                      </div>
                     )}
                   </div>
 

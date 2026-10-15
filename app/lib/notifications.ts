@@ -1,10 +1,11 @@
 import { prisma } from "./prisma";
+import { normalizeDept } from "./departments";
 
 // ─── Create a notification ────────────────────────────────────────────
 export async function createNotification({
   department, userId, patientId, title, message, type, referenceId, referenceType,
 }: {
-  department?: string;
+  department?: string | null;
   userId?: number;
   patientId?: number;
   title: string;
@@ -16,7 +17,10 @@ export async function createNotification({
   try {
     return await prisma.notification.create({
       data: {
-        department: department || null,
+        // Inboxes match on the canonical spelling (see
+        // app/lib/departments.ts). Normalizing here means no call site can
+        // write a department that its own receiver will never match.
+        department: normalizeDept(department),
         userId: userId || null,
         patientId: patientId || null,
         title,

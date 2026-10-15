@@ -10,6 +10,7 @@ interface LabRequestData {
   priority: string;
   clinicalNotes: string | null;
   criticalNote: string | null;
+  interpretation: string | null;
   isCritical: boolean;
   enteredByName: string | null;
   resultEnteredAt: string | null;
@@ -100,10 +101,24 @@ export default function NotificationInbox({
     }
   }, [department, userId]);
 
+  // The closed inbox only needs the unread badge, so it polls slowly. Opening
+  // the panel switches to the fast cadence. Every poll on this route used to
+  // cost 1 + N queries on a shared pgBouncer connection (see
+  // GET_NOTIFICATIONS in app/api/laboratory/route.ts), so an inbox left open in
+  // a background tab was enough to starve the rest of the app.
   useEffect(() => {
     fetchNotifs();
-    const interval = setInterval(fetchNotifs, 30000);
+    const interval = setInterval(fetchNotifs, isOpen ? 15000 : 60000);
     return () => clearInterval(interval);
+  }, [fetchNotifs, isOpen]);
+
+  // Don't poll a tab the user isn't looking at.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") fetchNotifs();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [fetchNotifs]);
 
   const markRead = async (id: number) => {
@@ -376,6 +391,19 @@ export default function NotificationInbox({
                     <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
                       <FlaskConical size={20} className="mx-auto mb-1 text-slate-300" />
                       <p className="text-xs text-slate-400">No detailed findings recorded for this test</p>
+                    </div>
+                  )}
+
+                  {/* Technician's remarks / interpretation — shown for every
+                      result, not just critical ones */}
+                  {selectedNotif.labRequest.interpretation && selectedNotif.labRequest.interpretation.trim() && (
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5">Remarks / Interpretation</p>
+                      <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3">
+                        <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
+                          {selectedNotif.labRequest.interpretation}
+                        </p>
+                      </div>
                     </div>
                   )}
 
